@@ -57,7 +57,7 @@ No protocol code was rewritten.
 | Interop functions (build tag `interop`) | 37 | 37, pinned to the same iec104-interop v0.5.0 digests |
 | Committed captures | as listed in SHA256SUMS | identical files and SHA256SUMS |
 | `make check` (lint, vet, race, coverage floors, examples, docs) | green | green (2026-11-11, local) |
-| `make interop` against iec104-interop images | green in go-iec104 CI | **not yet run** for this module |
+| `make interop` against iec104-interop v0.5.0 images (lib60870, openmuc, wendy512, cbsigma, same digests) | green in go-iec104 CI | green, local 2026-11-11 (Docker linux/arm64): 31 top-level tests, 482 subtests passed, 0 failed; 22 subtests skipped where an image does not declare the feature (openmuc: read; wendy512: time-tagged commands, upload, redundancy, TLS server); run with `IEC104_REQUIRE_INTEROP=1`, 381 s |
 | `make test-cbsigma` | green | green (local, 2026-11-11) |
 
 ## Known limitations
@@ -66,8 +66,7 @@ Those of go-iec104 v0.3.0, unchanged: [iec104/LIMITATIONS.md](iec104/LIMITATIONS
 
 ## Open items before parity can be called demonstrated
 
-- Run `make interop` (Docker) against the iec104-interop v0.5.0 digests and
-  record the result here.
+- Run the same suite in CI (it ran locally only).
 - Move the interop suite onto otfabric/iec60870-5-interop images once that
   harness publishes IEC 104 adapters with the same coverage.
 - Decide whether `iec104/client` adopts `telecontrol.Requester` (shared with
