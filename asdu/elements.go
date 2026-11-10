@@ -7,6 +7,8 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"github.com/otfabric/go-iec60870-5/cp"
 )
 
 // Quality is the set of quality flags of an information element. Which flags
@@ -213,129 +215,32 @@ const (
 
 // Timestamp is a time tag: CP56Time2a (a full date and time) or CP24Time2a
 // (minute, second and millisecond only), depending on the type
-// identification.
-//
-// The wire format carries no time zone; times are converted to and from
-// [Params.Location]. A CP56Time2a year is two digits: 70..99 decode as
-// 1970..1999 and 0..69 as 2000..2069.
-//
-// A CP24Time2a tag decodes onto 0001-01-01 00:mm:ss.mmm: only the minute,
-// second and nanosecond of Time are meaningful, and the receiver has to
-// supply the hour and date. On encode only those fields are used.
-//
-// A zero Time under a type identification that requires a CP56Time2a is
-// encoded as 2000-01-01 with the invalid flag set. A received CP56Time2a
-// with a field out of range, or a date that does not exist, decodes to the
-// zero Time with Invalid set.
-type Timestamp struct {
-	time.Time
-
-	// Invalid is the IV flag: the time is not reliable.
-	Invalid bool
-	// Substituted is the GEN flag: the time was not taken at the source of
-	// the information but added by intermediate equipment.
-	Substituted bool
-	// SummerTime is the SU flag (CP56Time2a only): the time is daylight
-	// saving time.
-	SummerTime bool
-	// NoWeekday reports a CP56Time2a whose day-of-week field is 0. The
-	// field ranges 1..7 (IEC 60870-5-4, CP56Time2a); controlling and
-	// controlled stations that do not use it send 0. When it is set the
-	// encoder writes 0 again instead of the day of the week of Time, so a
-	// time tag that is passed on or mirrored keeps the octets it came with.
-	NoWeekday bool
-}
+// identification. It is [cp.Timestamp]; see there for the encoding rules.
+// Times are converted to and from [Params.Location].
+type Timestamp = cp.Timestamp
 
 // At returns a valid time tag for t.
-func At(t time.Time) Timestamp { return Timestamp{Time: t} }
+func At(t time.Time) Timestamp { return cp.At(t) }
 
 // Now returns a valid time tag for the current time.
-func Now() Timestamp { return Timestamp{Time: time.Now()} }
+func Now() Timestamp { return cp.Now() }
 
 const (
-	sizeCP24 = 3
-	sizeCP56 = 7
+	sizeCP24 = cp.Size24
+	sizeCP56 = cp.Size56
 )
 
-func appendCP24(b []byte, t Timestamp, loc *time.Location) []byte {
-	tt := t.In(loc)
-	ms := tt.Second()*1000 + tt.Nanosecond()/int(time.Millisecond)
-	return append(b, byte(ms&0xFF), byte(ms>>8&0xFF), byte(tt.Minute()&0x3F)|timeFlags(t))
-}
-
-func timeFlags(t Timestamp) byte {
-	var f byte
-	if t.Invalid {
-		f |= 0x80
-	}
-	if t.Substituted {
-		f |= 0x40
-	}
-	return f
-}
-
-func appendCP56(b []byte, t Timestamp, loc *time.Location) []byte {
-	if t.IsZero() {
-		t = Timestamp{Time: time.Date(2000, 1, 1, 0, 0, 0, 0, loc), Invalid: true}
-	}
-	tt := t.In(loc)
-	// CP56Time2a carries the year without its century; parseCP56 reads 70..99
-	// as 1970..1999 and 0..69 as 2000..2069. A time outside that window would
-	// come back in another century, so it goes out flagged invalid.
-	year := tt.Year()
-	if year < 1970 || year > 2069 {
-		t.Invalid = true
-	}
-	b = appendCP24(b, t, loc)
-	hour := byte(tt.Hour() & 0x1F)
-	if t.SummerTime {
-		hour |= 0x80
-	}
-	dow := byte(tt.Weekday() & 0x07)
-	switch {
-	case t.NoWeekday:
-		dow = 0
-	case dow == 0:
-		dow = 7
-	}
-	return append(b, hour, byte(tt.Day()&0x1F)|dow<<5, byte(tt.Month()&0x0F), byte((year%100+100)%100&0x7F))
-}
+// The ASDU decoder checks lengths before it parses a time tag, so the
+// error of the cp parsers cannot occur here.
+func appendCP24(b []byte, t Timestamp, loc *time.Location) []byte { return cp.AppendCP24(b, t, loc) }
+func appendCP56(b []byte, t Timestamp, loc *time.Location) []byte { return cp.AppendCP56(b, t, loc) }
 
 func parseCP24(b []byte, loc *time.Location) Timestamp {
-	ms := int(b[0]) | int(b[1])<<8
-	minute := int(b[2] & 0x3F)
-	return Timestamp{
-		Time: time.Date(1, 1, 1, 0, minute, ms/1000,
-			ms%1000*int(time.Millisecond), loc),
-		// Out-of-range fields are normalized by time.Date and flagged.
-		Invalid:     b[2]&0x80 != 0 || ms > 59999 || minute > 59,
-		Substituted: b[2]&0x40 != 0,
-	}
+	t, _ := cp.ParseCP24(b, loc)
+	return t
 }
 
 func parseCP56(b []byte, loc *time.Location) Timestamp {
-	ms := int(b[0]) | int(b[1])<<8
-	minute, hour := int(b[2]&0x3F), int(b[3]&0x1F)
-	day, month, year := int(b[4]&0x1F), time.Month(b[5]&0x0F), int(b[6]&0x7F)
-	validYear := year <= 99
-	if year >= 70 {
-		year += 1900
-	} else {
-		year += 2000
-	}
-	t := Timestamp{
-		Time: time.Date(year, month, day, hour, minute, ms/1000,
-			ms%1000*int(time.Millisecond), loc),
-		Invalid:     b[2]&0x80 != 0,
-		Substituted: b[2]&0x40 != 0,
-		SummerTime:  b[3]&0x80 != 0,
-		NoWeekday:   b[4]&0xE0 == 0,
-	}
-	// A field outside its range, or a date that does not exist, is not a
-	// time at all: report it as the zero time, flagged invalid.
-	if !validYear || ms > 59999 || minute > 59 || hour > 23 || t.Day() != day || t.Month() != month {
-		t.Time = time.Time{}
-		t.Invalid = true
-	}
+	t, _ := cp.ParseCP56(b, loc)
 	return t
 }
