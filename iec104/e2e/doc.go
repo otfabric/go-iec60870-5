@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-// Package e2e holds end-to-end tests of go-iec104 against itself: the
+// Package e2e holds end-to-end tests of go-iec60870-5 against itself: the
 // client of this module as controlling station and the server of this
 // module as controlled station, over real TCP (and TLS) connections on
 // loopback.

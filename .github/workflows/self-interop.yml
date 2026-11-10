@@ -1,7 +1,7 @@
 name: Self-interop
 run-name: "Self-interop against iec104-interop-otfabric:latest, by @${{ github.actor }} on ${{ github.ref_name }}"
 
-# Manual only. This commit against the latest published image of go-iec104 itself
+# Manual only. This commit against the latest published image of go-iec60870-5 itself
 # (ghcr.io/otfabric/iec104-interop-otfabric:latest, from otfabric/iec104-interop),
 # in both roles. The e2e tests run both sides from one commit; this one finds a
 # change on the wire that breaks an earlier release.
@@ -48,12 +48,12 @@ jobs:
             echo
             echo "| | |"
             echo "|---|---|"
-            echo "| go-iec104 under test | \`${REF}\` at \`${SHA}\` (\`$(git describe --tags --always)\`) |"
+            echo "| go-iec60870-5 under test | \`${REF}\` at \`${SHA}\` (\`$(git describe --tags --always)\`) |"
             echo "| Go | \`$(go env GOVERSION)\` |"
             echo "| Image | \`${IMAGE}\` |"
             echo "| Image digest | \`${digest}\` |"
             echo "| Image reports | \`$(docker run --rm "${IMAGE}" version)\` |"
-            docker run --rm "${IMAGE}" print-capabilities | jq -r '"| go-iec104 in the image | `\(.upstream.version)` at `\(.upstream.revision)` |"'
+            docker run --rm "${IMAGE}" print-capabilities | jq -r '"| go-iec60870-5 in the image | `\(.upstream.version)` at `\(.upstream.revision)` |"'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Run the interop suite

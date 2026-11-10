@@ -12,14 +12,14 @@ import (
 	"github.com/otfabric/go-iec60870-5/iec104/apci"
 )
 
-// Decoded is one APDU of a conversation decoded by go-iec104.
+// Decoded is one APDU of a conversation decoded by go-iec60870-5.
 type Decoded struct {
 	APDU
 	Frame apci.Frame
 	ASDU  *asdu.ASDU // I frames whose ASDU decodes
 	// APCIErr and ASDUErr are the decode errors, if any.
 	APCIErr, ASDUErr error
-	// Reencoded is the encoding go-iec104 produces from Frame and ASDU; it
+	// Reencoded is the encoding go-iec60870-5 produces from Frame and ASDU; it
 	// is nil when either did not decode.
 	Reencoded []byte
 }
@@ -63,7 +63,7 @@ type Procedure struct {
 	Requests, Confirmed, Negative, Terminated, Unanswered int
 }
 
-// Analysis is what go-iec104 derives from one conversation.
+// Analysis is what go-iec60870-5 derives from one conversation.
 type Analysis struct {
 	Conversation
 	Decoded []Decoded

@@ -19,7 +19,7 @@ import (
 
 // testdata/captures/manifest.json describes every committed capture: where
 // it comes from, what is known about the systems in it, its evidence level
-// and what go-iec104 derives from it. TestManifest checks the files and the
+// and what go-iec60870-5 derives from it. TestManifest checks the files and the
 // counts against it; IEC104_CAPTURE_GENERATE=1 (make captures-manifest)
 // writes it again from the sources below and the code.
 
@@ -51,7 +51,7 @@ type entry struct {
 	Counts       counts   `json:"counts"`
 }
 
-// counts is what go-iec104 derives from a capture.
+// counts is what go-iec60870-5 derives from a capture.
 type counts struct {
 	Conversations int `json:"conversations"`
 	FromZero      int `json:"conversations_from_start"`
@@ -224,7 +224,7 @@ func derive(t *testing.T, path string) counts {
 func buildManifest(t *testing.T) manifest {
 	t.Helper()
 	m := manifest{
-		Description: "Recorded IEC 60870-5-104 traffic go-iec104 is tested against (testdata/captures/README.md). Files are byte-identical to their sources.",
+		Description: "Recorded IEC 60870-5-104 traffic go-iec60870-5 is tested against (testdata/captures/README.md). Files are byte-identical to their sources.",
 		Levels: map[string]string{
 			"A": "verified physical-device traffic",
 			"B": "credibly documented physical-device traffic",

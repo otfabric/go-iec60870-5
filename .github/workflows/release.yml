@@ -23,6 +23,6 @@ jobs:
     uses: otfabric/.github/.github/workflows/go-package-release.yml@v3.3.1
     with:
       bump: ${{ inputs.bump }}
-      release-name-prefix: go-iec104
+      release-name-prefix: go-iec60870-5
       update-major-tag: false
     secrets: inherit

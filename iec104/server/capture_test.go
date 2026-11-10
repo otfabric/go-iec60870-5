@@ -55,7 +55,7 @@ const (
 	diffCallNOS          = "FileServer calls the whole file with section number 0, the value lib60870-C v2.4.1 sends (file_server.c, sendCallFile); the recorded station sent 1"
 	diffLastNOS          = "FileServer numbers the last section of the file (F_LS_NA_1, LSQ 1) after the last section, as lib60870-C v2.4.1 (file_server.c, sendLastSection); the recorded station sent the last section's number"
 	diffForeignMirror    = "the recorded station sent a confirmation or termination of a request made on another connection (it answers on every connection): sent with Session.Send, as only the application can"
-	diffMalformedAnswer  = "the recorded station sent an ASDU whose length does not match its type (C_RP_NA_1 negative confirmations without the qualifier octet): go-iec104 encodes no such ASDU, so it is left out"
+	diffMalformedAnswer  = "the recorded station sent an ASDU whose length does not match its type (C_RP_NA_1 negative confirmations without the qualifier octet): go-iec60870-5 encodes no such ASDU, so it is left out"
 	diffAckBeforeStop    = "the server confirms STOPDT once its I frames are acknowledged (IEC 60870-5-104 ed. 2, 5.3); the recorded station confirmed with frames outstanding, so the scripted controlling station acknowledges them first"
 	diffMirrorQualifier  = "the recorded station mirrored single commands with another qualifier (SCO 0x28 answered with 0x08); Session.Confirm and Session.Terminate mirror the command as received"
 	diffMalformedRequest = "a request whose length does not match its type (the attacker's C_RD_NA_1 with an extra octet, C_SE_NA_1 two octets short): the server drops it without an answer and serves on (LIMITATIONS.md); the recorded station answered some of them with a negative confirmation"
@@ -275,7 +275,7 @@ func replayServer(t *testing.T, a *capture.Analysis, checkMalformed bool) server
 	p := &capture.Peer{Conn: conn, Side: capture.Controlling, AckBeforeStop: true,
 		// The station's idle test (t3) is timing: the server's is off, and
 		// the recorded test frames of the station and their answers are
-		// left out. So are the station's ASDUs go-iec104 cannot decode: no
+		// left out. So are the station's ASDUs go-iec60870-5 cannot decode: no
 		// API sends them (TestCaptureServerReplay counts them).
 		Skip: func(i int, d capture.Decoded) bool {
 			if !d.FromClient && d.Frame.Format == apci.FormatI && d.ASDU == nil {
@@ -392,7 +392,7 @@ func replayServer(t *testing.T, a *capture.Analysis, checkMalformed bool) server
 	end, malformed := len(a.Decoded), -1
 	for i, d := range a.Decoded {
 		if d.FromClient && d.APCIErr == nil && d.Frame.Format == apci.FormatI && d.ASDU == nil {
-			end, malformed = i, i // a request go-iec104 cannot decode: checked below
+			end, malformed = i, i // a request go-iec60870-5 cannot decode: checked below
 			break
 		}
 	}

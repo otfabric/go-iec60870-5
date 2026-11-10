@@ -13,7 +13,7 @@ import (
 )
 
 // Peer plays one side of a recorded conversation over a live connection to
-// the go-iec104 implementation of the other side.
+// the go-iec60870-5 implementation of the other side.
 //
 // Comparison rules: the control fields are dynamic. The peer rebuilds N(S)
 // and N(R) of the frames it sends from the live link and sends the

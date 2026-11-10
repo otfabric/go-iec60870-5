@@ -102,7 +102,7 @@ type sendReq struct {
 // New starts a controlling station on rw. Close stops it and closes rw
 // when it is an io.Closer.
 func New(rw io.ReadWriter, cfg Config) (*Client, error) {
-	p, err := cfg.Params.Normalize()
+	p, err := cfg.Normalize()
 	if err != nil {
 		return nil, err
 	}
@@ -172,6 +172,7 @@ func (c *Client) WaitUp(ctx context.Context) error {
 			return nil
 		case iec101.StateClosed:
 			return iec101.ErrClosed
+		case iec101.StateDown:
 		}
 		select {
 		case <-ch:

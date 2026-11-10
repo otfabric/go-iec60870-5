@@ -27,7 +27,7 @@ type adapter struct {
 	image string
 }
 
-// The reference images this version of go-iec104 is qualified against:
+// The reference images this version of go-iec60870-5 is qualified against:
 // otfabric/iec104-interop v0.5.0 (lib60870-C v2.4.1, OpenMUC j60870 1.8.0,
 // wendy512/iec104 v1.0.4 on go-iecp5 v1.2.6, cB-Sigma/iec60870 v0.3.0 with
 // IEC 62351-5), pinned by digest so that a run is reproducible. Moving to
@@ -50,7 +50,7 @@ const (
 // An adapter whose image is set to the empty string is left out.
 // IEC104_INTEROP_ADAPTERS restricts the run to a comma-separated subset.
 //
-// otfabric is go-iec104 itself, as published by otfabric/iec104-interop. It is
+// otfabric is go-iec60870-5 itself, as published by otfabric/iec104-interop. It is
 // not a reference: it runs only when IEC104_INTEROP_OTFABRIC_IMAGE names an
 // image, and what it shows is compatibility between releases of this library,
 // not independent verification.
@@ -251,7 +251,7 @@ func startServerWith(t testing.TB, a adapter, dockerArgs []string, extra ...stri
 	t.Helper()
 	// A fixed host port keeps the address stable across "docker restart".
 	port := freePort(t)
-	name := fmt.Sprintf("go-iec104-interop-%s-%d-%d", a.name, os.Getpid(), containerSeq.Add(1))
+	name := fmt.Sprintf("go-iec60870-5-interop-%s-%d-%d", a.name, os.Getpid(), containerSeq.Add(1))
 	args := append([]string{"run", "-d", "--name", name, "-p", fmt.Sprintf("127.0.0.1:%d:2404", port)}, dockerArgs...)
 	args = append(append(args, a.image, "server"), extra...)
 	if _, stderr, err := docker(args...); err != nil {
@@ -456,7 +456,7 @@ func (r *result) featureSummary() string {
 // normalized returns the document without what legitimately differs between
 // two runs: who answered, how long it took, wall-clock time tags, and the
 // NOS of the F_LS_NA_1 that ends a file (LSQ 1 or 2), which lib60870 and
-// go-iec104 send as one more than the number of sections and cB-Sigma as the
+// go-iec60870-5 send as one more than the number of sections and cB-Sigma as the
 // number of the last section.
 func (r *result) normalized() string {
 	doc := map[string]any{}
@@ -483,7 +483,7 @@ func (r *result) normalized() string {
 }
 
 // runClient runs one operation of the reference client of a against a
-// go-iec104 server listening on the host at addr, and returns its result
+// go-iec60870-5 server listening on the host at addr, and returns its result
 // document.
 func runClient(t testing.TB, a adapter, addr string, args ...string) *result {
 	t.Helper()

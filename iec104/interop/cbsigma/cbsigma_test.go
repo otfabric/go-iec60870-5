@@ -25,7 +25,7 @@ func seq(n int, b byte) []byte {
 }
 
 // Every message, encoded by both from the same field values, and decoded by
-// go-iec104 from what cB-Sigma encoded.
+// go-iec60870-5 from what cB-Sigma encoded.
 func TestEncodings(t *testing.T) {
 	pairs := []struct {
 		dir    sec.Direction
@@ -78,7 +78,7 @@ func TestEncodings(t *testing.T) {
 	}
 }
 
-// pair runs one go-iec104 endpoint against one cB-Sigma endpoint.
+// pair runs one go-iec60870-5 endpoint against one cB-Sigma endpoint.
 type pair struct {
 	t      *testing.T
 	ours   *sec.Endpoint
@@ -107,7 +107,7 @@ func (p *pair) pump(out [][]byte) {
 		for _, f := range back {
 			d, o, err := p.ours.Receive(p.now, f)
 			if err != nil {
-				p.t.Errorf("go-iec104: %v", err)
+				p.t.Errorf("go-iec60870-5: %v", err)
 			}
 			if d != nil {
 				p.toOurs = append(p.toOurs, d)
@@ -126,7 +126,7 @@ func (p *pair) ready() bool { return p.ours.Ready() && p.theirs.KeysValid() }
 func (p *pair) mustReady(what string) {
 	p.t.Helper()
 	if !p.ready() {
-		p.t.Fatalf("%s: go-iec104 %+v, cB-Sigma %+v", what, p.ours.Status(), p.theirs.Status())
+		p.t.Fatalf("%s: go-iec60870-5 %+v, cB-Sigma %+v", what, p.ours.Status(), p.theirs.Status())
 	}
 }
 
@@ -158,7 +158,7 @@ func (p *pair) exchange(n int) {
 		p.pump(out)
 	}
 	if len(p.toOurs) != n0+1 || !bytes.Equal(p.toOurs[n0], a) {
-		p.t.Fatalf("to go-iec104: %d ASDUs", len(p.toOurs)-n0)
+		p.t.Fatalf("to go-iec60870-5: %d ASDUs", len(p.toOurs)-n0)
 	}
 }
 
@@ -178,7 +178,7 @@ type side struct {
 
 func identities(t *testing.T) side {
 	t.Helper()
-	ours, err := sec.NewIdentity(sec.IdentityOptions{Subject: pkix.Name{CommonName: "go-iec104"}})
+	ours, err := sec.NewIdentity(sec.IdentityOptions{Subject: pkix.Name{CommonName: "go-iec60870-5"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func newPair(t *testing.T, s side, oc sec.Config, tc cb.Config) *pair {
 func TestAssociation(t *testing.T) {
 	for _, controlling := range []bool{true, false} {
 		for _, dpa := range []uint8{4, 3, 8, 11} {
-			name := fmt.Sprintf("go-iec104 %s/DPA %d", map[bool]string{true: "controlling", false: "controlled"}[controlling], dpa)
+			name := fmt.Sprintf("go-iec60870-5 %s/DPA %d", map[bool]string{true: "controlling", false: "controlled"}[controlling], dpa)
 			t.Run(name, func(t *testing.T) {
 				s := identities(t)
 				role := sec.Controlled
@@ -272,7 +272,7 @@ func TestAssociation(t *testing.T) {
 }
 
 // cB-Sigma, controlled, restarts with its association kept: its Session
-// Initiation Request crosses the Session Request of go-iec104.
+// Initiation Request crosses the Session Request of go-iec60870-5.
 func TestCrossingInitiation(t *testing.T) {
 	s := identities(t)
 	store := &cb.MemoryKeyStore{}
@@ -313,7 +313,7 @@ func TestCrossingInitiation(t *testing.T) {
 	p.exchange(2)
 }
 
-// go-iec104, controlled, restarts with its association kept, and later
+// go-iec60870-5, controlled, restarts with its association kept, and later
 // reconnects; cB-Sigma keeps its session keys over both.
 func TestControlledRestartAndReconnect(t *testing.T) {
 	s := identities(t)
@@ -378,11 +378,11 @@ func TestControlledRestartAndReconnect(t *testing.T) {
 // authority of its own, in both roles.
 func TestAuthorityCurve25519(t *testing.T) {
 	for _, controlling := range []bool{true, false} {
-		ourCA, err := sec.NewIdentity(sec.IdentityOptions{Subject: pkix.Name{CommonName: "go-iec104 CA"}, CA: true})
+		ourCA, err := sec.NewIdentity(sec.IdentityOptions{Subject: pkix.Name{CommonName: "go-iec60870-5 CA"}, CA: true})
 		if err != nil {
 			t.Fatal(err)
 		}
-		ourID, err := sec.NewIdentity(sec.IdentityOptions{Curve: sec.X25519, Subject: pkix.Name{CommonName: "go-iec104"}, Issuer: ourCA})
+		ourID, err := sec.NewIdentity(sec.IdentityOptions{Curve: sec.X25519, Subject: pkix.Name{CommonName: "go-iec60870-5"}, Issuer: ourCA})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -416,7 +416,7 @@ func TestAuthorityCurve25519(t *testing.T) {
 		p := newPair(t, side{}, oc, tc)
 		p.theirs.LinkUp()
 		p.pump(p.ours.Up(now))
-		p.mustReady(fmt.Sprintf("go-iec104 %s", role))
+		p.mustReady(fmt.Sprintf("go-iec60870-5 %s", role))
 		p.exchange(1)
 	}
 }

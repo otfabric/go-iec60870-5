@@ -112,7 +112,7 @@ func ownGoroutines() []string {
 	buf = buf[:runtime.Stack(buf, true)]
 	var own []string
 	for _, g := range strings.Split(string(buf), "\n\n") {
-		if strings.Contains(g, "github.com/otfabric/go-iec104/") && !strings.Contains(g, "[running]") {
+		if strings.Contains(g, "github.com/otfabric/go-iec60870-5/") && !strings.Contains(g, "[running]") {
 			own = append(own, g)
 		}
 	}
@@ -242,7 +242,7 @@ func FuzzServerStream(f *testing.F) {
 			time.Sleep(time.Millisecond)
 		}
 		if now := ownGoroutines(); len(now) > len(baseline) {
-			t.Fatalf("%d goroutines of go-iec104 before, %d after Close:\n%s", len(baseline), len(now),
+			t.Fatalf("%d goroutines of go-iec60870-5 before, %d after Close:\n%s", len(baseline), len(now),
 				strings.Join(now, "\n\n"))
 		}
 	})

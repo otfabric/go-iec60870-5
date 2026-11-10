@@ -120,7 +120,7 @@ type Server struct {
 // New starts a controlled station on rw. Close stops it and closes rw when
 // it is an io.Closer.
 func New(rw io.ReadWriter, cfg Config) (*Server, error) {
-	p, err := cfg.Params.Normalize()
+	p, err := cfg.Normalize()
 	if err != nil {
 		return nil, err
 	}

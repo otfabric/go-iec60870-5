@@ -61,7 +61,7 @@ func newSecrets(t testing.TB) *secrets {
 		return i
 	}
 	s := &secrets{dir: t.TempDir()}
-	s.ca = id("go-iec104 interop CA", sec.IdentityOptions{CA: true})
+	s.ca = id("go-iec60870-5 interop CA", sec.IdentityOptions{CA: true})
 	s.station = id("station", sec.IdentityOptions{Issuer: s.ca})
 	s.scada = id("scada", sec.IdentityOptions{Issuer: s.ca})
 	s.xStation = id("x25519 station", sec.IdentityOptions{Issuer: s.ca, Curve: sec.X25519})
@@ -124,7 +124,7 @@ func secureAdapters(t *testing.T) []adapter {
 	return out
 }
 
-// TestSecureClient: the go-iec104 client, with security, against the
+// TestSecureClient: the go-iec60870-5 client, with security, against the
 // secure reference stations.
 func TestSecureClient(t *testing.T) {
 	s := newSecrets(t)
@@ -242,7 +242,7 @@ func secureSummary(r *result) string {
 	return r.summary() + " secured=" + secured
 }
 
-// TestSecureServer: the secure reference clients against a go-iec104
+// TestSecureServer: the secure reference clients against a go-iec60870-5
 // station with security. The station keeps one association per controlling
 // station and configures each by its AIM, which the cases use: AIM 5 is
 // trusted through the authority, 6 by pin, 7 is a viewer, and 8 is refused.
@@ -308,7 +308,7 @@ func TestSecureServer(t *testing.T) {
 					args := strings.Fields(tt.args)
 					got := runClientWith(t, a, st.Addr, s.mount(), args...)
 					if s := secureSummary(got); s != tt.want {
-						t.Fatalf("%s client against go-iec104:\n got  %s\n want %s", a.name, s, tt.want)
+						t.Fatalf("%s client against go-iec60870-5:\n got  %s\n want %s", a.name, s, tt.want)
 					}
 					if tt.reference == nil {
 						return
@@ -320,8 +320,8 @@ func TestSecureServer(t *testing.T) {
 							a.name, a.name, s, tt.want)
 					}
 					if g, w := got.normalized(), want.normalized(); g != w {
-						t.Errorf("%s client sees a difference between go-iec104 and the %s server.\n"+
-							"--- go-iec104 ---\n%s\n--- %s server ---\n%s", a.name, a.name, g, a.name, w)
+						t.Errorf("%s client sees a difference between go-iec60870-5 and the %s server.\n"+
+							"--- go-iec60870-5 ---\n%s\n--- %s server ---\n%s", a.name, a.name, g, a.name, w)
 					}
 				})
 			}
@@ -404,7 +404,7 @@ func newTransport(t testing.TB) *transport {
 	return tr
 }
 
-// tlsStationName is what the go-iec104 client checks in the certificate of a
+// tlsStationName is what the go-iec60870-5 client checks in the certificate of a
 // station. The address is of no use for that: the contract does not check one.
 const tlsStationName = "station"
 
@@ -420,7 +420,7 @@ func tlsClientConfig(id tls.Certificate, trust *x509.CertPool) *tls.Config {
 	return &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{id}, RootCAs: trust, ServerName: tlsStationName}
 }
 
-// TestTLSClient: the go-iec104 client, with client.WithTLS, against the reference
+// TestTLSClient: the go-iec60870-5 client, with client.WithTLS, against the reference
 // stations with --tls, and that neither side gives in to the wrong certificate.
 func TestTLSClient(t *testing.T) {
 	forEachAdapter(t, func(t *testing.T, a adapter) {
@@ -476,7 +476,7 @@ func TestTLSClient(t *testing.T) {
 	}, append([]string{featTLSServer}, extendedFeatures...)...)
 }
 
-// TestTLSServer: the reference clients with --tls against a go-iec104 station with
+// TestTLSServer: the reference clients with --tls against a go-iec60870-5 station with
 // server.WithTLS.
 func TestTLSServer(t *testing.T) {
 	forEachAdapter(t, func(t *testing.T, a adapter) {

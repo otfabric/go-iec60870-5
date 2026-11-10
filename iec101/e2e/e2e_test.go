@@ -128,7 +128,7 @@ func start(t *testing.T, p iec101.Params, wrap func(io.ReadWriteCloser) io.ReadW
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { r.c.Close(); r.s.Close() })
+	t.Cleanup(func() { _ = r.c.Close(); _ = r.s.Close() })
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := r.c.WaitUp(ctx); err != nil {
@@ -292,8 +292,8 @@ func TestLinkRecovery(t *testing.T) {
 
 func TestConfigErrors(t *testing.T) {
 	a, b := net.Pipe()
-	defer a.Close()
-	defer b.Close()
+	defer func() { _ = a.Close() }()
+	defer func() { _ = b.Close() }()
 	p := iec101.DefaultParams()
 	p.Link.FT12.AddrSize = 0
 	if _, err := client.New(a, client.Config{Params: p}); !errors.Is(err, iec101.ErrInvalidConfig) {
@@ -322,7 +322,7 @@ func TestConfigErrors(t *testing.T) {
 
 func TestCloseFailsRequests(t *testing.T) {
 	r := start(t, params(iec101.ModeUnbalanced), nil)
-	r.c.Close()
+	_ = r.c.Close()
 	if err := r.c.WaitUp(context.Background()); !errors.Is(err, iec101.ErrClosed) {
 		t.Fatalf("WaitUp after close: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestCloseFailsRequests(t *testing.T) {
 	if r.c.State() != iec101.StateClosed {
 		t.Errorf("state %v", r.c.State())
 	}
-	r.s.Close()
+	_ = r.s.Close()
 	if err := r.s.Send(asdu.New(asdu.CauseSpontaneous, ca, asdu.SinglePoint{IOA: 1})); !errors.Is(err, iec101.ErrClosed) {
 		t.Errorf("send after close: %v", err)
 	}

@@ -23,7 +23,7 @@ import (
 // Wireshark as an independent decoder. make captures-oracle runs tshark over
 // every committed capture and keeps, per frame, the fields below in
 // <capture>.tshark.tsv.gz next to it; TestOracleTshark compares what
-// go-iec104 decodes from the same frames with them, field by field. The
+// go-iec60870-5 decodes from the same frames with them, field by field. The
 // files record the tshark version they were made with.
 
 // oracleFields are the tshark fields kept, in column order after
@@ -139,7 +139,7 @@ func readOracle(t *testing.T, path string) (version string, rows map[int]oracleR
 	return version, rows
 }
 
-// ourRow is what go-iec104 decodes from the APDUs a frame completes, in the
+// ourRow is what go-iec60870-5 decodes from the APDUs a frame completes, in the
 // form of the oracle columns.
 func ourRow(ds []Decoded) oracleRow {
 	row := oracleRow{}
@@ -255,7 +255,7 @@ func hasCP56(o asdu.InformationObject) bool {
 	return t.HasTimeTag() && !strings.Contains(t.Description(), "CP24Time2a")
 }
 
-// sameValue compares one oracle value with go-iec104's: numbers
+// sameValue compares one oracle value with go-iec60870-5's: numbers
 // numerically (tshark prints floats with its own precision), all else as
 // text.
 func sameValue(field, want, got string) bool {
@@ -270,7 +270,7 @@ func sameValue(field, want, got string) bool {
 	return false
 }
 
-// oracleDiff is a difference between tshark and go-iec104 in one frame.
+// oracleDiff is a difference between tshark and go-iec60870-5 in one frame.
 type oracleDiff struct {
 	Frame        int
 	Field        string
@@ -278,15 +278,15 @@ type oracleDiff struct {
 	Class        string
 }
 
-// Classes of differences between Wireshark and go-iec104.
+// Classes of differences between Wireshark and go-iec60870-5.
 const (
-	classPortReuse = "Wireshark does not dissect a connection that reuses the ports of an earlier one when the recording left out the SYN (it takes the segments for retransmissions); go-iec104 starts a new connection at the jump in sequence numbers"
-	classMalformed = "an ASDU whose length does not match its type identification: go-iec104 refuses it whole (asdu.ErrMalformed); Wireshark shows its header"
-	classInvalidU  = "a U frame with more than one function bit: go-iec104 refuses it (apci.ErrInvalidControl); Wireshark lists both functions"
-	classRawType   = "Wireshark 4.6.9 shows the information objects of this type identification as raw data; go-iec104 decodes them"
+	classPortReuse = "Wireshark does not dissect a connection that reuses the ports of an earlier one when the recording left out the SYN (it takes the segments for retransmissions); go-iec60870-5 starts a new connection at the jump in sequence numbers"
+	classMalformed = "an ASDU whose length does not match its type identification: go-iec60870-5 refuses it whole (asdu.ErrMalformed); Wireshark shows its header"
+	classInvalidU  = "a U frame with more than one function bit: go-iec60870-5 refuses it (apci.ErrInvalidControl); Wireshark lists both functions"
+	classRawType   = "Wireshark 4.6.9 shows the information objects of this type identification as raw data; go-iec60870-5 decodes them"
 	classSecurity  = "IEC 62351-5 ASDUs (type identifications 81..87): the asdu package carries them as raw payload for package sec; Wireshark decodes the ASDU some of them wrap"
-	classRaw       = "a type identification go-iec104 has no object model for (reserved types, S_IT_TC_1 = 41 of IEC 60870-5-7): carried as raw payload (asdu.ASDU.Raw); Wireshark decodes or guesses its objects"
-	classWeekday   = "a day of week that does not match the date (the synthetic capture sets it freely): go-iec104 keeps whether the field is used (Timestamp.NoWeekday) and derives the day from the date"
+	classRaw       = "a type identification go-iec60870-5 has no object model for (reserved types, S_IT_TC_1 = 41 of IEC 60870-5-7): carried as raw payload (asdu.ASDU.Raw); Wireshark decodes or guesses its objects"
+	classWeekday   = "a day of week that does not match the date (the synthetic capture sets it freely): go-iec60870-5 keeps whether the field is used (Timestamp.NoWeekday) and derives the day from the date"
 	classOther     = "unclassified"
 )
 
@@ -340,7 +340,7 @@ func compareOracle(t *testing.T, file string) (frames, values int, diffs []oracl
 	return frames, values, diffs
 }
 
-// classify names the class of a difference from what go-iec104 decoded
+// classify names the class of a difference from what go-iec60870-5 decoded
 // in the frame.
 func classify(d oracleDiff, ds []Decoded) string {
 	if d.Field == "frame" {
@@ -410,7 +410,7 @@ func TestOracleTshark(t *testing.T) {
 			for _, d := range diffs {
 				got[d.Class]++
 				if d.Class == classOther {
-					t.Errorf("frame %d %s: Wireshark %q, go-iec104 %q", d.Frame, d.Field, d.Tshark, d.Ours)
+					t.Errorf("frame %d %s: Wireshark %q, go-iec60870-5 %q", d.Frame, d.Field, d.Tshark, d.Ours)
 				}
 			}
 			if frames != want.frames || values != want.values {

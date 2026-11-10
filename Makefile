@@ -49,18 +49,18 @@ all: build ## Default target: build the examples
 build: ## Build the example client and server into ./bin
 	@echo "Building examples"
 	@mkdir -p $(BIN_DIR)
-	@for dir in examples/*/; do \
+	@for dir in iec104/examples/*/ iec101/examples/*/; do \
 		name="$$(basename "$$dir")"; \
 		go build -o "$(BIN_DIR)/example-$$name" "./$$dir"; \
 	done
 
 # The self-contained examples: each starts both sides and exits by itself.
-RUN_EXAMPLES := quickstart commands files events redundancy tls secure observability
+RUN_EXAMPLES := iec104/examples/quickstart iec104/examples/commands iec104/examples/files iec104/examples/events iec104/examples/redundancy iec104/examples/tls iec104/examples/secure iec104/examples/observability iec101/examples/quickstart
 
 examples: ## Run the self-contained examples (each must exit successfully)
 	@for e in $(RUN_EXAMPLES); do \
 		echo "Running example $$e"; \
-		go run ./examples/$$e >/dev/null || { echo "example $$e failed"; exit 1; }; \
+		go run ./$$e >/dev/null || { echo "example $$e failed"; exit 1; }; \
 	done
 
 fmt: ## Format Go code with the gofmt of the Go version in go.mod (what CI uses)
@@ -98,9 +98,9 @@ test: ## Run the library tests with the race detector
 	@echo "Running tests"
 	@go test -count=1 -race $(TEST_PKGS)
 
-e2e: ## Run the end-to-end suite: go-iec104 client against go-iec104 server on loopback
+e2e: ## Run the end-to-end suite: go-iec60870-5 client against go-iec60870-5 server on loopback
 	@echo "Running end-to-end tests"
-	@go test -count=1 -race ./e2e/...
+	@go test -count=1 -race ./iec104/e2e/...
 
 coverage: ## Run tests with coverage on the library packages (writes coverage.out)
 	@echo "Running coverage"
@@ -147,7 +147,7 @@ fuzz: ## Run every Fuzz target for FUZZTIME (targets discovered, never listed)
 CHAOS_SECONDS ?= 30
 CHAOS_SEEDS ?= 20
 chaos: ## Run the chaos test for CHAOS_SEEDS seeds of CHAOS_SECONDS each
-	@E2E_CHAOS_SECONDS=$(CHAOS_SECONDS) E2E_CHAOS_SEEDS=$(CHAOS_SEEDS) go test -count=1 -race -timeout=60m -run '^TestChaos$$' ./e2e/
+	@E2E_CHAOS_SECONDS=$(CHAOS_SECONDS) E2E_CHAOS_SEEDS=$(CHAOS_SEEDS) go test -count=1 -race -timeout=60m -run '^TestChaos$$' ./iec104/e2e/
 
 cross: ## Cross-compile without cgo (build only, the tests do not run there)
 	@for p in linux/amd64 linux/arm64 linux/arm darwin/arm64 windows/amd64; do \
@@ -161,19 +161,19 @@ test-interop: ## Run the interop suite against the lib60870, OpenMUC, wendy512 a
 		IEC104_INTEROP_OPENMUC_IMAGE="$(IEC104_INTEROP_OPENMUC_IMAGE)" \
 		IEC104_INTEROP_WENDY512_IMAGE="$(IEC104_INTEROP_WENDY512_IMAGE)" \
 		IEC104_INTEROP_CBSIGMA_IMAGE="$(IEC104_INTEROP_CBSIGMA_IMAGE)" \
-		go test -tags=$(INTEROP_TAGS) -count=1 -timeout=20m ./interop/...
+		go test -tags=$(INTEROP_TAGS) -count=1 -timeout=20m ./iec104/interop/...
 
 interop: test-interop ## Alias for test-interop
 
 test-cbsigma: ## Run the IEC 62351-5 differential tests against cB-Sigma/iec60870 (a module of its own, needs Go 1.26)
 	@echo "Running the application-layer security tests against cB-Sigma/iec60870"
-	@cd interop/cbsigma && go test -count=1 -race ./...
+	@cd iec104/interop/cbsigma && go test -count=1 -race ./...
 
 # Recorded traffic (testdata/captures/README.md). The committed captures run
 # in `make test`; these targets check them, fetch the full recordings that are
 # not committed, and regenerate what is derived from them.
 captures-verify: ## Check the committed captures against testdata/captures/SHA256SUMS
-	@cd testdata/captures && if command -v sha256sum >/dev/null; then sha256sum -c --quiet SHA256SUMS; else shasum -a 256 -c --quiet SHA256SUMS; fi && echo "captures: SHA256SUMS ok"
+	@cd iec104/testdata/captures && if command -v sha256sum >/dev/null; then sha256sum -c --quiet SHA256SUMS; else shasum -a 256 -c --quiet SHA256SUMS; fi && echo "captures: SHA256SUMS ok"
 
 captures-fetch: ## Download the captures listed in testdata/captures/CACHED into the git-ignored cache and verify their SHA256
 	@./scripts/fetch-captures.sh
@@ -182,10 +182,10 @@ captures-extended: captures-fetch ## Run the capture suites over the committed a
 	@IEC104_CAPTURE_EXTENDED=1 go test -count=1 -timeout 30m -run '^TestCapture' ./client/ ./server/
 
 captures-oracle: ## Regenerate the tshark oracle files next to the committed captures (needs tshark)
-	@IEC104_CAPTURE_ORACLE=1 go test -count=1 -run '^TestGenerateOracle$$' ./internal/capture/
+	@IEC104_CAPTURE_ORACLE=1 go test -count=1 -run '^TestGenerateOracle$$' ./iec104/internal/capture/
 
 captures-manifest: ## Regenerate testdata/captures/manifest.json and the fuzz seeds taken from the captures
-	@IEC104_CAPTURE_GENERATE=1 go test -count=1 -run '^(TestManifest|TestGenerateFuzzSeeds)$$' ./internal/capture/
+	@IEC104_CAPTURE_GENERATE=1 go test -count=1 -run '^(TestManifest|TestGenerateFuzzSeeds)$$' ./iec104/internal/capture/
 
 # The documents against the code (DOC-008): docsync, as docs-check.yml runs it.
 docs-check: ## Check that the documents agree with the code (docsync)

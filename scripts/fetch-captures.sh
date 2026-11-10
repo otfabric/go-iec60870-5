@@ -10,8 +10,8 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
-list="$root/testdata/captures/CACHED"
-cache="${IEC104_CAPTURE_CACHE:-$root/testdata/captures/cache}"
+list="$root/iec104/testdata/captures/CACHED"
+cache="${IEC104_CAPTURE_CACHE:-$root/iec104/testdata/captures/cache}"
 
 sha() { if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1; }
 

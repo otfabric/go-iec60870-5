@@ -189,6 +189,12 @@ func (p *port) write(f ft12.Frame) error {
 	if _, err := f.Encode(p.cfg.FT12); err != nil {
 		return err
 	}
+	// Checked first: select picks at random among ready cases.
+	select {
+	case <-p.done:
+		return ErrClosed
+	default:
+	}
 	select {
 	case <-p.done:
 		return ErrClosed

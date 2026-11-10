@@ -19,7 +19,7 @@ import (
 // testdata/captures/certlv/zeek/<capture>/ holds, unchanged, the logs its
 // test suite expects for the four CERT.LV traces (testing/Baseline of
 // cert-lv/spicy-iec104 at the pinned revision). TestOracleZeek compares
-// what go-iec104 decodes with the telemetry, interrogation, command, clock
+// what go-iec60870-5 decodes with the telemetry, interrogation, command, clock
 // synchronization, parameter and read logs.
 
 var zeekCaptures = map[string]string{
@@ -123,14 +123,14 @@ func zeekValue(o asdu.InformationObject) string {
 }
 
 // octets renders a 32-bit bitstring as its four octets in transmission
-// order, as Zeek and Wireshark print it. go-iec104 holds it as a
+// order, as Zeek and Wireshark print it. go-iec60870-5 holds it as a
 // little-endian integer, as lib60870-C v2.4.1 does (BitString32_encode):
 // the octets are the same.
 func octets(v uint32) string {
 	return fmt.Sprintf("0x%02x%02x%02x%02x", byte(v), byte(v>>8), byte(v>>16), byte(v>>24))
 }
 
-// sameZeek compares a logged value with go-iec104's; floats numerically.
+// sameZeek compares a logged value with go-iec60870-5's; floats numerically.
 func sameZeek(want, got string) bool {
 	if want == got {
 		return true
@@ -193,7 +193,7 @@ func TestOracleZeek(t *testing.T) {
 			check := func(log string, i int, field, want, got string) {
 				compared++
 				if !sameZeek(want, got) {
-					t.Errorf("%s row %d %s: Zeek %q, go-iec104 %q", log, i, field, want, got)
+					t.Errorf("%s row %d %s: Zeek %q, go-iec60870-5 %q", log, i, field, want, got)
 				}
 			}
 
@@ -219,7 +219,7 @@ func TestOracleZeek(t *testing.T) {
 			}
 			rows := zeekLog(t, logs, "iec104_telemetry.log")
 			if len(rows) != len(tele) {
-				t.Fatalf("telemetry: Zeek %d rows, go-iec104 %d objects", len(rows), len(tele))
+				t.Fatalf("telemetry: Zeek %d rows, go-iec60870-5 %d objects", len(rows), len(tele))
 			}
 			for i, r := range rows {
 				x := tele[i]
@@ -244,7 +244,7 @@ func TestOracleZeek(t *testing.T) {
 			}
 			rows = zeekLog(t, logs, "iec104_query.log")
 			if len(rows) > len(query) {
-				t.Fatalf("query: Zeek %d rows, go-iec104 %d requests", len(rows), len(query))
+				t.Fatalf("query: Zeek %d rows, go-iec60870-5 %d requests", len(rows), len(query))
 			}
 			for i, r := range rows {
 				// The analyzer logs one row per completed procedure; a
@@ -268,7 +268,7 @@ func TestOracleZeek(t *testing.T) {
 			}
 			rows = zeekLog(t, logs, "iec104_write.log")
 			if len(rows) != 0 && len(rows) != len(cmds) {
-				t.Fatalf("write: Zeek %d rows, go-iec104 %d commands", len(rows), len(cmds))
+				t.Fatalf("write: Zeek %d rows, go-iec60870-5 %d commands", len(rows), len(cmds))
 			}
 			for i, r := range rows {
 				a := cmds[i]
@@ -311,7 +311,7 @@ func TestOracleZeek(t *testing.T) {
 				}
 				compared++
 				if !found {
-					t.Errorf("param row %d: %s ioa %s value %s not among go-iec104's requests", i, r["asdu_type"], r["ioa"], r["value"])
+					t.Errorf("param row %d: %s ioa %s value %s not among go-iec60870-5's requests", i, r["asdu_type"], r["ioa"], r["value"])
 				}
 			}
 
@@ -333,7 +333,7 @@ func TestOracleZeek(t *testing.T) {
 				}
 				compared++
 				if !found {
-					t.Errorf("read row %d: cot %s ioa %s not among go-iec104's", i, r["cot"], r["ioa"])
+					t.Errorf("read row %d: cot %s ioa %s not among go-iec60870-5's", i, r["cot"], r["ioa"])
 				}
 			}
 			t.Logf("%d values compared with Zeek's logs", compared)

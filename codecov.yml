@@ -1,4 +1,4 @@
-# Codecov configuration for go-iec104.
+# Codecov configuration for go-iec60870-5.
 # CI uploads coverage for the library packages; examples/ and test helpers are not tested there.
 coverage:
   status:

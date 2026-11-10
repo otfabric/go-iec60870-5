@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 
-// Package cbsigma tests the application-layer security of go-iec104
+// Package cbsigma tests the application-layer security of go-iec60870-5
 // (package sec, IEC 62351-5:2023 with IEC TS 60870-5-7:2025) against
 // github.com/cB-Sigma/iec60870, the open-source implementation its formats
 // were derived from.
 //
-// It is a module of its own so that go-iec104 keeps no dependencies. The
+// It is a module of its own so that go-iec60870-5 keeps no dependencies. The
 // tests run both implementations in one process and hand the ASDUs from one
 // to the other: the encodings of every message, complete associations in
 // both roles with every data protection algorithm, segmentation, renewal,

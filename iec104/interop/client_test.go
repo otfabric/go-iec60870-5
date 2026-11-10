@@ -152,7 +152,7 @@ func forEachServer(t *testing.T, f func(t *testing.T, a adapter, fx *fixture, sr
 	}
 }
 
-// TestClientInterrogation: what go-iec104 decodes from a reference station
+// TestClientInterrogation: what go-iec60870-5 decodes from a reference station
 // is the fixture, value by value.
 func TestClientInterrogation(t *testing.T) {
 	forEachServer(t, func(t *testing.T, a adapter, fx *fixture, srv *refServer) {
@@ -241,7 +241,7 @@ func TestClientSystemCommands(t *testing.T) {
 		c := dial(t, srv.addr)
 		ca := fx.Station.CommonAddr
 
-		// The station receives the time go-iec104 encoded, to the millisecond.
+		// The station receives the time go-iec60870-5 encoded, to the millisecond.
 		when := time.Date(2026, 10, 9, 15, 35, 12, 345e6, time.UTC)
 		if err := c.ClockSync(ctx, ca, when); err != nil {
 			t.Fatalf("ClockSync: %v", err)
@@ -416,7 +416,7 @@ func TestClientRefusals(t *testing.T) {
 	})
 }
 
-// TestClientFileTransfer: go-iec104 downloads the files of a reference
+// TestClientFileTransfer: go-iec60870-5 downloads the files of a reference
 // station and gets the content the fixture defines.
 func TestClientFileTransfer(t *testing.T) {
 	forEachServer(t, func(t *testing.T, a adapter, fx *fixture, srv *refServer) {
@@ -545,14 +545,14 @@ func TestClientFlowControl(t *testing.T) {
 }
 
 // TestClientIdleTest: the timers. The station sends TESTFR after t3 and
-// closes the connection if go-iec104 does not confirm within t1; go-iec104
+// closes the connection if go-iec60870-5 does not confirm within t1; go-iec60870-5
 // sends its own TESTFR and closes if the station does not confirm.
 func TestClientIdleTest(t *testing.T) {
 	forEachServer(t, func(t *testing.T, a adapter, fx *fixture, srv *refServer) {
 		ctx := context.Background()
 		ca := fx.Station.CommonAddr
 
-		// go-iec104 with the idle test disabled: only the station's TESTFR.
+		// go-iec60870-5 with the idle test disabled: only the station's TESTFR.
 		m := &frames{}
 		params := apci.DefaultParams()
 		params.T3 = 0
@@ -561,23 +561,23 @@ func TestClientIdleTest(t *testing.T) {
 			return m.count(true, apci.TestFRAct) >= 2 && m.count(false, apci.TestFRCon) >= 2
 		})
 		if got := m.count(false, apci.TestFRAct); got != 0 {
-			t.Errorf("go-iec104 sent %d TESTFR act with its idle test disabled", got)
+			t.Errorf("go-iec60870-5 sent %d TESTFR act with its idle test disabled", got)
 		}
 		if _, err := c.Interrogate(ctx, ca, asdu.QOIStation); err != nil {
 			t.Errorf("Interrogate after the station's idle tests: %v", err)
 		}
 		_ = c.Close()
 
-		// go-iec104 with a shorter t3 than the station: its own TESTFR.
+		// go-iec60870-5 with a shorter t3 than the station: its own TESTFR.
 		m = &frames{}
 		params = apci.Params{T1: 2 * time.Second, T2: time.Second, T3: time.Second}
 		c = dial(t, srv.addr, client.WithParams(params), client.WithMetrics(m))
 		eventually(t, 15*time.Second, "TESTFR con from the station", func() bool { return m.count(true, apci.TestFRCon) >= 3 })
 		if c.State() != iec104.StateStarted {
-			t.Errorf("state %s after go-iec104's idle tests", c.State())
+			t.Errorf("state %s after go-iec60870-5's idle tests", c.State())
 		}
 		if _, err := c.Interrogate(ctx, ca, asdu.QOIStation); err != nil {
-			t.Errorf("Interrogate after go-iec104's idle tests: %v", err)
+			t.Errorf("Interrogate after go-iec60870-5's idle tests: %v", err)
 		}
 	}, "--t1", "2", "--t2", "1", "--t3", "3")
 }
@@ -615,7 +615,7 @@ func TestClientReconnect(t *testing.T) {
 	})
 }
 
-// TestClientConcurrentSessions: several go-iec104 clients on one station.
+// TestClientConcurrentSessions: several go-iec60870-5 clients on one station.
 func TestClientConcurrentSessions(t *testing.T) {
 	forEachServer(t, func(t *testing.T, a adapter, fx *fixture, srv *refServer) {
 		ca := fx.Station.CommonAddr
@@ -743,7 +743,7 @@ func startExtended(t *testing.T, a adapter, extra ...string) (*fixture, *refServ
 	return loadExtended(t, a), startServer(t, a, append(append([]string{}, extendedFlags...), extra...)...)
 }
 
-// TestClientGroups: go-iec104 interrogates the groups of a reference station.
+// TestClientGroups: go-iec60870-5 interrogates the groups of a reference station.
 func TestClientGroups(t *testing.T) {
 	forEachAdapter(t, func(t *testing.T, a adapter) {
 		fx, srv := startExtended(t, a)
@@ -802,7 +802,7 @@ func TestClientGroups(t *testing.T) {
 	}, extendedFeatures...)
 }
 
-// TestClientBitstringQuality: go-iec104 decodes the value and the quality of
+// TestClientBitstringQuality: go-iec60870-5 decodes the value and the quality of
 // M_BO_NA_1 from a reference station, flag by flag.
 func TestClientBitstringQuality(t *testing.T) {
 	forEachAdapter(t, func(t *testing.T, a adapter) {
@@ -860,7 +860,7 @@ func sectionsOf(content []byte, size int) [][]byte {
 	return append(out, content)
 }
 
-// TestClientUpload: go-iec104 sends a file to a reference station. The event of
+// TestClientUpload: go-iec60870-5 sends a file to a reference station. The event of
 // the station says what arrived, and it can be fetched again and is in the
 // directory where the station can do that.
 func TestClientUpload(t *testing.T) {
@@ -944,7 +944,7 @@ func TestClientUpload(t *testing.T) {
 	}, append([]string{featUploadServer}, extendedFeatures...)...)
 }
 
-// TestClientDirectory: go-iec104 lists the files of a reference station.
+// TestClientDirectory: go-iec60870-5 lists the files of a reference station.
 func TestClientDirectory(t *testing.T) {
 	forEachAdapter(t, func(t *testing.T, a adapter) {
 		for _, tt := range []struct {
@@ -1000,7 +1000,7 @@ func redundancyEvent(t *testing.T, fx *fixture, ev *asdu.ASDU, value bool) {
 	}
 }
 
-// TestClientRedundancy: two go-iec104 clients against a reference station in a
+// TestClientRedundancy: two go-iec60870-5 clients against a reference station in a
 // redundancy group, switching over with STOPDT and by taking over. What happens
 // to the connection taken over is left to the stack, closed or open: the test
 // holds only that nothing arrives on it.

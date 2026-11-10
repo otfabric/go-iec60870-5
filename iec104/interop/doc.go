@@ -2,15 +2,15 @@
 
 // SPDX-License-Identifier: MIT
 
-// Package interop runs black-box tests of go-iec104 against independent
+// Package interop runs black-box tests of go-iec60870-5 against independent
 // IEC 60870-5-104 implementations: MZ Automation lib60870-C, OpenMUC j60870,
 // wendy512/iec104 and, when its image is given, cB-Sigma/iec60870, packaged
 // as container images by otfabric/iec104-interop.
 //
 // Both directions are covered:
 //
-//   - the go-iec104 client against the reference servers (client_test.go)
-//   - the reference clients against a go-iec104 server (server_test.go)
+//   - the go-iec60870-5 client against the reference servers (client_test.go)
+//   - the reference clients against a go-iec60870-5 server (server_test.go)
 //   - both with the application-layer security of IEC 62351-5, against the
 //     references that declare it (secure_test.go)
 //   - both with the features of container contract 1.3, for every reference
@@ -27,7 +27,7 @@
 // The images are the only thing shared with iec104-interop: their container
 // contract (commands, JSON documents, exit codes) and the fixture baked into
 // them, which the tests read with "print-fixture". The scenarios, expected
-// values and assertions are owned here. The fixture-driven go-iec104 station
+// values and assertions are owned here. The fixture-driven go-iec60870-5 station
 // the reference clients talk to lives in internal/station, shared with the
 // end-to-end tests of package e2e.
 //

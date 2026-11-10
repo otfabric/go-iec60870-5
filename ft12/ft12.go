@@ -148,8 +148,9 @@ func (f Frame) Size(p Params) int {
 		return 1
 	case KindFixed:
 		return 4 + p.AddrSize
+	default:
+		return 7 + p.AddrSize + len(f.Data)
 	}
-	return 7 + p.AddrSize + len(f.Data)
 }
 
 func checksum(b []byte) byte {

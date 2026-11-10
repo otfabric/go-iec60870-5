@@ -16,7 +16,7 @@ import (
 	"github.com/otfabric/go-iec60870-5/iec104/server"
 )
 
-// Station is a go-iec104 server that behaves as a fixture prescribes: the
+// Station is a go-iec60870-5 server that behaves as a fixture prescribes: the
 // library in the role of the controlled station. It is written against the
 // public API only, the way an application would be.
 type Station struct {
@@ -136,7 +136,7 @@ type stationCommand struct {
 	selected bool
 }
 
-// Start serves the fixture with go-iec104 on all interfaces, so that
+// Start serves the fixture with go-iec60870-5 on all interfaces, so that
 // a client container can reach it through the Docker host gateway.
 func Start(t testing.TB, fx *Fixture, opts ...server.Option) *Station {
 	t.Helper()

@@ -708,7 +708,7 @@ func TestEventQueue(t *testing.T) {
 	})
 }
 
-// A client-side redundancy group over two go-iec104 stations: one
+// A client-side redundancy group over two go-iec60870-5 stations: one
 // connection started, failover when its station goes away, switchover back.
 func TestRedundancyGroup(t *testing.T) {
 	a, b := start(t, nil), start(t, nil)

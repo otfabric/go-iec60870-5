@@ -1,10 +1,10 @@
-module github.com/otfabric/go-iec104/interop/cbsigma
+module github.com/otfabric/go-iec60870-5/iec104/interop/cbsigma
 
 go 1.26.0
 
 require (
 	github.com/cB-Sigma/iec60870 v0.3.0
-	github.com/otfabric/go-iec104 v0.1.2
+	github.com/otfabric/go-iec60870-5 v0.0.0
 )
 
 require (
@@ -16,5 +16,5 @@ require (
 	golang.org/x/sys v0.48.0 // indirect
 )
 
-// The tests run against the go-iec104 of this checkout.
-replace github.com/otfabric/go-iec104 => ../..
+// The tests run against the go-iec60870-5 of this checkout.
+replace github.com/otfabric/go-iec60870-5 => ../../..

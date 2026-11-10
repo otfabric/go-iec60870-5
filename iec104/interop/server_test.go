@@ -108,9 +108,9 @@ func reference(t *testing.T, a adapter, sc scenario) *adapter {
 	return nil
 }
 
-// TestServerScenarios drives a go-iec104 station with every reference client
+// TestServerScenarios drives a go-iec60870-5 station with every reference client
 // and checks two things for each operation: that the outcome is what the
-// standard prescribes, and that the client cannot tell the go-iec104 station
+// standard prescribes, and that the client cannot tell the go-iec60870-5 station
 // from the reference server of its own stack. The second check compares the
 // complete result documents: every ASDU, in order, field by field.
 func TestServerScenarios(t *testing.T) {
@@ -143,7 +143,7 @@ func TestServerScenarios(t *testing.T) {
 						if readBug {
 							t.Skipf("known bug of %s (it cannot decode the mirrored C_RD_NA_1): got %s", a.name, s)
 						}
-						t.Fatalf("%s client against go-iec104:\n got  %s\n want %s", a.name, s, sc.want)
+						t.Fatalf("%s client against go-iec60870-5:\n got  %s\n want %s", a.name, s, sc.want)
 					}
 					if readBug {
 						t.Skipf("known bug of %s: its server cannot receive a read, so there is nothing to compare with", a.name)
@@ -164,8 +164,8 @@ func TestServerScenarios(t *testing.T) {
 							a.name, other.name, s, sc.want)
 					}
 					if g, w := got.normalized(), want.normalized(); g != w {
-						t.Errorf("%s client sees a difference between go-iec104 and the %s server.\n"+
-							"--- go-iec104 ---\n%s\n--- %s server ---\n%s", a.name, other.name, g, other.name, w)
+						t.Errorf("%s client sees a difference between go-iec60870-5 and the %s server.\n"+
+							"--- go-iec60870-5 ---\n%s\n--- %s server ---\n%s", a.name, other.name, g, other.name, w)
 					}
 				})
 			}
@@ -174,7 +174,7 @@ func TestServerScenarios(t *testing.T) {
 }
 
 // TestServerValues checks the data, not just the shape: what a reference
-// client reads from a go-iec104 station is the fixture, and commands change
+// client reads from a go-iec60870-5 station is the fixture, and commands change
 // it.
 func TestServerValues(t *testing.T) {
 	for _, a := range adapters(t) {
@@ -246,7 +246,7 @@ func TestServerValues(t *testing.T) {
 }
 
 // TestServerSessions checks the connection handling a reference client
-// exercises on a go-iec104 server: tight flow-control windows, the idle test
+// exercises on a go-iec60870-5 server: tight flow-control windows, the idle test
 // and several controlling stations at once.
 func TestServerSessions(t *testing.T) {
 	for _, a := range adapters(t) {
@@ -262,7 +262,7 @@ func TestServerSessions(t *testing.T) {
 			}
 
 			// An idle connection: the client's t3 (2s) expires several times
-			// and go-iec104 must answer each TESTFR act within t1 (2s).
+			// and go-iec60870-5 must answer each TESTFR act within t1 (2s).
 			r = runClient(t, a, st.Addr, "connect", "--hold-ms", "7000", "--t1", "2", "--t2", "1", "--t3", "2",
 				"--timeout-ms", "3000")
 			if !r.OK || !r.StopDT {
@@ -284,7 +284,7 @@ func TestServerSessions(t *testing.T) {
 	}
 }
 
-// TestServerEventQueue: events a go-iec104 station queued while no
+// TestServerEventQueue: events a go-iec60870-5 station queued while no
 // controlling station was connected reach a reference client in order, and
 // the client's acknowledgements empty the queue.
 func TestServerEventQueue(t *testing.T) {
@@ -334,7 +334,7 @@ func TestServerEventQueue(t *testing.T) {
 	}
 }
 
-// featureCase is one operation of a reference client against a go-iec104 station
+// featureCase is one operation of a reference client against a go-iec60870-5 station
 // with the fixture extended, as iec104-interop states it for its own stations in
 // tests/feature-cases.tsv.
 type featureCase struct {
@@ -352,13 +352,13 @@ func runCases(t *testing.T, a adapter, st *station.Station, cases []featureCase,
 				if strings.HasPrefix(tc.args, "read") && a.knownReadBug(t) {
 					t.Skipf("known bug of %s, it cannot decode the mirrored C_RD_NA_1: got %s", a.name, s)
 				}
-				t.Errorf("%s client against go-iec104:\n got  %s\n want %s", a.name, s, tc.want)
+				t.Errorf("%s client against go-iec60870-5:\n got  %s\n want %s", a.name, s, tc.want)
 			}
 		})
 	}
 }
 
-// TestServerGroups: the reference clients interrogate the groups of a go-iec104
+// TestServerGroups: the reference clients interrogate the groups of a go-iec60870-5
 // station, value by value.
 func TestServerGroups(t *testing.T) {
 	forEachAdapter(t, func(t *testing.T, a adapter) {
@@ -394,7 +394,7 @@ func TestServerGroups(t *testing.T) {
 	}, featGroups, featBitstringQ)
 }
 
-// TestServerBitstringQuality: what a reference client reads from a go-iec104
+// TestServerBitstringQuality: what a reference client reads from a go-iec60870-5
 // station is the value and the quality of the fixture.
 func TestServerBitstringQuality(t *testing.T) {
 	forEachAdapter(t, func(t *testing.T, a adapter) {
@@ -432,7 +432,7 @@ func fileASDUsUp(n int) string {
 	return "F_SC_NA_1/13" + strings.Repeat(",F_SC_NA_1/13,F_AF_NA_1/13", n) + ",F_AF_NA_1/13"
 }
 
-// TestServerUpload: the reference clients send a file to a go-iec104 station,
+// TestServerUpload: the reference clients send a file to a go-iec60870-5 station,
 // which has what the fixture's rule says, and refuses what its uploads do not take.
 func TestServerUpload(t *testing.T) {
 	forEachAdapter(t, func(t *testing.T, a adapter) {
@@ -496,7 +496,7 @@ func TestServerUpload(t *testing.T) {
 	}, featUploadClient)
 }
 
-// TestServerDirectory: a reference client lists the files of a go-iec104 station.
+// TestServerDirectory: a reference client lists the files of a go-iec60870-5 station.
 func TestServerDirectory(t *testing.T) {
 	forEachAdapter(t, func(t *testing.T, a adapter) {
 		const prefix = "exit=0 ok=true error=- conf= term=false asdus=F_DR_TA_1/5 directory="
@@ -517,7 +517,7 @@ func TestServerDirectory(t *testing.T) {
 	}, featDirectoryClient)
 }
 
-// TestServerRedundancy: a reference client with two connections to a go-iec104
+// TestServerRedundancy: a reference client with two connections to a go-iec60870-5
 // station in a redundancy group, switching over in both ways.
 func TestServerRedundancy(t *testing.T) {
 	const station1 = "C_IC_NA_1/7,M_SP_NA_1/20,M_DP_NA_1/20,M_BO_NA_1/20,M_ME_NB_1/20,M_ME_NC_1/20,C_IC_NA_1/10"
@@ -533,7 +533,7 @@ func TestServerRedundancy(t *testing.T) {
 				st := station.StartGroup(t, fx)
 				r := runClient(t, a, st.Addr, append([]string{"redundancy"}, strings.Fields(tc.flags)...)...)
 				if s := r.featureSummary(); s != tc.want {
-					t.Errorf("%s client against go-iec104:\n got  %s\n want %s", a.name, s, tc.want)
+					t.Errorf("%s client against go-iec60870-5:\n got  %s\n want %s", a.name, s, tc.want)
 				}
 				if r.Redundancy == nil || r.Redundancy.Switchover != tc.name {
 					t.Errorf("redundancy: %+v", r.Redundancy)
@@ -580,7 +580,7 @@ func TestServerRedundancy(t *testing.T) {
 			r := runClient(t, a, st.Addr, "redundancy", "--timeout-ms", "2000")
 			want := "exit=1 ok=false error=timeout conf=7 term=true asdus=" + station1 + " redundancy=7/0/0/false"
 			if s := r.featureSummary(); s != want {
-				t.Errorf("%s client against go-iec104:\n got  %s\n want %s", a.name, s, want)
+				t.Errorf("%s client against go-iec60870-5:\n got  %s\n want %s", a.name, s, want)
 			}
 		})
 	}, featRedundClient)

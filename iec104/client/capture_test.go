@@ -92,7 +92,7 @@ type clientReplay struct {
 	errs          []string
 }
 
-// replayClient plays conversation a against a go-iec104 client through Send
+// replayClient plays conversation a against a go-iec60870-5 client through Send
 // and the link procedures.
 func replayClient(t *testing.T, a *capture.Analysis) clientReplay {
 	t.Helper()

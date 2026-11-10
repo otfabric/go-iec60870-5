@@ -87,7 +87,7 @@ func (fx *Fixture) Point(ioa asdu.IOA) *Point {
 }
 
 // Observed is one information object reduced to what the fixture states
-// about a point, so that fixture, go-iec104 objects and reference client
+// about a point, so that fixture, go-iec60870-5 objects and reference client
 // documents can be compared with ==.
 type Observed struct {
 	IOA     asdu.IOA
@@ -179,7 +179,7 @@ func baseTypeName(t asdu.TypeID) string {
 	}
 }
 
-// Observe reduces the objects of ASDUs decoded by go-iec104.
+// Observe reduces the objects of ASDUs decoded by go-iec60870-5.
 func Observe(t testing.TB, asdus []*asdu.ASDU) []Observed {
 	t.Helper()
 	var out []Observed

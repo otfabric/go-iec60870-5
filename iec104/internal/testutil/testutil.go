@@ -108,7 +108,7 @@ func TLSConfigs(t testing.TB) (server, client *tls.Config) {
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "go-iec104 test"},
+		Subject:               pkix.Name{CommonName: "go-iec60870-5 test"},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(time.Hour),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,

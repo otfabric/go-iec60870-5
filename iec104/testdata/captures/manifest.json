@@ -1,5 +1,5 @@
 {
-  "description": "Recorded IEC 60870-5-104 traffic go-iec104 is tested against (testdata/captures/README.md). Files are byte-identical to their sources.",
+  "description": "Recorded IEC 60870-5-104 traffic go-iec60870-5 is tested against (testdata/captures/README.md). Files are byte-identical to their sources.",
   "evidence_levels": {
     "A": "verified physical-device traffic",
     "B": "credibly documented physical-device traffic",

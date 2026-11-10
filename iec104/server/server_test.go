@@ -517,7 +517,7 @@ func TestMutualTLS(t *testing.T) {
 	if err := c.TestCommand(context.Background(), 1); err != nil {
 		t.Fatal(err)
 	}
-	if cn := <-peer; cn != "go-iec104 test" {
+	if cn := <-peer; cn != "go-iec60870-5 test" {
 		t.Errorf("peer certificate CN = %q", cn)
 	}
 }

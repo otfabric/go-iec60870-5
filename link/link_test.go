@@ -70,7 +70,7 @@ func pair(t *testing.T, cfg Config, addr uint16, h SecondaryHandler) (*Primary, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { pr.Close(); se.Close() })
+	t.Cleanup(func() { _ = pr.Close(); _ = se.Close() })
 	return pr, se
 }
 
@@ -173,8 +173,8 @@ func TestRepetitionNotProcessedTwice(t *testing.T) {
 	pr, _ := NewPrimary(a, fast)
 	h := &station{}
 	se, _ := NewSecondary(lb, fast, 1, h)
-	defer pr.Close()
-	defer se.Close()
+	defer func() { _ = pr.Close() }()
+	defer func() { _ = se.Close() }()
 	ctx := context.Background()
 	if _, err := pr.Init(ctx, 1); err != nil {
 		t.Fatal(err)
@@ -210,7 +210,7 @@ func TestCloseAndCancel(t *testing.T) {
 	if _, err := pr.RequestStatus(ctx, 2); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancel: %v", err)
 	}
-	se.Close()
+	_ = se.Close()
 	<-se.Done()
 	if se.Err() != nil {
 		t.Errorf("err after close: %v", se.Err())
@@ -229,8 +229,8 @@ func TestCloseAndCancel(t *testing.T) {
 
 func TestConfigErrors(t *testing.T) {
 	a, b := net.Pipe()
-	defer a.Close()
-	defer b.Close()
+	defer func() { _ = a.Close() }()
+	defer func() { _ = b.Close() }()
 	if _, err := NewPrimary(a, Config{FT12: ft12.Params{AddrSize: 4}}); !errors.Is(err, ErrInvalidConfig) {
 		t.Error(err)
 	}
@@ -338,13 +338,15 @@ func TestBalanced(t *testing.T) {
 			if frames.Load() == 0 {
 				t.Error("OnFrame not called")
 			}
-			a.Close()
-			b.Close()
+			_ = a.Close()
 			<-b.Done()
 			if b.Err() == nil {
 				t.Error("b: transport error not reported")
 			}
-			_ = a.Err()
+			_ = b.Close()
+			if a.Err() != nil {
+				t.Errorf("a closed by the application reports %v", a.Err())
+			}
 		}
 	}
 }

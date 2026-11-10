@@ -23,10 +23,10 @@ jobs:
       fuzz-time: 10s
       # Same scope as TEST_PKGS in the Makefile: the fixture and test helper packages have no tests of their own.
       test-exclude-regex: "/example(s)?($|/)|/internal/(station|testutil)$"
-      codecov-name: go-iec104
+      codecov-name: go-iec60870-5
       # Coverage across the production packages, as make coverage measures it: the
       # e2e suite exercises them. make coverpkg-check keeps it equal to COVER_PKGS.
-      coverpkg: github.com/otfabric/go-iec104,github.com/otfabric/go-iec60870-5/iec104/apci,github.com/otfabric/go-iec60870-5/asdu,github.com/otfabric/go-iec60870-5/iec104/client,github.com/otfabric/go-iec60870-5/iec104/internal/link,github.com/otfabric/go-iec60870-5/internal/logx,github.com/otfabric/go-iec60870-5/sec,github.com/otfabric/go-iec60870-5/iec104/server
+      coverpkg: github.com/otfabric/go-iec60870-5,github.com/otfabric/go-iec60870-5/asdu,github.com/otfabric/go-iec60870-5/cp,github.com/otfabric/go-iec60870-5/ft12,github.com/otfabric/go-iec60870-5/iec101,github.com/otfabric/go-iec60870-5/iec101/client,github.com/otfabric/go-iec60870-5/iec101/server,github.com/otfabric/go-iec60870-5/iec104,github.com/otfabric/go-iec60870-5/iec104/apci,github.com/otfabric/go-iec60870-5/iec104/client,github.com/otfabric/go-iec60870-5/iec104/internal/link,github.com/otfabric/go-iec60870-5/iec104/server,github.com/otfabric/go-iec60870-5/internal/logx,github.com/otfabric/go-iec60870-5/link,github.com/otfabric/go-iec60870-5/sec,github.com/otfabric/go-iec60870-5/telecontrol
       go-versions: '["1.26", "1.27"]'
     secrets: inherit
 

@@ -25,7 +25,7 @@ import (
 
 // The hostile tests put a peer that does not follow the protocol on the
 // other end of a real connection, speaking raw APDUs built with the public
-// apci and asdu encoders. Whatever it sends, the go-iec104 side must end
+// apci and asdu encoders. Whatever it sends, the go-iec60870-5 side must end
 // the connection or answer as the protocol says within a bound, must not
 // take anything else down with it, and must leave nothing behind.
 //
@@ -310,7 +310,7 @@ func goroutines(t testing.TB) func() {
 	}
 }
 
-// legitimateInterrogation proves the station still serves: a go-iec104
+// legitimateInterrogation proves the station still serves: a go-iec60870-5
 // client connects and interrogates it.
 func legitimateInterrogation(t testing.TB, st *station.Station, fx *station.Fixture) {
 	t.Helper()
