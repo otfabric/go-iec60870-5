@@ -1,0 +1,380 @@
+# go-iec104 Releases
+
+## v0.3.0
+
+**Date:** 2026-11-08
+**Previous release:** v0.2.0
+
+### Added
+
+- `asdu.Timestamp.NoWeekday` reports a CP56Time2a whose day-of-week field is 0, which stations that do not use it send. The encoder writes 0 again, so a time tag passed on or mirrored keeps its octets.
+
+### Fixed
+
+- A CP56Time2a with day of week 0 was decoded and encoded again with the day of the week of its date. A station mirroring a clock synchronization (`Session.Confirm`, `Session.Reply`) thus answered with other octets than it received, as recorded in testdata/captures/certlv (frames 10 and 14 of unknown_unknown_file-read.pcapng). Regression test `TestCP56UnusedWeekday`; the server replay of the recordings fails without the fix.
+- `client.Interrogate` dropped the parameters of measured values (P_ME_NA_1..P_ME_NC_1) a station reports in answer to an interrogation with cause 20..36: it took them for control-direction ASDUs. They are now collected, as recorded in unknown_unknown_errors.pcapng (frames 22 to 32, also in the logs of CERT.LV's Zeek analyzer). They still reached the `Handler`.
+- `client.PutFile` failed with `ErrProtocol` when the station called the file with a section number other than 0, as the recorded station of unknown_unknown_file-write.pcapng does (section 1, frame 53). The section number of the call of a whole file is no longer checked; that of a section still is.
+
+### Tests
+
+- Recorded traffic of other implementations, committed byte-identical under testdata/captures with SHA256SUMS, a manifest with source, revision, terms and evidence level per file, and `make captures-verify` in CI: CERT.LV's spicy-iec104 traces (pinned commit), the University of Western Macedonia IEC 104 dataset (Zenodo record 7108614: QTester104, IEC TestServer, attacks) and Wireshark's synthetic coverage capture. 12 captures, 681 conversations, 77,299 APDUs. None comes from a device that can be identified as physical: the dataset's "real RTUs" are not identifiable in its recordings, whose stations all run in VirtualBox.
+- `internal/capture` reads pcap, pcapng and gzip with Ethernet, loopback, Linux cooked and raw IP, reassembles TCP deterministically (retransmissions, out-of-order segments, several APDUs per segment, APDUs over several segments, gaps, port reuse without SYN), and checks both sides' sequence numbers, acknowledgements, windows and STARTDT/STOPDT/TESTFR, interrogation, command and file procedures.
+- Every APDU decoded and encoded again: all of the recorded implementations byte for byte. Decoded fields compared with Wireshark 4.6.9 (621,207 values in 65,302 frames) and with the logs of CERT.LV's Zeek analyzer; every difference is classified and pinned.
+- The client against every recorded station (sequence numbers rebuilt, ASDU octets as recorded), through `Send` and through `Interrogate`, `CounterInterrogate`, `Read`, `ClockSync`, `Command`, `GetFile` and `PutFile`; the server, with `Mux` and `FileServer`, against every recorded controlling station. The recorded faults of IEC TestServer are pinned: the client closes on its stale N(R) and on its I frames after STOPDT con.
+- `make captures-fetch` and `make captures-extended` run the replays over four full recordings of the dataset (29 to 75 MB, not committed), the MITM drop attack among them. Fuzz seeds for `apci.FuzzParse` and `asdu.FuzzDecode` from every APDU shape of the recordings.
+
+---
+
+## v0.2.0
+
+**Date:** 2026-11-04
+**Previous release:** v0.1.2
+
+### Breaking
+
+- Go 1.26 is the minimum (was 1.23). CI tests Go 1.26 and 1.27. HMAC-SHA3-256 (MAL 7 and 8) no longer depends on the Go version: it is always built.
+- `asdu.QOIGroup(n)` returns 0 (qualifier "not used") for `n` outside 1..16, instead of the qualifier of another group or a reserved one.
+
+### Fixed
+
+- CP56Time2a carries the year without its century, and the decoder reads 70..99 as 1970..1999 and 0..69 as 2000..2069. A time outside that window was encoded without notice and came back in another century; it now goes out flagged invalid (IV). A year before 0 also set bit 7 of the year octet, which is reserved.
+- File transfer: a section number past 255 or a length past 24 bits could wrap into a valid-looking one in the client and the server. They now reach the encoder as values it refuses.
+- The server reserved memory for the whole section length a client announced in an upload (up to 16 MiB per section ready, before any data): a peer could repeat file ready and section ready on many addresses until the station ran out of memory. It now reserves at most 64 KiB and grows with the data that arrives.
+- The client preallocated the whole file length a station announced (up to 16 MiB) when a download started; it now preallocates at most 64 KiB and grows with the data.
+- `client.GetFile` accepted segments and the last segment of a section other than the one it had called, and acknowledged the section positively. It now fails with `ErrProtocol`.
+- `server.Mux` passed an ASDU without information objects (VSQ of zero) to the handler, where `First()` is nil; a handler that indexed it panicked, and one that held a lock while doing so blocked every session. The Mux now refuses it with cause 44 (unknown type identification). A failing file-transfer reply to such an ASDU could also panic the session.
+
+### Security
+
+- Static analysis at the lowest thresholds (gosec, opengrep): 54 findings to 0, all fixed in code. Every narrowing integer conversion is range-checked or masked where it happens; `sec.LoadIdentity` cleans its paths.
+
+### Tests
+
+- Limits of every range-checked conversion: signed values, step positions, the CP56Time2a year window, segment and file lengths, address widths, security length fields, key wrap steps, fixture report causes. New fuzz targets `FuzzSignedValues` and `FuzzCP56`.
+- Hostile peers over TCP (`e2e/hostile_test.go`): broken framing, control fields, sequence numbers and state, idle and one-octet-at-a-time peers, floods, undecodable and zero-object ASDUs, unknown types, file transfer out of turn, against the server and, as a hostile station, against the client. Each case checks the bound, that a legitimate client is served afterwards and that no goroutine is left. `FuzzServerStream` feeds arbitrary octets to a running server over an in-memory connection.
+
+---
+
+## v0.1.2
+
+**Date:** 2026-11-02
+**Previous release:** v0.1.1
+
+### Fixed
+
+- A takeover in a group named with `WithRedundancyGroups` left the old connection started. A STARTDT on another connection only moved the event queue: `Session.Started` was true on both, a request on the old connection was still answered, and when the new one stopped the queue went back to the old one. The old connection is now closed before the STARTDT con goes out; one in STOPDT stays up. The `default` group, used without that option, is not a redundancy group and keeps its independent sessions.
+
+### Tests
+
+- The `interop` suite tests client and server against what iec104-interop's container contract 1.3 adds: interrogation groups, a quality on bitstrings, mutual TLS, file upload, the file directory and redundancy. The references are pinned to iec104-interop v0.5.0, where they run in both directions for every reference that declares the feature: 14 tests, 198 cases, 3 skipped because wendy512 has no upload, redundancy or TLS station.
+
+---
+
+## v0.1.1
+
+**Date:** 2026-10-31
+**Previous release:** v0.1.0
+
+### Fixed
+
+- `Close` during `Connect`, after the dial, could return `ErrConnectFailed` wrapping `context.Canceled`. It returns `ErrClosed`.
+
+---
+
+## v0.1.0
+
+**Date:** 2026-10-30
+**Previous release:** v0.0.5
+
+## Summary
+
+A client always reports "stopped" before "started" on a new connection.
+
+## Changes
+
+### Fixes
+
+- **A state handler could be told "connecting" followed directly by "started".** The link was usable before "stopped" was reported, so a `StartDT` on another goroutine could finish first and the report would skip "stopped". Found by `TestChaos`, which failed intermittently on it.
+
+---
+
+## v0.0.5
+
+**Date:** 2026-10-26
+**Previous release:** v0.0.4
+
+## Summary
+
+The interop suite qualified against iec104-interop v0.3.1, whose OpenMUC
+image is built on j60870 1.8.0.
+
+## Changes
+
+### Changed
+
+- **Interop references: [otfabric/iec104-interop v0.3.1](https://github.com/otfabric/iec104-interop/releases/tag/v0.3.1)**, pinned by digest: lib60870-C v2.4.1, j60870 1.8.0, wendy512/iec104 v1.0.4 on go-iecp5 v1.2.6 and cB-Sigma/iec60870 v0.3.0. j60870 1.8.0 closes the connection on a read command; the suite skips the read cases against it as a known bug and fails when the bug no longer reproduces ([INTEROPERABILITY.md](INTEROPERABILITY.md)). The library is unchanged.
+
+---
+
+## v0.0.4
+
+**Date:** 2026-10-26
+**Previous release:** v0.0.3
+
+## Summary
+
+Application-layer security: the A-Profile of IEC 62351-5:2023 as
+IEC TS 60870-5-7:2025 applies it to IEC 60870-5-104, in the new package
+`sec`, switched on with `client.WithSecurity` and `server.WithSecurity`.
+Station Association with X.509 certificates, session keys, every ASDU
+authenticated or encrypted, role-based access control and the security
+statistics, with or without TLS. Interoperable with cB-Sigma/iec60870, the
+open-source implementation the formats were derived from; the IEC documents
+were not used. One breaking change in `asdu`: the security type
+identifications and causes are those of the 2025 edition.
+
+**Upgrade notes**
+
+- `asdu.S_CH_NA_1` .. `asdu.S_UC_NA_1` and `asdu.S_IT_TC_1` (the 2013 edition) are replaced by `asdu.S_AQ_NA_1` .. `asdu.S_KP_NA_1` and `asdu.S_SD_NA_1` (the 2025 edition), which use the same numbers 81..91 differently. `asdu.CauseAuthentication` and `asdu.CauseUserRoleUpdateKey` are replaced by `asdu.CauseDataProtection` (14) and `asdu.CauseAssociation` (16); `asdu.CauseSessionKey` (15) stays, `asdu.CauseNotAuthorized` (17) is new. Code that only printed these types needs nothing.
+
+## Changes
+
+### Added
+
+- **Package `sec`**, the A-Profile of IEC 62351-5 with IEC TS 60870-5-7, as a sans-IO `Endpoint` for either station role:
+  - Station Association: certificates exchanged and checked against a `Trust` (pinned self-signed certificates or public keys, or Central Authorities with an optional list of subjects), ECDH on secp256r1 or Curve25519, HKDF;
+  - Session Key Change with AES-256 key wrap, at every connection, after `Settings.KeyLifetime` or `KeyUses`, on `Endpoint.Renew`; the Session Initiation Request of a controlled station whose keys are not valid;
+  - Secure Data under HMAC-SHA-256 (16 or 8 octets), HMAC-SHA3-256 (built with Go 1.24 or later) or AES-256-GCM, with sequence numbers against replay, and segmentation of long security messages;
+  - retransmission, reply and request timeouts, failure with backoff, and a Station Association anew after a failed Session Key Change;
+  - the security statistics and events of IEC 62351-5 (`Endpoint.Statistics`, `Config.OnEvent`), `Endpoint.Status`;
+  - role-based access control with the seven roles of IEC TS 60870-5-7 (`Config.Roles`); the acknowledgement of a download needs file read, where cB-Sigma asks for file write (see INTEROPERABILITY.md);
+  - identities from PEM files (`LoadIdentity`) or made for tests and provisioning (`NewIdentity`, Curve25519 certificates included), and `FileStore`, which keeps an association over a restart;
+  - the codec of the ten security messages (`Encode`, `Decode`, `Segment`, `AssociationOf`) for tools and tests.
+- **`client.WithSecurity` and `server.WithSecurity`.** The client runs the key management when data transfer starts and `Connect` returns once the secure session is established; requests wait for it. The server keeps one association per controlling station: its factory makes the endpoint for an AIM when that station is first heard, or refuses it, and a connection is bound to its station's association by the first security message on it. The connections of a client redundancy group share their station's association; other controlling stations keep theirs. The server discards unprotected ASDUs and answers a request the roles do not permit with a negative confirmation with cause "not authorized" before it reaches the handler. `Session.Security` returns the association of the session's controlling station. Both combine with TLS.
+- `asdu.CauseNotAuthorized` (17), `asdu.CauseDataProtection` (14) and `asdu.CauseAssociation` (16), with names; the 2025 security types (see "Upgrade notes").
+- **`examples/secure`**: an association with certificates of a plant authority, AES-256-GCM, and a command refused by role.
+- **`interop/cbsigma`**, a module of its own so that go-iec104 keeps no dependencies: `sec` against cB-Sigma/iec60870 in process (`make test-cbsigma`, and a job in the Interop workflow).
+- **Interop suite: cB-Sigma/iec60870 as a fourth reference image** with IEC 62351-5 (`IEC104_INTEROP_CBSIGMA_IMAGE`), and `interop/secure_test.go`, the application-layer security in both directions against every reference that declares `secureAuthentication`. Result documents are compared without the NOS of the F_LS_NA_1 that ends a file, which cB-Sigma fills differently from lib60870 and go-iec104.
+
+### Changed
+
+- The client reports a refusal with cause "not authorized" (17) as `*iec104.NegativeError`, like the "unknown ..." causes; before, such an answer was not taken for the answer of the request.
+
+### Verification
+
+- Unit tests of `sec`, 95% of its statements: the encodings checked against octet strings produced by cB-Sigma/iec60870's encoder, RFC 3394 and RFC 5869 vectors; two endpoints on a simulated connection with a clock of their own, through every procedure and the retransmission, timeout, failure and backoff of each, tampered and replayed messages, unprotected ASDUs, duplicate requests, restarts with a kept association, a Session Initiation Request crossing a Session Request, a controlled station reconnecting to a controlling station that kept its keys, refused certificates (untrusted, expired, other curve, other authority, bad signature, subject not listed) and refused algorithms. A fuzz target for the decoder and both endpoint roles.
+- Against cB-Sigma/iec60870 v0.3.0 (`interop/cbsigma`): the encodings and segments of every message compared, and complete associations with go-iec104 in either role and every data protection algorithm both have (MAL 3 and 4, HMAC-SHA3-256, AES-256-GCM): data both ways, short and segmented, renewal by the controlling station, a restart of either side with its association kept, a reconnect, crossing requests, and Curve25519 station certificates issued by an authority on each side.
+- End to end (`e2e`): the station scenarios run also with the A-Profile, HMAC over TCP and AES-256-GCM over TLS, each client a controlling station of its own, eight of them at once included; a client redundancy group shares its association over a switchover while another controlling station keeps its own; a station refuses an AIM its factory does not know; and role-based access control refuses commands and file delivery to a viewer while it interrogates, lists files and downloads one to its acknowledgement.
+- Found and fixed on the way, before release: a request held while the session keys changed was sent only at the next change when the keys arrived while the protocol loop was busy; a station certificate whose subject equals its authority's (both empty) was taken for self-signed; a repeated first segment of a security message abandoned the series; and what a controlled station sent after a reconnect, under keys the controlling station had dropped, was lost.
+- **Qualified against [otfabric/iec104-interop v0.3.0](https://github.com/otfabric/iec104-interop/releases/tag/v0.3.0)**, pinned by digest: lib60870-C v2.4.1, j60870 1.7.2, wendy512/iec104 v1.0.4 on go-iecp5 v1.2.6 and, new, cB-Sigma/iec60870 v0.3.0 (container contract 1.2). The suite treats the read bug of j60870 1.8.0, which a later iec104-interop builds on, as known.
+- Against the cB-Sigma/iec60870 v0.3.0 image: every scenario of the interop suite in both directions, and the A-Profile through the security flags: go-iec104's client against the cB-Sigma station and the cB-Sigma client against a go-iec104 station, with authority-issued and pinned certificates, secp256r1 and X25519, HMAC-SHA-256 and AES-256-GCM, other association identities, a viewer's command refused with cause 17 and an operator's executed, a viewer's download from a go-iec104 station completed (cB-Sigma's station refuses its acknowledgement), an AIM the station refuses, untrusted certificates on either side and a client without security. The cB-Sigma client's results against go-iec104 equal those against the cB-Sigma station.
+- Not verified: against a third, independent implementation or certified test equipment.
+
+---
+
+## v0.0.3
+
+**Date:** 2026-10-10
+**Previous release:** v0.0.2
+
+## Summary
+
+File transfer in control direction and the file directory, a comparison
+with wendy512/iec104, and a folder of examples to start from. A thorough
+overhaul of the order in which the two protocol machines, the redundancy
+group and the event queue change state and tell their applications: 25
+fixes, found by a new suite of state machine tests, a randomized chaos test
+and two independent reviews of the code. No breaking API change.
+
+**Upgrade notes**
+
+- `Close` (client, group, session and server) now waits for a handler call in progress to return. A handler that never returns blocks it; see "Changed".
+- A request that is waiting when data transfer stops now fails with `iec104.ErrNotStarted` instead of its timeout error; see "Fixed".
+- A request method called from inside the client's `Handler` or state handler now fails at once with the new `iec104.ErrInHandler`. It could never be answered there and used to run into its timeout; see "Changed".
+
+## Changes
+
+### Added
+
+- **File upload** — `Client.PutFile` (and `Group.PutFile`) delivers a file to a station: file ready, then the sections and segments the station calls for, each with its checksum, until the station acknowledges the file. On the station, `server.FileServer.Sink` (a `FileSink`) decides whether a file is accepted and stores what arrived intact; a length or checksum that does not match, or a failed store, is acknowledged negatively.
+- **File directory** — `Client.ListFiles` (and `Group.ListFiles`) calls the directory and returns its entries; `server.FileServer.Directory` answers the call, as `F_DR_TA_1` sequences.
+- **Names for the secure authentication types** — `asdu.S_CH_NA_1` .. `asdu.S_UC_NA_1` and `asdu.S_IT_TC_1` (IEC TS 60870-5-7), `TypeID.IsSecurity`, and the causes `asdu.CauseAuthentication`, `CauseSessionKey` and `CauseUserRoleUpdateKey`. These types print by name and are still carried as `ASDU.Raw`: the procedures of IEC 62351-5 are not implemented (see SECURITY.md).
+- **Examples** — nine programs under `examples/`: `quickstart`, `commands`, `files`, `events`, `redundancy`, `tls` and `observability` are self-contained and run with `go run`; `server` and `client` are the two separate programs that were there. `make examples` runs the self-contained ones, and so does CI.
+
+### Changed
+
+- `server.FileTypes` now also lists `F_FR_NA_1`, `F_SR_NA_1`, `F_SG_NA_1` and `F_LS_NA_1`, which a station receives when a file is delivered to it. A `FileServer` without a `Sink` refuses them with "unknown information object address"; before, a `Mux` answered them with "unknown type identification".
+- **`Close` waits for the callbacks**, on `Client`, `Group`, `Session` and `Server`. It returns when the `Handler`, the state handler and the switch handler have been called for the last time (see "Fixed"); several callers at once all wait for that. A handler that blocks forever therefore blocks `Close` called from another goroutine. From inside a handler `Close` returns at once, as before, the handler is not called again, and the close completes when that call has returned.
+- **`Client.Close` hands over what was received.** Called from outside a callback it first gives the `Handler` everything the connection had already received and acknowledged to the station.
+- **Callbacks may call back.** A client state handler may call `StartDT`, `StopDT`, `Send`, `Connect` and `Close`; a group's state and switch handlers may call `Switchover` and `Close`; a server handler may call `Session.Close` and `Server.Close`, also from the first "stopped" notification. Before, several of these deadlocked.
+- **New error `iec104.ErrInHandler`** for a client request method (`Command`, `Interrogate`, `Read`, `GetFile`, ...) called from the client's `Handler` or state handler. The answer is delivered by the goroutine the callback occupies: from the `Handler` such a call always ran into its timeout, from the state handler it did so depending on timing. It now fails at once, every time. It is not retried.
+- **`Group.Switchover` reports when nothing was switched.** It returns `ErrNotConnected` when the standby could not be started and data transfer is back on the connection it was on; before, it returned nil.
+- **A `Group` follows its connections, not the `Handler`.** It notices a lost or stopped connection when the connection changes, also while the application's `Handler` is busy on it. It no longer holds its lock while the application is called: a slow state handler delays the notifications of its own connection and nothing else.
+- A `Group` waits `Reconnect.MinDelay`, doubling up to `MaxDelay`, before it dials an address again that could not be reached.
+- `server.NewFileServer` accepts a nil source, for a station that only takes files or only has a directory.
+- The comparison matrix in the README has a column for wendy512/iec104.
+
+### Fixed
+
+Link and state order:
+
+- **A station confirmed STOPDT and STARTDT before it had changed its own state.** For a moment after the confirmation was on the wire, `Session.Started` still reported the old state and `Session.Send` followed it: a controlling station that had its STOPDT confirmed could find the station still "started". The state now changes before the confirmation is sent. Found by the end-to-end tests on a CI runner.
+- **A request that was waiting when data transfer stopped kept waiting until its timeout.** After STOPDT (the client's own, or a group's switchover) the station cannot answer any more. Such requests now fail at once with `iec104.ErrNotStarted`, after everything the station sent before it confirmed the stop has been delivered, so an answer that did arrive is not lost. A request sent after the restart is not affected by the stop before it.
+- **Sending on a connection that was just ending could report the wrong error.** For a moment during shutdown a `Send`, and with it any request, was told `ErrNotStarted`, or `ErrConnectionLost` for a connection the application itself was closing. It now gets the reason the connection ended: `ErrClosed` for a local `Close`.
+- **A deactivation confirmation could pass for an activation confirmation.** The late answer to a `Deactivate` the caller had given up on was taken as the positive confirmation of a following command on the same object. Confirmations are now matched by cause.
+
+- **A directory listing could break a file transfer on the same connection.** `ListFiles` running while `GetFile` or `PutFile` was under way failed that transfer with a protocol violation when the directory listed the file being transferred first: the directory was taken for a part of the transfer. Found by the end-to-end tests in the release pipeline.
+- **A directory listing could be returned as the value of a read.** `Read` of an address took a directory that `ListFiles` had called for at the same time, when the directory listed a file at that address: both carry the cause "request". Interrogations and reads no longer take anything that belongs to file transfer. Found by the cross-talk tests below.
+
+Close:
+
+- **Callbacks could still arrive after `Close` had returned.** `Client.Close`, `Session.Close` and `Server.Close` returned as soon as the connection was down, while a `Handler` or state handler call could still be in progress or about to start. They now return when the last callback has returned and none follows.
+- **After `Close` from inside a handler, the handler was called again** for what was still queued, on client and server.
+- **`Close` from a state handler could deadlock**: `Client.Close` from the client's state handler, and `Session.Close` or `Server.Close` from the first "stopped" notification of a session.
+- **A second `Close` returned early.** Called while another `Close` was still waiting for a handler, `Client.Close` and `Server.Close` returned at once.
+- **`Server.Close` did not wait for sessions that were already ending**: one whose connection the peer had dropped and whose state handler was still running, or one whose `Handler` had closed its own session.
+- **A client lost monitoring data it had acknowledged.** `Client.Close` discarded what the connection had received but the `Handler` had not yet seen; the station had been told it arrived and did not send it again. Found by the chaos test.
+- **A client could be told about a connection after it had closed it, and "disconnected" twice**, when the station dropped the connection at the moment the application called `Close`.
+- **A client could report "stopped" for a connection that was already lost**, before "disconnected". A connection that has ended is now only reported by its loss.
+- **`Connect` racing `Close` could leave a closed client reporting a state other than "disconnected"**, and read the client's state without its lock (a data race, found by the chaos test).
+
+Event queue (`Server.Enqueue`):
+
+- **Events could be sent twice on the same connection** after a STOPDT and STARTDT, when the session's `Handler` was slow: the queue learned of the stop only when the `Handler` had returned and took the events of the next started period for unacknowledged ones. The queue now follows the connection itself.
+- **Events could wait in the queue of a started connection** when the controlling station sent STARTDT while its STOPDT was still waiting for an acknowledgement; they moved again with the next event.
+- **A switchover could be held up to t1** by the old connection, when its window was full and it no longer acknowledged.
+- The application's logger is no longer called with the queue's lock held.
+
+Redundancy group (`client.Group`):
+
+- **Two connections could end up started.** A STARTDT the group had given up on could still be confirmed later, and nothing stopped that connection. The group now stops such a stray, or drops the connection when it cannot.
+- **`Group.Close` and `Group.Switchover` from a state handler deadlocked**, and a state handler that was slow held up the whole group, `Close` included.
+- **`Group.Close` returned while the switch handler was running**, and the handler could be called again afterwards.
+- **Failover waited for the `Handler`.** A lost active connection was noticed only when the `Handler` that was busy on it had returned.
+- **`Group.Switchover` could return before the switch handler had been told**, when the group's own goroutine was telling it at that moment. The group now calls the application from a goroutine of its own, which a slow callback cannot keep from supervising the connections.
+- **An address that refused connections was dialed without pause**, thousands of times per second.
+
+### Verification
+
+- Upload and directory: round trips of files of every shape, refusals, corrupted deliveries (wrong checksum, too much or too little data, deliveries out of order, abandoned transfers) against the station, and a station that misbehaves against the client; end to end over TCP, TLS and with `k = w = 1`, including delivering, fetching and listing at once on one connection.
+- **State machine tests**, written after the first of the fixes above to look for its relatives:
+  - in `internal/link`, every frame a link writes is checked against the link's own state at that moment (no confirmation before the state has changed, no I frame outside a started period), in 500 strict start/stop cycles and in randomized runs where both applications start, stop and send at once; every frame a `Send` accepted must arrive once and in order, both sides must report the same sequence of states, and neither may see a protocol error;
+  - in `e2e`, 200 STARTDT/STOPDT cycles with both sides checked at the return of every call; connections that come and go at random while the station drops sessions, with the story each session and each client is told checked against a grammar; every control call at once from eight goroutines, with a `Close` in the middle; nothing after `Close` on either side, also when the station drops the connection at that very moment; requests pending across a stop; 60 redundancy switchovers with both stations checked at each return.
+- **A chaos test** (`e2e`, `TestChaos`): clients that connect, start, stop, send, request and close at random, a station that drops sessions, broadcasts and queues events, and a network that delays, fragments and cuts connections, for several seeds. Afterwards every call has returned, every queued event has reached a `Handler`, each side was told a story that fits the grammar and ends in the state it is in, and no goroutine is left. `E2E_CHAOS_SECONDS` and `E2E_CHAOS_SEEDS` lengthen it; it ran for minutes under the race detector, also on one and two CPUs.
+- **Two independent reviews** of the state machines, each asked to break them and to prove every finding with a failing test. Their reproductions are part of the suite (`TestOrdering...`, `TestReview2...`), next to tests that call back into the library from every callback, close from several goroutines at once, and place a `Close` at a chosen point of a connection loss (a failpoint).
+- **Cross-talk tests**: every request method against a station that, around each ASDU of its answer, sends what every other procedure would send for the same station and the same object, and all of it again for another object and as another station, with refusals where a confirmation would be and with other values. Then every pair of request methods at once on one connection, all of them at once, and end to end several clients issuing every kind of request at once over TCP, TLS and `k = w = 1`. Taking out any one of the eleven conditions by which a request recognizes its answers fails these tests.
+- **Mutation checks**: each fix was taken out again in turn, to see a test fail for it.
+- **Under load**: the whole suite repeatedly without and with the race detector, on two CPUs with every core kept busy, as on a shared CI runner. Two tests assumed more about timing than the library promises and were corrected (`TestSilentLink`, which failed in the release pipeline, and `TestReceiveBackpressure`).
+- The end-to-end suite (`e2e`) covers what is new: upload, directory and fetching a delivered file over TCP, TLS and `k = w = 1`, through a redundancy group on both of its paths and with IEC 101 field sizes; the station's state at the moment STARTDT and STOPDT are confirmed; the secure authentication types in the wire matrix.
+- Not yet against a reference stack: the interop images have no upload or directory operation. lib60870-C can receive a file; none of the three has a directory.
+
+---
+
+## v0.0.2
+
+**Date:** 2026-10-10
+**Previous release:** v0.0.1
+
+## Summary
+
+Fixes a client bug that could hide a refused command, and closes the gaps
+with lib60870-C and j60870: file transfer (typed ASDUs and the download
+procedure in both roles), server-side redundancy groups and a server-side
+event queue with acknowledged delivery. Qualified against three reference
+stacks instead of two. No breaking API change.
+
+**Upgrade if you use v0.0.1**: see "Fixed".
+
+## Changes
+
+### Added
+
+- **File transfer types** (`asdu`) — `F_FR_NA_1`..`F_SC_NB_1` (120..127) now decode into `FileReady`, `SectionReady`, `FileCall`, `FileLastSegment`, `FileAck`, `FileSegment`, `FileDirectoryEntry` and `FileQueryLog`, with the qualifier constants and `TypeID.IsFileTransfer`. 67 type identifications are modelled.
+- **File download** — `Client.GetFile` (and `Group.GetFile`) runs the file transfer procedure in monitor direction: select, call, sections, segments, with the length and checksum of every section and of the file checked and acknowledged. `server.FileServer`, registered on a `Mux` for `server.FileTypes`, serves the files of a `FileSource`; `server.NewFile` splits content into sections and `FileServer.OnDone` reports the end of each transfer.
+- **Server-side redundancy groups** — `server.WithRedundancyGroups` assigns connections to groups by client address; `Session.Group`. The connection of a group that started data transfer last is its active one.
+- **Event queue** — `Server.Enqueue` queues an event per redundancy group, delivers in order to the group's active connection, keeps events while no controlling station is connected and repeats what was not acknowledged when a connection stops or is lost. `server.WithEventQueue` sets the size (default 1024, oldest dropped when full); `Server.Pending` and `Server.Dropped` expose it.
+
+### Changed
+
+- **File transfer ASDUs are no longer raw.** Code that read `ASDU.Raw` for types 120..127 now finds typed `ASDU.Objects` instead. `ASDU.Raw` remains for the private range.
+- A server now turns away a client that no redundancy group allows. With the default configuration (one group for everyone) nothing changes.
+
+### Fixed
+
+- **A command or interrogation could take the activation termination of an earlier request for its own answer.** `Command`, `Deactivate`, `ClockSync`, `TestCommand` and `ResetProcess` returned success, without waiting for the confirmation, when the termination of a previous command to the same object arrived after the new one was sent: a refusal by the station went unnoticed. `Interrogate` and `CounterInterrogate` could likewise return early, with no data, on the termination of the previous run. A termination now only ends the request whose confirmation preceded it. Present in v0.0.1; found by the new end-to-end tests, where both sides answer within microseconds.
+
+### Verification
+
+- **End-to-end tests of the library against itself** (package `e2e`, part of `go test ./...`), 33 tests that execute about 85% of the library:
+  - the client against a go-iec104 station serving the interop fixture, over TCP, TLS and with `k = w = 1`: interrogation, counters and read value by value; all command types, select-before-operate and refusals; file download; STARTDT/STOPDT; the idle test in both directions; reconnect; concurrent sessions; the event queue; redundancy groups on the client and on the server;
+  - a wire matrix of all 67 type identifications in every variant, through both codecs and both protocol machines, also with the IEC 101 field sizes and a non-UTC time zone, and a 40,000-frame run across the sequence number wrap;
+  - state callbacks, logs and metrics of both sides checked against each other; retries; admission (session limit, accept filter, redundancy groups by address); event queue overflow; broadcast; timeouts, cancellation, `ErrBusy` and shutdown under a pending request; handler panics; mutual TLS; unsolicited data amid requests; STOPDT during an event stream; a silent link detected by t1 on both sides.
+
+- Byte-level vectors and fuzzing for the file transfer types.
+- **Qualified against [otfabric/iec104-interop v0.2.0](https://github.com/otfabric/iec104-interop/releases/tag/v0.2.0)**, pinned by digest: lib60870-C v2.4.1, j60870 1.7.2 and, new, wendy512/iec104 v1.0.4 on go-iecp5 v1.2.6 as a third independent implementation. All three pass in both directions.
+- File download against the reference stacks: `GetFile` fetches the files of a lib60870-C station with the content its fixture defines, and the lib60870-C and j60870 clients download from a go-iec104 station and see, ASDU by ASDU, what they see from the lib60870-C file server.
+- The interop suite reads the capabilities of each reference image and skips what an image does not declare: commands with time tag and file transfer for wendy512/iec104, the file server role for j60870.
+- The event queue is tested against all three reference clients: events queued before a connection arrive in order and their acknowledgements empty the queue.
+
+### Still open against lib60870-C
+
+- File transfer in control direction (upload), the file directory and deletion: typed in the codec, no procedure.
+- IEC 60870-5-101 serial link layer: out of scope for this module (see README).
+
+---
+
+## v0.0.1
+
+**Date:** 2026-10-09
+**Previous release:** none
+
+## Summary
+
+First release: an IEC 60870-5-104 controlling station (`client`) and
+controlled station (`server`) in pure Go on a shared protocol machine, with
+an ASDU codec that is independent of the transport. No dependencies outside
+the standard library; Go 1.23 or later.
+
+The library is qualified against two independent implementations, MZ
+Automation lib60870-C v2.4.1 and OpenMUC j60870 1.7.2, as client and as
+server.
+
+The API is not frozen: until v1.0.0 a minor release may change it.
+
+## Changes
+
+### Added
+
+- **`client`** — `Dial`/`Connect`, `StartDT`/`StopDT`/`TestLink`, `Interrogate`, `CounterInterrogate`, `Read`, `ClockSync`, `Command`, `Deactivate`, `TestCommand`, `ResetProcess` and raw `Send`. Every received ASDU is delivered in order to a `Handler`. TLS (IEC 62351-3), custom `Dialer`, connection state handler.
+- **Resilience** — `context.Context` on every call; automatic reconnect with exponential backoff (`WithReconnect`); a start handler that runs on every fresh connection (`WithStartHandler`); automatic retries of the requests that only read (`WithRetry`), never of commands.
+- **Redundancy groups** (`client.Group`) — several connections to one station with exactly one started, automatic failover and manual `Switchover`. This is the protocol's counterpart of a connection pool.
+- **Observability** — silent by default. Structured logging through `FieldLogger`/`ContextLogger` (`NewSlogLogger` returns both), with a formatted fallback for printf-style loggers. Metrics hooks for connections and frames (`Metrics`), request outcomes with duration and retries (`RequestMetrics`) and handler duration (`HandlerMetrics`).
+- **`server`** — `Server` with any number of `Session`s; `Mux` routing by type identification with the refusals of the standard (unknown type, cause, common address); `Confirm`/`Negative`/`Terminate`/`Reject`; `Broadcast` to started sessions; session limit, accept filter, TLS with a bounded handshake.
+- **`asdu`** — model and codec for 59 type identifications: process information in monitor direction (1..21, 30..40), process commands (45..51, 58..64), system information (70, 100..107) and parameters (110..113). CP24Time2a and CP56Time2a, SQ = 0 and SQ = 1, configurable field sizes (`Params`) so that the package serves IEC 60870-5-101 as well. File transfer and private types travel as `ASDU.Raw`.
+- **`apci`** — APDU framing (`Frame`, `Parse`, `ReadFrame`, `AppendBinary`), I/S/U control fields, 15-bit sequence arithmetic and `Params` (`k`, `w`, `t0`..`t3`) with validation.
+- **Protocol machine** (`internal/link`) — send and receive sequence numbers, the `k`/`w` windows, `t1`/`t2`/`t3` supervision, STARTDT/STOPDT/TESTFR in both roles including the "unconfirmed stopped" state, receive flow control that withholds acknowledgements before it stops reading.
+- **Root package `iec104`** — sentinel errors (`ErrClosed`, `ErrNotConnected`, `ErrConnectFailed`, `ErrNotStarted`, `ErrConnectionLost`, `ErrTimeout`, `ErrProtocol`, `ErrBusy`, `ErrInvalidOption`), `NegativeError`, `State`, the `Logger` and `Metrics` interfaces with their extensions, `log/slog` and `log` adapters.
+- **Examples** — `examples/server` and `examples/client`, and runnable examples in the package documentation.
+- **Docs** — README, API.md, ARCHITECTURE.md, INTEROPERABILITY.md, ERRORS.md, OBSERVABILITY.md, SECURITY.md, CONTRIBUTING.md.
+
+### Verification
+
+- **Unit and integration tests** with the race detector: codec vectors from the standard, round trips over every type identification, a scripted peer for every window, timer and protocol violation, client and server against each other including TLS and reconnect. Statement coverage is above 90% in every package.
+- **Fuzzing** of `apci.Parse`/`ReadFrame` and `asdu.Decode` (parse, re-encode, fixed point).
+- **Interop suite** (`interop`, `make interop`, the Interop workflow on every push) against the images of [otfabric/iec104-interop v0.1.0](https://github.com/otfabric/iec104-interop/releases/tag/v0.1.0), pinned by digest:
+
+  | Reference | go-iec104 client → reference server | reference client → go-iec104 server |
+  |-----------|:-----------------------------------:|:-----------------------------------:|
+  | lib60870-C v2.4.1 | pass | pass |
+  | j60870 1.7.2 | pass | pass |
+
+  In the server direction each of 30 scenarios must have the outcome the standard prescribes, and the reference client's complete result must equal what it gets from the server of its own stack.
+
+### Known limitations
+
+- No file transfer state machine and no object model for types 120..127.
+- Redundancy groups are managed on the client side only; a server does not group its sessions. No buffering of events for stopped connections.
+- No connection pool, deliberately: connections of this protocol are sessions, not interchangeable request channels. Use a redundancy group.
+- No IEC 62351-5 application-layer authentication.
+- A client `Handler` cannot call the request methods (`Command`, `Interrogate`, ...) from inside `HandleASDU`; use another goroutine.
+- Verified against lib60870-C and j60870 only; not against certified test equipment or field devices. The interop suite covers the types of the reference fixture; the other type identifications are covered by this repository's codec tests.

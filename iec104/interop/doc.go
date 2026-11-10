@@ -1,0 +1,36 @@
+//go:build interop
+
+// SPDX-License-Identifier: MIT
+
+// Package interop runs black-box tests of go-iec104 against independent
+// IEC 60870-5-104 implementations: MZ Automation lib60870-C, OpenMUC j60870,
+// wendy512/iec104 and, when its image is given, cB-Sigma/iec60870, packaged
+// as container images by otfabric/iec104-interop.
+//
+// Both directions are covered:
+//
+//   - the go-iec104 client against the reference servers (client_test.go)
+//   - the reference clients against a go-iec104 server (server_test.go)
+//   - both with the application-layer security of IEC 62351-5, against the
+//     references that declare it (secure_test.go)
+//   - both with the features of container contract 1.3, for every reference
+//     that declares the role that pairs with the library: interrogation groups,
+//     a quality on bitstrings, file upload, the file directory and redundancy
+//     (client_test.go, server_test.go), and mutual TLS with certificates made
+//     when the test runs (secure_test.go)
+//
+// A test of contract 1.3 asks the image under test and skips a reference that
+// does not declare the feature, without failing under IEC104_REQUIRE_INTEROP:
+// an older image declares none of it, and wendy512 has no TLS station, no
+// upload station and no redundancy station.
+//
+// The images are the only thing shared with iec104-interop: their container
+// contract (commands, JSON documents, exit codes) and the fixture baked into
+// them, which the tests read with "print-fixture". The scenarios, expected
+// values and assertions are owned here. The fixture-driven go-iec104 station
+// the reference clients talk to lives in internal/station, shared with the
+// end-to-end tests of package e2e.
+//
+// Build with -tags=interop. Running needs Docker; see README.md § Interop
+// tests. Editor/gopls: add -tags=interop to buildFlags.
+package interop
