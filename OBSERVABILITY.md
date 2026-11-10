@@ -1,4 +1,4 @@
-# Observability: otfabric/go-iec104
+# Observability: otfabric/go-iec60870-5
 
 Logging and metrics for the client and the server. Both are off by default
 and cost nothing when off.
@@ -12,7 +12,7 @@ and cost nothing when off.
 ## Logging
 
 Silent by default. `client.WithLogger` and `server.WithLogger` accept an
-`iec104.Logger`:
+`iec60870.Logger`:
 
 ```go
 type Logger interface {
@@ -26,7 +26,7 @@ type Logger interface {
 ### Structured logging
 
 The library writes every entry as a constant message plus key-value fields.
-When the logger also implements `iec104.FieldLogger` the fields are passed on
+When the logger also implements `iec60870.FieldLogger` the fields are passed on
 as such; otherwise they are appended to the message as `key=value`.
 
 ```go
@@ -40,11 +40,11 @@ type FieldLogger interface {
 }
 ```
 
-`iec104.NewSlogLogger(handler)` wraps a `log/slog` handler and implements
+`iec60870.NewSlogLogger(handler)` wraps a `log/slog` handler and implements
 `FieldLogger`, so `slog` users get structured output without doing anything:
 
 ```go
-logger := iec104.NewSlogLogger(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+logger := iec60870.NewSlogLogger(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
 	Level: slog.LevelDebug,
 }))
 c, err := client.Dial(ctx, "10.0.0.5:2404", client.WithLogger(logger))
@@ -60,11 +60,11 @@ To add your own fields to everything the library logs, use
 `NewSlogFieldLogger` and `With`:
 
 ```go
-logger := iec104.NewSlogFieldLogger(handler).With("site", "north", "station", 7)
+logger := iec60870.NewSlogFieldLogger(handler).With("site", "north", "station", 7)
 srv, err := server.New(mux, server.WithLogger(logger))
 ```
 
-A printf-style logger (`iec104.NewStdLogger`, or your own four methods)
+A printf-style logger (`iec60870.NewStdLogger`, or your own four methods)
 receives the same entries as one line each:
 
 ```text
@@ -74,7 +74,7 @@ DEBUG iec104 client remote=10.0.0.5:2404: frame sent format=I ns=0 nr=0 len=10
 
 ### Context
 
-When the logger implements `iec104.ContextLogger`, entries that belong to a
+When the logger implements `iec60870.ContextLogger`, entries that belong to a
 request (`request`, `request failed, retrying`) are logged with the context
 the request method was called with, so a handler can add trace and span
 identifiers. `NewSlogLogger` implements it through
@@ -108,8 +108,8 @@ text. Log calls are made synchronously on the protocol path; keep
 implementations non-blocking. Per-frame debug entries are not built at all
 when a `NewSlogLogger` handler is not enabled for debug.
 
-Other adapters: `iec104.NewStdLogger(logger)` for the standard `log` package
-and `iec104.NopLogger()`.
+Other adapters: `iec60870.NewStdLogger(logger)` for the standard `log` package
+and `iec60870.NopLogger()`.
 
 ## Metrics
 

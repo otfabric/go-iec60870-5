@@ -1,14 +1,14 @@
-# Contributing to go-iec104
+# Contributing to go-iec60870-5
 
-Thank you for your interest in contributing to `go-iec104`! This document covers the guidelines for contributing.
+Thank you for your interest in contributing to `go-iec60870-5`! This document covers the guidelines for contributing.
 
 ## Getting Started
 
 1. Fork the repository on GitHub
 2. Clone your fork locally:
    ```sh
-   git clone git@github.com:<your-username>/go-iec104.git
-   cd go-iec104
+   git clone git@github.com:<your-username>/go-iec60870-5.git
+   cd go-iec60870-5
    ```
 3. Create a feature branch:
    ```sh
@@ -41,7 +41,7 @@ make build
 # Run the interop suite against lib60870, OpenMUC j60870 and wendy512/iec104 (needs Docker)
 make interop
 
-# Against the latest published go-iec104 (the Self-interop workflow, run by hand)
+# Against the latest published go-iec60870-5 (the Self-interop workflow, run by hand)
 IEC104_INTEROP_ADAPTERS=otfabric IEC104_INTEROP_OTFABRIC_IMAGE=ghcr.io/otfabric/iec104-interop-otfabric:latest make interop
 ```
 

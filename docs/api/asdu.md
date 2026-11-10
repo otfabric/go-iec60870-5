@@ -1493,33 +1493,10 @@ Address returns the information object address.
 ### type Timestamp
 
 ```go
-type Timestamp struct {
-	time.Time
-
-	// Invalid is the IV flag: the time is not reliable.
-	Invalid bool
-	// Substituted is the GEN flag: the time was not taken at the source of
-	// the information but added by intermediate equipment.
-	Substituted bool
-	// SummerTime is the SU flag (CP56Time2a only): the time is daylight
-	// saving time.
-	SummerTime bool
-	// NoWeekday reports a CP56Time2a whose day-of-week field is 0. The
-	// field ranges 1..7 (IEC 60870-5-4, CP56Time2a); controlling and
-	// controlled stations that do not use it send 0. When it is set the
-	// encoder writes 0 again instead of the day of the week of Time, so a
-	// time tag that is passed on or mirrored keeps the octets it came with.
-	NoWeekday bool
-}
+type Timestamp = cp.Timestamp
 ```
 
-Timestamp is a time tag: CP56Time2a (a full date and time) or CP24Time2a (minute, second and millisecond only), depending on the type identification.
-
-The wire format carries no time zone; times are converted to and from [Params.Location](#func-params-location). A CP56Time2a year is two digits: 70..99 decode as 1970..1999 and 0..69 as 2000..2069.
-
-A CP24Time2a tag decodes onto 0001-01-01 00:mm:ss.mmm: only the minute, second and nanosecond of Time are meaningful, and the receiver has to supply the hour and date. On encode only those fields are used.
-
-A zero Time under a type identification that requires a CP56Time2a is encoded as 2000-01-01 with the invalid flag set. A received CP56Time2a with a field out of range, or a date that does not exist, decodes to the zero Time with Invalid set.
+Timestamp is a time tag: CP56Time2a (a full date and time) or CP24Time2a (minute, second and millisecond only), depending on the type identification. It is [cp.Timestamp](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/cp#Timestamp); see there for the encoding rules. Times are converted to and from [Params.Location](#func-params-location).
 
 #### func At
 

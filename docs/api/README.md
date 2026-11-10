@@ -2,13 +2,21 @@
 
 # API reference
 
-Generated from the source of `github.com/otfabric/go-iec104` with `docsync api`; the doc comments are the documentation. The guides around it explain how the pieces fit.
+Generated from the source of `github.com/otfabric/go-iec60870-5` with `docsync api`; the doc comments are the documentation. The guides around it explain how the pieces fit.
 
 | Package | Synopsis |
 |---|---|
-| [github.com/otfabric/go-iec104](go-iec104.md) | Package iec104 is the module root of a pure Go implementation of IEC 60870-5-104, the TCP/IP telecontrol protocol used between control centres and substations, RTUs and generation assets. |
-| [github.com/otfabric/go-iec60870-5/iec104/apci](apci.md) | Package apci implements the IEC 60870-5-104 Application Protocol Control Information: APDU framing, the I/S/U control field formats, 15-bit sequence number arithmetic and the protocol parameters (k, w, t0..t3). |
+| [github.com/otfabric/go-iec60870-5](go-iec60870-5.md) | Package iec60870 is the module root of a pure Go implementation of the IEC 60870-5 telecontrol protocol family. |
 | [github.com/otfabric/go-iec60870-5/asdu](asdu.md) | Package asdu implements the Application Service Data Unit of the IEC 60870-5 companion standards: the data unit identifier, the information objects and elements of IEC 60870-5-101 clause 7, and their binary codec. |
-| [github.com/otfabric/go-iec60870-5/iec104/client](client.md) | Package client implements the controlling station (master) of IEC 60870-5-104. |
+| [github.com/otfabric/go-iec60870-5/cp](cp.md) | Package cp encodes and decodes the binary time tags of IEC 60870-5-4 (subclause 6.8): CP16Time2a (elapsed milliseconds), CP24Time2a (minute, second, millisecond), CP32Time2a (adds the hour) and CP56Time2a (a full date and time). |
+| [github.com/otfabric/go-iec60870-5/ft12](ft12.md) | Package ft12 encodes and decodes the FT 1.2 frame format of IEC 60870-5-1 (subclause 6.2.4.2), the serial framing shared by IEC 60870-5-101, -102 and -103: |
+| [github.com/otfabric/go-iec60870-5/iec101](iec101.md) | Package iec101 holds what the controlling and the controlled station of IEC 60870-5-101 share: the system parameters, the link State and the sentinel errors. |
+| [github.com/otfabric/go-iec60870-5/iec101/client](iec101-client.md) | Package client is the controlling station of IEC 60870-5-101: it brings up the link, polls the controlled station (unbalanced transmission) or exchanges messages with it (balanced transmission), runs requests (interrogation, counter interrogation, read, commands, clock synchronization, test, reset process, delay acquisition) and delivers monitor-direction ASDUs to a handler. |
+| [github.com/otfabric/go-iec60870-5/iec101/server](iec101-server.md) | Package server is the controlled station of IEC 60870-5-101: it answers the link procedures of the controlling station, hands control-direction ASDUs to a Handler and transmits monitor-direction ASDUs: as class 1 or class 2 data when polled (unbalanced transmission), or on its own initiative (balanced transmission). |
+| [github.com/otfabric/go-iec60870-5/iec104](iec104.md) |  |
+| [github.com/otfabric/go-iec60870-5/iec104/apci](iec104-apci.md) | Package apci implements the IEC 60870-5-104 Application Protocol Control Information: APDU framing, the I/S/U control field formats, 15-bit sequence number arithmetic and the protocol parameters (k, w, t0..t3). |
+| [github.com/otfabric/go-iec60870-5/iec104/client](iec104-client.md) | Package client implements the controlling station (master) of IEC 60870-5-104. |
+| [github.com/otfabric/go-iec60870-5/iec104/server](iec104-server.md) | Package server implements the controlled station (outstation, slave) of IEC 60870-5-104. |
+| [github.com/otfabric/go-iec60870-5/link](link.md) | Package link implements the link transmission procedures of IEC 60870-5-2 over FT 1.2 frames (package ft12): the control field, unbalanced transmission with a Primary (controlling) station polling one or more Secondary (controlled) stations, and Balanced transmission between two combined stations. |
 | [github.com/otfabric/go-iec60870-5/sec](sec.md) | Package sec is the application-layer security of IEC 60870-5-104: the A-Profile of IEC 62351-5:2023 as IEC TS 60870-5-7:2025 maps it onto IEC 60870-5-101 and -104. |
-| [github.com/otfabric/go-iec60870-5/iec104/server](server.md) | Package server implements the controlled station (outstation, slave) of IEC 60870-5-104. |
+| [github.com/otfabric/go-iec60870-5/telecontrol](telecontrol.md) | Package telecontrol holds the application procedures that IEC 60870-5-101 and IEC 60870-5-104 share (IEC 60870-5-5 as profiled by the two companion standards): how a controlling station recognises the answers to its requests, and how it runs the request kinds that are answered with a confirmation (commands, clock synchronization), with data and a termination (interrogation, counter interrogation) or with the data itself (read). |

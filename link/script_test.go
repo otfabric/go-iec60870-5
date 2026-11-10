@@ -151,9 +151,9 @@ func TestSecondaryOddMessages(t *testing.T) {
 		prim := func(fn byte, fcb bool, kind ft12.Kind) ft12.Frame {
 			return ft12.Frame{Kind: kind, Addr: 1, Control: byte(PrimaryControl(fn, fcb, fcvRequired(fn), false)), Data: []byte{}}
 		}
-		send(ft12.Frame{Kind: ft12.KindSingle})                     // ignored
-		send(fixed(FuncAck, 1))                                     // a secondary frame: ignored (or an orphan response)
-		send(prim(FuncRequestStatus, false, ft12.KindFixed))        // to address 1
+		send(ft12.Frame{Kind: ft12.KindSingle})              // ignored
+		send(fixed(FuncAck, 1))                              // a secondary frame: ignored (or an orphan response)
+		send(prim(FuncRequestStatus, false, ft12.KindFixed)) // to address 1
 		expect(FuncStatus)
 		send(prim(13, false, ft12.KindFixed)) // undefined function
 		expect(FuncNotImplemented)

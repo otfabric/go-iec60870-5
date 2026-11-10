@@ -1,31 +1,37 @@
-# AGENTS.md — go-iec104
+# AGENTS.md — go-iec60870-5
 
 ## What this is
 
-Pure Go IEC 60870-5-104 client and server with no dependencies outside the standard library: APCI protocol machine, ASDU codec, file transfer, redundancy groups, TLS and IEC 62351-5 application-layer security. Profile: **protocol-library**. Nothing is certified; see LIMITATIONS.md.
+Pure Go implementation of the IEC 60870-5 telecontrol family with no dependencies outside the standard library. IEC 60870-5-104 (carried over from go-iec104 v0.3.0: APCI, ASDU codec, file transfer, redundancy, TLS, IEC 62351-5) and IEC 60870-5-101 (FT 1.2, IEC 60870-5-2 link procedures, unbalanced and balanced stations). IEC 60870-5-103 and -102 are planned (docs/ROADMAP.md). Profile: **protocol-library**. Nothing is certified; see LIMITATIONS.md.
 
 ## Organisation standards
 
-This repository follows **otfabric/engineering policy 1.2**, profile **protocol-library** (`.otfabric/policy.yaml`, mode `enforce`). Organisation skills: `otfabric` Claude Code plugin. Where this file and the organisation standards disagree, this file wins here — say so in your report.
+This repository follows **otfabric/engineering policy 1.4**, profile **protocol-library** (`.otfabric/policy.yaml`, mode `enforce`). Organisation skills: `otfabric` Claude Code plugin. Where this file and the organisation standards disagree, this file wins here — say so in your report.
 
 ## Where the truth lives
 
 | Question | Source |
 |---|---|
-| What is implemented, clause by clause; verification status | INTEROPERABILITY.md |
-| Packages, goroutines, protocol machine | ARCHITECTURE.md |
-| Scope not implemented, known deviations | LIMITATIONS.md |
-| Application-layer security | SECURITY.md |
+| Status per companion standard and evidence | docs/FEATURE-STATUS.md |
+| Standards, editions, which texts we hold | docs/STANDARDS.md |
+| Requirements and the tests that trace them | docs/REQUIREMENTS.md |
+| Packages, layering, import rules | ARCHITECTURE.md |
+| IEC 104 clause by clause, verification | docs/iec104/INTEROPERABILITY.md |
+| IEC 101 clause by clause | INTEROPERABILITY.md |
+| What came from go-iec104, parity | docs/MIGRATION_AUDIT.md, docs/IEC104_PARITY.md |
+| Next phases | docs/ROADMAP.md, PROGRESS.md |
 | Errors | ERRORS.md |
 | Release history | RELEASE.md (`## vX.Y.Z` … `---`) |
 
 ## Hard rules
 
-1. Never lower the go-ci `coverage-min` (90), add lint suppressions, or skip/delete tests to make CI pass.
-2. Never invent protocol semantics; cite the clause.
-3. Interop claims only from passing runs against the pinned images: the digests in the Makefile and `interop/harness.go` stay in step.
-4. The module stays free of dependencies outside the standard library; `interop/cbsigma` is a module of its own. This library stays on v0 or v1.
-5. The code must build and pass on the Go version in go.mod.
+1. Never lower the go-ci `coverage-min` (90) or the per-package floor, add lint suppressions, or skip/delete tests to make CI pass.
+2. Never invent protocol semantics; cite the standard and clause. Where we do not hold the text (docs/STANDARDS.md), say so and mark the behaviour as an interpretation.
+3. Interop claims only from passing runs against pinned independent images. The library is never its own oracle.
+4. The module stays free of dependencies outside the standard library; `iec104/interop/cbsigma` is a module of its own.
+5. Never import github.com/otfabric/go-iec104 and never modify the go-iec104, iec104-interop or iec104ctl repositories from work in this one.
+6. IEC 102 and IEC 103 keep their own ASDU models; share only `cp`, `ft12` and `link`.
+7. The code must build and pass on the Go version in go.mod.
 
 ## Commands
 
@@ -33,12 +39,12 @@ This repository follows **otfabric/engineering policy 1.2**, profile **protocol-
 |---|---|
 | anything | `make check` |
 | a codec | `make fuzz` |
-| interop-relevant behaviour | `make interop` (Docker) |
+| IEC 104 interop-relevant behaviour | `make interop` (Docker) |
 | application-layer security | `make test-cbsigma` (Go 1.26) |
 
 ## Definition of Done
 
-`make check` green; tests for new behaviour including error paths; fuzz target for any new decoder; INTEROPERABILITY.md and API.md updated in the same change; RELEASE.md section for user-visible changes.
+`make check` green; tests for new behaviour including error paths; fuzz target for any new decoder; FEATURE-STATUS, INTEROPERABILITY and API docs updated in the same change (`docsync api` regenerates docs/api); RELEASE.md section for user-visible changes.
 
 ## Git and releases
 

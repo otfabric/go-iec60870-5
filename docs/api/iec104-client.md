@@ -94,7 +94,7 @@ ClockSync sets the clock of the station to t (C\_CS\_NA\_1) and waits for the co
 func (c *Client) Close() error
 ```
 
-Close closes the connection and stops reconnecting. Pending requests fail with [iec104.ErrClosed](https://pkg.go.dev/github.com/otfabric/go-iec104#ErrClosed). When Close returns the [Handler](#type-handler) and the state handler have been called for the last time: a call in progress has returned and none follows. Before that the Handler is given what the connection had received, and acknowledged to the station, up to the moment of the call.
+Close closes the connection and stops reconnecting. Pending requests fail with [iec104.ErrClosed](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#ErrClosed). When Close returns the [Handler](#type-handler) and the state handler have been called for the last time: a call in progress has returned and none follows. Before that the Handler is given what the connection had received, and acknowledged to the station, up to the moment of the call.
 
 Called from the Handler or the state handler, Close cannot wait for that call: it returns at once, the Handler is not called again, and "disconnected" is reported after the call has returned. Close is idempotent; every caller outside a callback returns when the client is closed.
 
@@ -106,7 +106,7 @@ func (c *Client) Command(ctx context.Context, ca asdu.CommonAddr, obj asdu.Infor
 
 Command sends a process command with cause "activation" and waits for the activation confirmation. obj must be one of [asdu.SingleCommand](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#SingleCommand), [asdu.DoubleCommand](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#DoubleCommand), [asdu.StepCommand](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#StepCommand), [asdu.SetpointNormalized](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#SetpointNormalized), [asdu.SetpointScaled](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#SetpointScaled), [asdu.SetpointFloat](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#SetpointFloat) or [asdu.BitstringCommand](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#BitstringCommand). A command whose Time is set is sent as the CP56Time2a variant.
 
-A negative confirmation or an "unknown ..." answer is returned as [\*iec104.NegativeError](https://pkg.go.dev/github.com/otfabric/go-iec104#NegativeError).
+A negative confirmation or an "unknown ..." answer is returned as [\*iec104.NegativeError](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#NegativeError).
 
 For select-before-operate call Command twice: first with Select set, then without. The activation termination some stations send after executing is not awaited; it reaches the [Handler](#type-handler).
 
@@ -118,7 +118,7 @@ func (c *Client) Connect(ctx context.Context) error
 
 Connect establishes the transport connection and, unless disabled with [WithAutoStart](#func-withautostart), starts data transfer. The connection attempt is bounded by ctx and by t0, whichever is shorter.
 
-Connect fails with [iec104.ErrBusy](https://pkg.go.dev/github.com/otfabric/go-iec104#ErrBusy) when the client is already connected or connecting. With [WithReconnect](#func-withreconnect) it only needs to succeed once: the client re-establishes a lost connection by itself.
+Connect fails with [iec104.ErrBusy](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#ErrBusy) when the client is already connected or connecting. With [WithReconnect](#func-withreconnect) it only needs to succeed once: the client re-establishes a lost connection by itself.
 
 #### func (Client) CounterInterrogate
 
@@ -148,9 +148,9 @@ GetFile downloads a file from the controlled station: the file transfer procedur
 
 It selects and calls the file, then calls every section the station announces, checks the length and the checksum of each section and of the file, and acknowledges them. It returns the content once the file is acknowledged.
 
-A station that refuses the file (unknown address or name, file not ready) is reported as [\*iec104.NegativeError](https://pkg.go.dev/github.com/otfabric/go-iec104#NegativeError). A length or checksum that does not match is acknowledged negatively and reported as [iec104.ErrProtocol](https://pkg.go.dev/github.com/otfabric/go-iec104#ErrProtocol).
+A station that refuses the file (unknown address or name, file not ready) is reported as [\*iec104.NegativeError](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#NegativeError). A length or checksum that does not match is acknowledged negatively and reported as [iec104.ErrProtocol](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#ErrProtocol).
 
-The request timeout bounds every wait for the station, not the whole transfer; ctx bounds the transfer. The ASDUs of the transfer are also delivered to the [Handler](#type-handler). Two transfers of the same file at once fail with [iec104.ErrBusy](https://pkg.go.dev/github.com/otfabric/go-iec104#ErrBusy), and a download is never repeated by [WithRetry](#func-withretry).
+The request timeout bounds every wait for the station, not the whole transfer; ctx bounds the transfer. The ASDUs of the transfer are also delivered to the [Handler](#type-handler). Two transfers of the same file at once fail with [iec104.ErrBusy](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#ErrBusy), and a download is never repeated by [WithRetry](#func-withretry).
 
 #### func (Client) Interrogate
 
@@ -172,7 +172,7 @@ func (c *Client) ListFiles(ctx context.Context, ca asdu.CommonAddr, ioa asdu.IOA
 
 ListFiles calls the directory of the controlled station (F\_SC\_NA\_1 with cause "request") and returns its entries (F\_DR\_TA\_1), collected until the entry the station marks as the last one ([asdu.FileLastOfDirectory](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#FileLastOfDirectory)). ioa selects a directory; 0 is the station's default one.
 
-A station without a directory answers with the mirrored call, which is reported as [\*iec104.NegativeError](https://pkg.go.dev/github.com/otfabric/go-iec104#NegativeError).
+A station without a directory answers with the mirrored call, which is reported as [\*iec104.NegativeError](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#NegativeError).
 
 #### func (Client) PutFile
 
@@ -184,7 +184,7 @@ PutFile sends a file to the controlled station: the file transfer procedure in c
 
 It announces the file, answers the station's calls for the file and for each section with the data and its checksum, and returns once the station has acknowledged the file.
 
-A station that refuses the file, or answers a section or the file with a negative acknowledgement, is reported as [\*iec104.NegativeError](https://pkg.go.dev/github.com/otfabric/go-iec104#NegativeError). The request timeout bounds every wait for the station, ctx the transfer as a whole. A transfer is never repeated by [WithRetry](#func-withretry).
+A station that refuses the file, or answers a section or the file with a negative acknowledgement, is reported as [\*iec104.NegativeError](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#NegativeError). The request timeout bounds every wait for the station, ctx the transfer as a whole. A transfer is never repeated by [WithRetry](#func-withretry).
 
 #### func (Client) Read
 
@@ -192,7 +192,7 @@ A station that refuses the file, or answers a section or the file with a negativ
 func (c *Client) Read(ctx context.Context, ca asdu.CommonAddr, ioa asdu.IOA) (*asdu.ASDU, error)
 ```
 
-Read requests the current value of one information object (C\_RD\_NA\_1) and returns the ASDU the station sends with cause "request" for that address. An unknown address is reported as [\*iec104.NegativeError](https://pkg.go.dev/github.com/otfabric/go-iec104#NegativeError).
+Read requests the current value of one information object (C\_RD\_NA\_1) and returns the ASDU the station sends with cause "request" for that address. An unknown address is reported as [\*iec104.NegativeError](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#NegativeError).
 
 #### func (Client) ResetProcess
 
@@ -293,7 +293,7 @@ This is what the protocol offers in place of a connection pool. An IEC 60870-5-1
 
 The group starts data transfer on the first connection that becomes established; when several are, on the one whose address comes first. When the active connection is lost it starts another one and re-establishes the lost one in the background as a standby. A path that returns does not take data transfer back by itself: see [Group.Switchover](#func-group-switchover). Every connection delivers to the same [Handler](#type-handler).
 
-The request methods act on the active connection and fail with [iec104.ErrNotConnected](https://pkg.go.dev/github.com/otfabric/go-iec104#ErrNotConnected) when there is none. A Group is safe for concurrent use.
+The request methods act on the active connection and fail with [iec104.ErrNotConnected](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#ErrNotConnected) when there is none. A Group is safe for concurrent use.
 
 #### func NewGroup
 
@@ -351,7 +351,7 @@ func (g *Group) Connect(ctx context.Context) error
 
 Connect establishes the connections and returns as soon as one of them has data transfer started. The others keep being established in the background, as does every connection that is lost later.
 
-If no connection can be started before ctx ends, Connect returns an error that matches [iec104.ErrConnectFailed](https://pkg.go.dev/github.com/otfabric/go-iec104#ErrConnectFailed); the group keeps trying in the background until it is closed.
+If no connection can be started before ctx ends, Connect returns an error that matches [iec104.ErrConnectFailed](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#ErrConnectFailed); the group keeps trying in the background until it is closed.
 
 #### func (Group) CounterInterrogate
 
@@ -431,7 +431,7 @@ Send transmits one ASDU on the active connection. See [Client.Send](#func-client
 func (g *Group) Switchover(ctx context.Context) error
 ```
 
-Switchover moves data transfer from the active connection to the next established standby: STOPDT on the one, STARTDT on the other. It fails with [iec104.ErrNotConnected](https://pkg.go.dev/github.com/otfabric/go-iec104#ErrNotConnected) when no standby is established, in which case the active connection is left as it is.
+Switchover moves data transfer from the active connection to the next established standby: STOPDT on the one, STARTDT on the other. It fails with [iec104.ErrNotConnected](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#ErrNotConnected) when no standby is established, in which case the active connection is left as it is.
 
 The switch handler has been told of the change when Switchover returns, and so have the state handlers, unless one of them is still busy with an earlier call. Switchover may be called from a handler; the handlers are then told after that handler has returned.
 
@@ -516,7 +516,7 @@ WithHandler sets the receiver of ASDUs. Without one, received ASDUs are only vis
 #### func WithLogger
 
 ```go
-func WithLogger(l iec104.Logger) Option
+func WithLogger(l iec60870.Logger) Option
 ```
 
 WithLogger sets the logger. Nil, the default, disables logging.
@@ -551,7 +551,7 @@ WithParams sets the protocol parameters k, w and t0..t3. Zero K, W, T0, T1 and T
 func WithReconnect(r Reconnect) Option
 ```
 
-WithReconnect enables automatic reconnection: when an established connection is lost, the client re-dials with exponential backoff until it succeeds or is closed. Requests issued while disconnected fail with [iec104.ErrNotConnected](https://pkg.go.dev/github.com/otfabric/go-iec104#ErrNotConnected). Zero fields of r take their defaults.
+WithReconnect enables automatic reconnection: when an established connection is lost, the client re-dials with exponential backoff until it succeeds or is closed. Requests issued while disconnected fail with [iec104.ErrNotConnected](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#ErrNotConnected). Zero fields of r take their defaults.
 
 #### func WithRequestTimeout
 
@@ -573,7 +573,7 @@ Retried: [Client.Interrogate](#func-client-interrogate), [Client.CounterInterrog
 
 Never retried: [Client.Command](#func-client-command), [Client.Deactivate](#func-client-deactivate), [Client.ClockSync](#func-client-clocksync), [Client.ResetProcess](#func-client-resetprocess) and [Client.Send](#func-client-send). A command whose confirmation was lost may already have operated the process, and IEC 60870-5-104 has no way to ask; repeating it is the application's decision.
 
-A request is repeated when the connection was lost or is not established, or when the station did not answer within the request timeout. It is not repeated when the station refused it ([\*iec104.NegativeError](https://pkg.go.dev/github.com/otfabric/go-iec104#NegativeError)), when an identical request is pending or when the caller's context ended. Combine with [WithReconnect](#func-withreconnect): the backoff gives the client time to come back.
+A request is repeated when the connection was lost or is not established, or when the station did not answer within the request timeout. It is not repeated when the station refused it ([\*iec104.NegativeError](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#NegativeError)), when an identical request is pending or when the caller's context ended. Combine with [WithReconnect](#func-withreconnect): the backoff gives the client time to come back.
 
 With retries enabled the request timeout bounds each attempt, also when the caller's context has a deadline; that deadline bounds the whole call.
 
@@ -603,7 +603,7 @@ f runs on its own goroutine and may call any method of the client. ctx is cancel
 func WithStateHandler(f func(state iec104.State, err error)) Option
 ```
 
-WithStateHandler registers a callback for connection state changes. err is the reason when the state is [iec104.StateDisconnected](https://pkg.go.dev/github.com/otfabric/go-iec104#StateDisconnected) or a reconnect attempt failed, nil otherwise. Notifications are delivered one at a time, in order, and each state once: "disconnected" is the last thing a closed client reports.
+WithStateHandler registers a callback for connection state changes. err is the reason when the state is [iec104.StateDisconnected](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#StateDisconnected) or a reconnect attempt failed, nil otherwise. Notifications are delivered one at a time, in order, and each state once: "disconnected" is the last thing a closed client reports.
 
 The callback may call the client, [Client.Close](#func-client-close) included. It should return soon: the next notification waits for it, and so does a [Client.Close](#func-client-close) called from another goroutine.
 

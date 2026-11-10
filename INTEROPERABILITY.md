@@ -1,422 +1,65 @@
-# Interoperability: otfabric/go-iec104
+# Interoperability: otfabric/go-iec60870-5
 
-What the library implements, following the structure of the
-interoperability list in IEC 60870-5-104 clause 9. Use it to compare against
-the interoperability list of the device or control centre on the other side.
+What is implemented per companion standard, and how it was verified. IEC
+60870-5-104, clause by clause with its interop results, is in
+[docs/iec104/INTEROPERABILITY.md](docs/iec104/INTEROPERABILITY.md). This page
+covers IEC 60870-5-101.
 
-Legend: **yes** implemented and tested · **raw** carried as undecoded payload
-(`ASDU.Raw`) · **no** not implemented · **app** the library carries it, the
-behaviour is the application's.
+Evidence levels used below:
 
-## System and network
+- **unit**: codec or procedure tests in this repository
+- **e2e**: this library's client against this library's server (not
+  independent)
+- **independent**: a passing run against a pinned image of
+  otfabric/iec60870-5-interop
 
-| Item | Support |
-|------|---------|
-| Controlling station (master) | yes, `client` |
-| Controlled station (slave) | yes, `server` |
-| Combined station (both directions on one connection) | no; run a client and a server side by side |
-| Transport | TCP, IPv4 and IPv6 |
-| Port | 2404 by default, any |
-| TLS (IEC 62351-3) | yes, standard `crypto/tls`, default port 19998 |
-| IEC 62351-5 application-layer security (IEC TS 60870-5-7) | yes, the A-Profile of the 2023 edition, package `sec`, both roles. See [Application-layer security](#application-layer-security) |
-| Redundant connections (redundancy groups) | yes, both roles. See [Redundancy](#redundancy) |
-
-## Application layer framing
-
-Fixed by IEC 60870-5-104 and the defaults of `asdu.IEC104`:
-
-| Field | Size |
-|-------|------|
-| Cause of transmission | 2 octets (with originator address) |
-| Common address of ASDU | 2 octets |
-| Information object address | 3 octets |
-| Maximum APDU length | 253 octets (ASDU up to 249) |
-| Time tags | CP56Time2a, UTC by default (`asdu.Params.In` for another zone) |
-
-Other field sizes (1-octet cause, 1-octet common address, 1- or 2-octet
-object address) are supported by the codec for IEC 60870-5-101 use and for
-non-conformant devices (`WithASDUParams`).
-
-Both SQ = 0 (addressed objects) and SQ = 1 (sequence of elements) are
-decoded for every type. Encoding uses SQ = 1 only when `ASDU.Sequence` is set.
-
-## APCI
-
-| Item | Support |
-|------|---------|
-| I, S and U formats | yes |
-| STARTDT, STOPDT, TESTFR | yes, both roles |
-| `k`: maximum unacknowledged I frames sent | yes, 1..32767, default 12 |
-| `w`: latest acknowledgement after I frames received | yes, 1..`k`, default 8 |
-| `t0`: connection establishment | yes, default 30s (client) |
-| `t1`: send or test APDU timeout | yes, default 15s |
-| `t2`: acknowledgement timeout, `t2 < t1` | yes, default 10s |
-| `t3`: idle test timeout | yes, default 20s, 0 disables |
-| Sequence number validation | yes; a violation closes the connection |
-
-The parameters are not negotiated: configure both sides alike. See
-[ARCHITECTURE.md](ARCHITECTURE.md#conformance-decisions) for the behaviour in
-each exceptional situation.
-
-## Type identifications
-
-### Process information in monitor direction
-
-| Type | ID | Description | Support | Go type |
-|------|----|-------------|---------|---------|
-| `M_SP_NA_1` | 1 | Single-point information | yes | `SinglePoint` |
-| `M_SP_TA_1` | 2 | … with CP24Time2a ¹ | yes | `SinglePoint` |
-| `M_DP_NA_1` | 3 | Double-point information | yes | `DoublePoint` |
-| `M_DP_TA_1` | 4 | … with CP24Time2a ¹ | yes | `DoublePoint` |
-| `M_ST_NA_1` | 5 | Step position information | yes | `StepPosition` |
-| `M_ST_TA_1` | 6 | … with CP24Time2a ¹ | yes | `StepPosition` |
-| `M_BO_NA_1` | 7 | Bitstring of 32 bit | yes | `Bitstring32` |
-| `M_BO_TA_1` | 8 | … with CP24Time2a ¹ | yes | `Bitstring32` |
-| `M_ME_NA_1` | 9 | Measured value, normalized | yes | `MeasuredNormalized` |
-| `M_ME_TA_1` | 10 | … with CP24Time2a ¹ | yes | `MeasuredNormalized` |
-| `M_ME_NB_1` | 11 | Measured value, scaled | yes | `MeasuredScaled` |
-| `M_ME_TB_1` | 12 | … with CP24Time2a ¹ | yes | `MeasuredScaled` |
-| `M_ME_NC_1` | 13 | Measured value, short floating point | yes | `MeasuredFloat` |
-| `M_ME_TC_1` | 14 | … with CP24Time2a ¹ | yes | `MeasuredFloat` |
-| `M_IT_NA_1` | 15 | Integrated totals | yes | `IntegratedTotal` |
-| `M_IT_TA_1` | 16 | … with CP24Time2a ¹ | yes | `IntegratedTotal` |
-| `M_EP_TA_1` | 17 | Event of protection equipment with CP24Time2a ¹ | yes | `ProtectionEvent` |
-| `M_EP_TB_1` | 18 | Packed start events of protection equipment with CP24Time2a ¹ | yes | `ProtectionStart` |
-| `M_EP_TC_1` | 19 | Packed output circuit information with CP24Time2a ¹ | yes | `ProtectionOutput` |
-| `M_PS_NA_1` | 20 | Packed single-point information with status change detection | yes | `PackedSinglePoints` |
-| `M_ME_ND_1` | 21 | Measured value, normalized without quality descriptor | yes | `MeasuredNormalized` |
-| `M_SP_TB_1` | 30 | Single-point information with CP56Time2a | yes | `SinglePoint` |
-| `M_DP_TB_1` | 31 | Double-point information with CP56Time2a | yes | `DoublePoint` |
-| `M_ST_TB_1` | 32 | Step position information with CP56Time2a | yes | `StepPosition` |
-| `M_BO_TB_1` | 33 | Bitstring of 32 bit with CP56Time2a | yes | `Bitstring32` |
-| `M_ME_TD_1` | 34 | Measured value, normalized with CP56Time2a | yes | `MeasuredNormalized` |
-| `M_ME_TE_1` | 35 | Measured value, scaled with CP56Time2a | yes | `MeasuredScaled` |
-| `M_ME_TF_1` | 36 | Measured value, short floating point with CP56Time2a | yes | `MeasuredFloat` |
-| `M_IT_TB_1` | 37 | Integrated totals with CP56Time2a | yes | `IntegratedTotal` |
-| `M_EP_TD_1` | 38 | Event of protection equipment with CP56Time2a | yes | `ProtectionEvent` |
-| `M_EP_TE_1` | 39 | Packed start events of protection equipment with CP56Time2a | yes | `ProtectionStart` |
-| `M_EP_TF_1` | 40 | Packed output circuit information with CP56Time2a | yes | `ProtectionOutput` |
-
-¹ Defined by IEC 60870-5-101 and not part of the IEC 60870-5-104 subset.
-Supported by the codec so that the `asdu` package is complete for
-IEC 60870-5-101 and tolerant of devices that send them over TCP. `asdu.New`
-never selects these types; set `ASDU.Type` explicitly.
-
-### Process information in control direction
-
-| Type | ID | Description | Support | Go type |
-|------|----|-------------|---------|---------|
-| `C_SC_NA_1` | 45 | Single command | yes | `SingleCommand` |
-| `C_DC_NA_1` | 46 | Double command | yes | `DoubleCommand` |
-| `C_RC_NA_1` | 47 | Regulating step command | yes | `StepCommand` |
-| `C_SE_NA_1` | 48 | Set-point command, normalized | yes | `SetpointNormalized` |
-| `C_SE_NB_1` | 49 | Set-point command, scaled | yes | `SetpointScaled` |
-| `C_SE_NC_1` | 50 | Set-point command, short floating point | yes | `SetpointFloat` |
-| `C_BO_NA_1` | 51 | Bitstring of 32 bit | yes | `BitstringCommand` |
-| `C_SC_TA_1` | 58 | Single command with CP56Time2a | yes | `SingleCommand` |
-| `C_DC_TA_1` | 59 | Double command with CP56Time2a | yes | `DoubleCommand` |
-| `C_RC_TA_1` | 60 | Regulating step command with CP56Time2a | yes | `StepCommand` |
-| `C_SE_TA_1` | 61 | Set-point command, normalized with CP56Time2a | yes | `SetpointNormalized` |
-| `C_SE_TB_1` | 62 | Set-point command, scaled with CP56Time2a | yes | `SetpointScaled` |
-| `C_SE_TC_1` | 63 | Set-point command, short floating point with CP56Time2a | yes | `SetpointFloat` |
-| `C_BO_TA_1` | 64 | Bitstring of 32 bit with CP56Time2a | yes | `BitstringCommand` |
-
-### System information
-
-| Type | ID | Description | Support | Go type |
-|------|----|-------------|---------|---------|
-| `M_EI_NA_1` | 70 | End of initialization | yes | `EndOfInitialization` |
-| `C_IC_NA_1` | 100 | Interrogation command | yes | `Interrogation` |
-| `C_CI_NA_1` | 101 | Counter interrogation command | yes | `CounterInterrogation` |
-| `C_RD_NA_1` | 102 | Read command | yes | `Read` |
-| `C_CS_NA_1` | 103 | Clock synchronization command | yes | `ClockSync` |
-| `C_TS_NA_1` | 104 | Test command ¹ | yes | `TestCommand` |
-| `C_RP_NA_1` | 105 | Reset process command | yes | `ResetProcess` |
-| `C_CD_NA_1` | 106 | Delay acquisition command ¹ | yes | `DelayAcquisition` |
-| `C_TS_TA_1` | 107 | Test command with CP56Time2a | yes | `TestCommand` |
-
-### Parameters in control direction
-
-| Type | ID | Description | Support | Go type |
-|------|----|-------------|---------|---------|
-| `P_ME_NA_1` | 110 | Parameter of measured value, normalized | yes | `ParameterNormalized` |
-| `P_ME_NB_1` | 111 | Parameter of measured value, scaled | yes | `ParameterScaled` |
-| `P_ME_NC_1` | 112 | Parameter of measured value, short floating point | yes | `ParameterFloat` |
-| `P_AC_NA_1` | 113 | Parameter activation | yes | `ParameterActivation` |
-
-### File transfer
-
-| Type | ID | Description | Support | Go type |
-|------|----|-------------|---------|---------|
-| `F_FR_NA_1` | 120 | File ready | yes | `FileReady` |
-| `F_SR_NA_1` | 121 | Section ready | yes | `SectionReady` |
-| `F_SC_NA_1` | 122 | Call directory, select file, call file, call section | yes | `FileCall` |
-| `F_LS_NA_1` | 123 | Last section, last segment | yes | `FileLastSegment` |
-| `F_AF_NA_1` | 124 | Ack file, ack section | yes | `FileAck` |
-| `F_SG_NA_1` | 125 | Segment | yes | `FileSegment` |
-| `F_DR_TA_1` | 126 | Directory | yes | `FileDirectoryEntry` |
-| `F_SC_NB_1` | 127 | Query log, request archive file | yes | `FileQueryLog` |
-
-The types are encoded and decoded. The library runs the transfer procedure
-for download, upload and the directory (`Client.GetFile`, `PutFile`,
-`ListFiles`; `server.FileServer`); file deletion, the spontaneous directory
-and the query log are the application's. See
-[Basic application functions](#basic-application-functions).
-
-### Security (IEC TS 60870-5-7:2025)
-
-| Type | ID | Description | Support |
-|------|----|-------------|---------|
-| `S_AQ_NA_1` | 81 | Association request | yes, `sec` |
-| `S_AP_NA_1` | 82 | Association response | yes, `sec` |
-| `S_UH_NA_1` | 83 | Update key change request | yes, `sec` |
-| `S_UP_NA_1` | 84 | Update key change response | yes, `sec` |
-| `S_SI_NA_1` | 85 | Session initiation request | yes, `sec` |
-| `S_SQ_NA_1` | 86 | Session request | yes, `sec` |
-| `S_SP_NA_1` | 87 | Session response | yes, `sec` |
-| `S_KH_NA_1` | 88 | Session key change request | yes, `sec` |
-| `S_KP_NA_1` | 89 | Session key change response | yes, `sec` |
-| `S_SD_NA_1` | 91 | Secure data | yes, `sec` |
-
-With `WithSecurity` the library creates and checks them; without it they
-are **raw**, like any type `asdu` does not decode.
-
-### Private range
-
-Types 128..255 are **raw** in both directions.
-
-## Causes of transmission
-
-All causes 1..17, 20..41 and 44..47 are defined (`asdu.Cause…`) and carried
-unchanged; 14..17 are those of IEC TS 60870-5-7 (data protection, session
-key, association, operation not authorized). The originator address is supported (`client.WithOriginator`).
-The test bit and the P/N bit are exposed as `ASDU.Test` and `ASDU.Negative`.
-
-## Basic application functions
-
-| Function | Client | Server |
-|----------|--------|--------|
-| Station initialization (`M_EI_NA_1`) | received via `Handler` | app: send with `Session.Send` |
-| Cyclic, background, spontaneous transmission | received via `Handler` | `Server.Enqueue` (queued per redundancy group, acknowledged delivery), `Session.Send`, `Server.Broadcast` |
-| Station interrogation, global and groups 1..16 | `Interrogate` | app, via `Mux` |
-| Counter interrogation, general and groups 1..4, freeze/reset qualifiers | `CounterInterrogate` | app, via `Mux` |
-| Read procedure | `Read` | app, via `Mux` |
-| Clock synchronization | `ClockSync` | app, via `Mux` |
-| Command transmission, direct | `Command` | app, via `Mux` |
-| Command transmission, select and execute | `Command` with `Select`, then without | app: the handler keeps the select state |
-| Command deactivation | `Deactivate` | app, via `Mux` |
-| Commands with time tag | set `Time` on the command | app: the handler checks the age |
-| Test procedure (`C_TS_TA_1`) | `TestCommand` | app, via `Mux` |
-| Reset process | `ResetProcess` | app, via `Mux` |
-| Parameter loading and activation | `Send` | app, via `Mux` |
-| File transfer, monitor direction (download) | `GetFile` | `FileServer`, via `Mux` |
-| File transfer, control direction (upload) | `PutFile` | `FileServer` with a `FileSink`, via `Mux` |
-| File directory | `ListFiles` | `FileServer.Directory`, via `Mux` |
-| File deletion, spontaneous directory, query log | app: typed ASDUs with `Send` | app: typed ASDUs via `Mux` |
-| Rejecting unknown type / cause / common address | reported as `NegativeError` | yes: `Mux` and `WithCommonAddrs` |
-| Rejecting unknown information object address | reported as `NegativeError` | app: `Session.Reject(req, asdu.CauseUnknownIOA)` |
-
-"app, via `Mux`" means the library routes the request to the handler
-registered for the type and provides `Confirm`, `Negative`, `Terminate` and
-`Reject` for the answers; what the station does is the handler's code.
-
-## Redundancy
-
-IEC 60870-5-104 edition 2, clause 10 ("Redundant connections"), lets a
-controlled station serve several connections of one redundancy group, of
-which exactly one is started. Closing the connection that is taken over, below,
-is how go-iec104 keeps it at one; it is not taken from the text of clause 10.
-
-- **Server**: `WithRedundancyGroups` assigns each connection to a group by
-  the client's address. Each connection has its own STARTDT/STOPDT state; the
-  connection of a group that started data transfer last is its active one, and
-  the one active before is closed, so that exactly one is started and nothing
-  more is sent on the other. Without that option there is one `default` group
-  for everyone, which is a queue and not a redundancy group: every client is
-  an independent session, and a STARTDT closes nothing, so with two clients
-  started the one that is not active still gets answers, and queued events when
-  the active one stops. `Server.Enqueue` delivers events to
-  the active connection of every group, buffers them while there is none
-  and repeats what was not acknowledged after a switchover.
-- **Client**: `client.Group` manages a redundancy group: every connection
-  established, exactly one started, the standbys supervised by test frames,
-  automatic failover when the active one is lost and manual `Switchover`.
-  A single `Client` with `WithAutoStart(false)` is the building block. A
-  standby that loses its connection comes back in STOPDT, so it does not take
-  over from the active one (`TestReconnectingStandbyDoesNotEvictActive`,
-  `TestFailoverThenRejoinDoesNotEvict`). A plain `Client` that reconnects with
-  auto-start sends STARTDT and takes over again, in a declared server group.
-
-## Application-layer security
-
-The A-Profile of IEC 62351-5:2023 as IEC TS 60870-5-7:2025 applies it to
-IEC 60870-5-104, in package `sec` (`client.WithSecurity`,
-`server.WithSecurity`). See [SECURITY.md](SECURITY.md#application-layer-security-iec-62351-5)
-for what it protects and where it came from.
-
-| Item | Support |
-|------|---------|
-| Station Association, Session Key Change, Secure Data | yes, both roles |
-| Session Initiation Request (controlled station asks for keys) | yes |
-| Segmentation of security messages (ASC octet) | yes, both directions |
-| Protocol version | 1.0 |
-| Key agreement | ECDH on secp256r1 or Curve25519 |
-| Key derivation | HKDF with the hash of the MAC algorithm |
-| Key wrap (KWA) | 2, AES-256 key wrap (RFC 3394) |
-| MAC algorithms (MAL) | 3 HMAC-SHA-256/8, 4 HMAC-SHA-256/16 (default), 7 and 8 HMAC-SHA3-256/8 and /16 |
-| Data protection (DPA) | the MAC algorithms above, 11 AES-256-GCM |
-| Certificates | X.509, self-signed and pinned, or issued by a trusted Central Authority, optionally restricted by subject |
-| Role-based access control | the seven roles of IEC TS 60870-5-7, configured per association; refusals with cause 17 |
-| Several controlling stations at one station | yes, one association per AIM, made on first contact or refused |
-| Security statistics and events | yes, all counters and mnemonics |
-| Broadcast session key (IEC 60870-5-101) | no |
-| secp256k1, X448, brainpool curves; BLAKE2s | no |
-| IEC 62351-8 access tokens, certificate revocation lists | no |
-
-Behaviour that goes beyond what cB-Sigma/iec60870 v0.3.0 does, and stays
-compatible with it:
-
-- The controlling station changes the session keys whenever a connection
-  starts, and holds its data until the change is complete. The controlled
-  station holds what it sends until new keys arrive, and accepts data under
-  the previous keys meanwhile, from a controlling station that kept them;
-  it asks with a Session Initiation Request after a third of
-  `Settings.RequestTimeout` if the controlling station has not started a
-  change by then.
-- A Session Initiation Request that crosses the controlling station's
-  Session Request is accepted, and the Session Response is verified in
-  both of the forms the crossing allows.
-- A Session Key Change that fails makes the next attempt a Station
-  Association; failed attempts are repeated with a backoff from
-  `Settings.ReplyTimeout` doubling to one minute.
-- A Central Authority certificate is checked by its signature on the
-  station certificate only, which accepts the authority certificates of
-  cB-Sigma that carry no basic constraints.
-
-Where the two differ in what a controlled station permits:
-
-- The acknowledgement of a download (F_AF_NA_1 from the controlling
-  station) needs the file read permission, so a VIEWER downloads a file to
-  its end. cB-Sigma asks for file write, and refuses a viewer's
-  acknowledgement with cause 17 after sending the whole file (seen in the
-  container suite); a go-iec104 client then reports the refusal.
-
-## Known deviations
-
-- The client's activation confirmation wait does not extend to the
-  activation termination of a command; the termination reaches the `Handler`.
-- A received ASDU that cannot be decoded is dropped without a negative
-  answer.
-
-## Verification status
-
-The application-layer security is checked against octet strings produced by
-the encoder of cB-Sigma/iec60870 v0.3.0 in the unit tests, and by
-differential tests that run complete associations between the two
-implementations in memory: both roles, every data protection algorithm,
-segmented messages, renewal, crossing requests and Curve25519 certificates
-issued by an authority.
-
-The container suite below runs it against cB-Sigma too, through the
-security flags of the iec104-interop container contract 1.2: go-iec104's
-client against the cB-Sigma station and the cB-Sigma client against a
-go-iec104 station, with certificates issued by an authority and pinned
-self-signed ones, secp256r1 and X25519, HMAC-SHA-256 and AES-256-GCM, other
-association identities, role-based access control (a viewer's command
-refused with cause 17, an operator's executed, a viewer's download from a
-go-iec104 station completed), a station that refuses an
-AIM, untrusted certificates on either side and a client without security.
-Where a reference station can do the same, the cB-Sigma client's complete
-result must not tell go-iec104 from it.
-
-Besides its own tests the library is run against four independent
-implementations, as client and as server, on every push. The reference
-builds are the images of
-[otfabric/iec104-interop v0.5.0](https://github.com/otfabric/iec104-interop/releases/tag/v0.5.0),
-pinned by digest:
-
-| Reference | Version | go-iec104 client → reference server | reference client → go-iec104 server |
-|-----------|---------|-------------------------------------|-------------------------------------|
-| MZ Automation lib60870-C | v2.4.1 | pass | pass |
-| OpenMUC j60870 | 1.8.0 | pass ¹ ⁴ | pass ⁴ |
-| wendy512/iec104 on go-iecp5 | v1.0.4 on v1.2.6 | pass ² | pass ² |
-| cB-Sigma/iec60870 | v0.3.0 | pass ³ | pass ³ |
-
-¹ without file download: the j60870 reference has no file server.
-² without commands with time tag and without file transfer: go-iecp5 drops
-those types on reception. The suite reads what each reference declares and
-skips what it lacks.
-³ and the IEC 62351-5 cases above, in both directions.
-⁴ without read: j60870 1.8.0 cannot decode a read command (C_RD_NA_1) and
-closes the connection on one, as a station on any read and as a controlling
-station on a refused read. The suite treats it as a known bug and fails when
-it no longer reproduces; a fix is proposed upstream in
-[gythialy/j60870#75](https://github.com/gythialy/j60870/pull/75).
-
-The suite (`make interop`, package `interop`) covers the types of the
-reference fixture: `M_SP`, `M_DP`, `M_ST`, `M_BO`, `M_ME_NA/NB/NC`, `M_IT`
-and their CP56Time2a variants; `C_SC`, `C_DC`, `C_RC`, `C_SE_NA/NB/NC` with
-and without time tag; `C_IC`, `C_CI`, `C_RD`, `C_CS`, `C_TS_TA`; the negative
-answers; STARTDT/STOPDT; the `k`/`w` windows at 1; `t3` in both directions.
-The other type identifications are covered by this repository's codec tests
+No IEC 101 behaviour has independent evidence yet: the adapters
+(lib60870-C, cB-Sigma, digitalpetri) are being built in
+otfabric/iec60870-5-interop. Until then every row below is unit or e2e
 only.
 
-File download is verified in both roles: `GetFile` fetches the files of the
-lib60870-C station with the content its fixture defines, and the lib60870-C
-and j60870 clients download from `FileServer`, whose answers they cannot
-tell, ASDU by ASDU, from those of the lib60870-C file server.
+We do not hold the text of IEC 60870-5-1, -2 or -101; the behaviour below
+follows the extracts of IEC 60870-5-1 and -2 quoted in IEC 60870-5-103
+clause 6 (GOST R IEC 60870-5-103-2005, an identical translation) and the
+documented behaviour of lib60870-C. See [docs/STANDARDS.md](docs/STANDARDS.md).
 
-Container contract 1.3 of iec104-interop adds interrogation groups, a quality
-on `M_BO_NA_1`, mutual TLS (IEC 62351-3), file upload, the file directory and
-redundancy groups (IEC 60870-5-104 edition 2, clause 10). The images pinned above
-(v0.5.0) offer it wherever their upstream supports it. The suite reads the
-capabilities from the image under test and runs in both directions:
+## Physical and link layer
 
-| Feature | go-iec104 client → reference server | reference client → go-iec104 server |
-|---------|-------------------------------------|-------------------------------------|
-| Interrogation groups | `TestClientGroups`: lib60870-C, j60870, wendy512, cB-Sigma | `TestServerGroups`: all four |
-| Quality on `M_BO_NA_1` | `TestClientBitstringQuality`: all four (j60870 without read) | `TestServerBitstringQuality`: all four |
-| Mutual TLS, with certificates made when the test runs, and the wrong authority, no TLS on either side refused | `TestTLSClient`: lib60870-C, j60870, cB-Sigma | `TestTLSServer`: all four |
-| File upload, read back, refusals | `TestClientUpload`: lib60870-C, j60870, cB-Sigma | `TestServerUpload`: all four |
-| File directory | `TestClientDirectory`: all four | `TestServerDirectory`: all four |
-| Redundancy: STOPDT, takeover, queued event | `TestClientRedundancy`: lib60870-C, j60870, cB-Sigma | `TestServerRedundancy`: all four |
+| Item | Implemented | Evidence |
+|---|---|---|
+| FT 1.2 single character E5h, fixed and variable frames | yes | unit (`ft12`), fuzz |
+| Checksum, start/stop, double length check | yes | unit |
+| Resynchronization after noise or a broken frame | yes | unit (`TestDecoderResync`) |
+| Line idle interval / inter-character gap detection | **no** | - |
+| Link address size 0, 1, 2 octets | yes (0 only balanced) | unit, e2e (1 and 2), unit balanced 0 |
+| Unbalanced: request status of link, reset of remote link, reset of user process | yes | unit, e2e |
+| Unbalanced: send/confirm, send/no reply (broadcast), request class 1/2 | yes | unit, e2e |
+| ACD-driven class 1 polling, DFC holds back user data | yes | unit, e2e |
+| FCB/FCV, repetition answered with the stored response | yes | unit (`TestRepetitionNotProcessedTwice`) |
+| Single character E5h as ACK / no-data NACK (configurable) | yes | unit |
+| NACK (1), not functioning (14), not implemented (15) | yes | unit |
+| Balanced: both directions initialized, test function for link, DIR bit | yes | unit, e2e |
+| Multiple secondaries on one line (multidrop) polled by one client | link layer yes, `iec101/client` **no** (one link address per client) | unit (address filtering) |
 
-wendy512 on go-iecp5 has no station over TLS, cannot receive a file and cannot
-follow a group of connections; its image says so and the tests skip.
+## Application layer
 
-### Recorded traffic
+ASDU field sizes: cause of transmission 1 or 2 octets, common address 1 or
+2, information object address 1, 2 or 3 (`asdu.Params`); every type
+identification of the `asdu` package (IEC 104's 67 plus the 101-only
+C_TS_NA_1 and C_CD_NA_1) encodes under any of them.
 
-Besides the live suite, the client and the server are tested against
-recorded traffic of other implementations
-([testdata/captures](testdata/captures/README.md)): CERT.LV's
-spicy-iec104 traces, the University of Western Macedonia IEC 104 dataset
-(QTester104 against IEC TestServer, with attacks) and Wireshark's synthetic
-coverage capture. Evidence levels: one recording of unknown origin on
-Ethernet (C), software testbeds (D), generated (E). None is traffic of a
-device that can be identified as physical.
-
-- Every APDU is decoded and encoded again: the recorded implementations
-  byte for byte. The decoded fields agree with Wireshark 4.6.9 and with
-  CERT.LV's Zeek analyzer; the differences are classified in
-  `internal/capture/oracle_test.go` (ASDUs whose length does not match their
-  type, which go-iec104 refuses whole; types it carries raw; Wireshark not
-  dissecting a reused port).
-- `client/capture_test.go` plays every recorded station against the client,
-  through `Send` and the request methods, including three file downloads and
-  three uploads. `server/capture_test.go` plays every recorded controlling
-  station against the server with `Mux` and `FileServer`.
-- Classified differences: go-iec104 states the day of the week in
-  `ClockSync` (the recorded clients send 0), calls a whole file with section
-  number 0 and numbers the last section of a file after its last section (as
-  lib60870-C v2.4.1; the recorded CERT.LV programs send 1 and the last
-  section's number), and cuts file segments at 236 octets (the recorded
-  programs at 233). The server confirms STOPDT only once its I frames are
-  acknowledged (IEC 60870-5-104 ed. 2, 5.3); the recorded IEC TestServer
-  did not wait.
-- Recorded faults of IEC TestServer, on which the client closes the
-  connection: an N(R) left over from an earlier connection, and I frames
-  after STOPDT con. Its negative confirmations of C_RP_NA_1 without the
-  qualifier octet do not decode and are dropped.
-
-It has **not** been run against certified test equipment or field devices.
-Interoperability reports are welcome.
+| Function | Client | Server | Evidence |
+|---|---|---|---|
+| End of initialization (M_EI_NA_1) after the first link reset and after reset of user process | delivered to the handler | sent | e2e |
+| General and group interrogation (C_IC_NA_1) | `Interrogate` | handler | e2e |
+| Counter interrogation (C_CI_NA_1) | `CounterInterrogate` | handler | e2e |
+| Read (C_RD_NA_1) | `Read` | handler | e2e |
+| Clock synchronization (C_CS_NA_1) | `ClockSync` | handler | e2e |
+| Test command (C_TS_NA_1, fixed test pattern) | `TestCommand` | handler | e2e |
+| Reset process (C_RP_NA_1) | `ResetProcess` | handler | e2e |
+| Delay acquisition (C_CD_NA_1) | `DelayAcquisition` | handler | e2e |
+| Process commands, direct and select-before-operate, deactivation | `Command`, `Deactivate` | handler | e2e |
+| Spontaneous (class 1) and cyclic (class 2) data | handler | `Send`, `SendClass` | e2e |
+| Negative confirmations and "unknown ..." causes | `*telecontrol.NegativeError` | `Negative`, `Reject` | e2e |
+| File transfer | **no** | **no** | - |
+| IEC 62351-5 / IEC TS 60870-5-7 security | **no** | **no** | - |

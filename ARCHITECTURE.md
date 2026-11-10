@@ -1,207 +1,121 @@
-# Architecture: otfabric/go-iec104
+# Architecture: otfabric/go-iec60870-5
 
-How the module is divided, why, and how a connection works inside.
+How the module is layered, what is shared between the companion standards
+and why. The IEC 104 connection machinery (APCI, timers, redundancy,
+security in the loop) is described in
+[docs/iec104/ARCHITECTURE.md](docs/iec104/ARCHITECTURE.md).
 
 ## Layers
 
-IEC 60870-5-104 is two things in one standard: a control protocol for
-running a TCP connection (APCI) and the application data it carries (ASDU).
+IEC 60870-5 is a family: parts 1 to 5 define frame formats, link
+procedures, data structures, information elements and application
+functions; the companion standards (101, 102, 103, 104) select from them.
+The packages follow that split, and share code only where the companion
+standards share the definition.
 
 ```text
-                 IEC 60870-5-104
-┌──────────────────────────────────────────────┐
-│  ASDU   type identification, cause of        │  package asdu
-│         transmission, common address,        │  (shared with IEC 60870-5-101)
-│         information objects                  │
-├──────────────────────────────────────────────┤
-│  A-Profile (optional) association, session  │  package sec
-│         keys, Secure Data: IEC 62351-5,      │
-│         IEC TS 60870-5-7                     │
-├──────────────────────────────────────────────┤
-│  APCI   APDU framing, I/S/U frames,          │  package apci (codec)
-│         sequence numbers, acknowledgements,  │  internal/link (state machine)
-│         STARTDT / STOPDT / TESTFR            │
-└──────────────────────────────────────────────┘
-                      TCP (optionally TLS)
+              iec101/client  iec101/server        iec104/client  iec104/server
+                     \           /                      \           /
+                      iec101  ----------- telecontrol ---  iec104 -- iec104/apci
+                        |                     |                       (TCP, APCI)
+                        |                    asdu  ------------------ sec
+                        |                     |
+                       link (IEC 60870-5-2)   cp (IEC 60870-5-4 time tags)
+                        |
+                       ft12 (IEC 60870-5-1)
+                        |
+                    io.ReadWriter: serial port, terminal server TCP stream, pipe
 ```
 
-The packages follow the reuse boundaries rather than the picture:
+| Package | Shared by | Why there and not elsewhere |
+|---|---|---|
+| `cp` | 101, 104, 103 (planned) | IEC 60870-5-4 defines the time tags once; 103 uses CP32Time2a and CP56Time2a with the same octets. |
+| `ft12` | 101, 102, 103 | IEC 60870-5-1 FT 1.2 is the only frame format the three serial companion standards allow (103: clause 6.1). |
+| `link` | 101, 102, 103 | IEC 60870-5-2 procedures. The companion standards restrict them (function codes, address size, single character) through `link.Config` and caller choices; nothing standard-specific is built in. The one extension, function code 7 "reset FCB" of IEC 60870-5-103 clause 6.3, is a separate method (`Primary.ResetFCB`) a 101 station never calls. |
+| `asdu` | 101, 104 | The telecontrol ASDU (type identifications 1..127 of IEC 60870-5-101 clause 7 and 104 clause 9) with configurable field sizes. IEC 102 and IEC 103 define different ASDUs and will have their own codecs. |
+| `telecontrol` | 101 (104 later) | How a controlling station recognises the answers to its requests. Neither 101 nor 104 has a transaction identifier; both use the same matching rules. |
+| `iec104/...` | 104 only | APCI framing, sequence numbers, k/w, t0..t3, TLS, redundancy groups: nothing of it applies to a serial line. |
+| `sec` | 104 (101 planned) | IEC TS 60870-5-7 profiles IEC 62351-5 for 101 and 104; it is wired into 104 only. |
 
-- **APCI stays inside this module.** It has no life outside
-  IEC 60870-5-104, so it is not a separate library. It is split into a pure
-  codec (`apci`, exported, useful to analysers and test tools) and the state
-  machine (`internal/link`, private, because its API is shaped by the client
-  and the server and nothing else).
-- **ASDU is the reusable part.** IEC 60870-5-101 carries the same ASDUs over
-  a serial link layer with different field widths. `asdu` therefore knows
-  nothing about TCP or APCI and takes the widths as `asdu.Params`.
-- **TCP is the standard library.** The client accepts any `Dialer`, the
-  server any `net.Listener`.
-- **The application-layer security sits between them.** IEC TS 60870-5-7
-  wraps every application ASDU in a Secure Data ASDU and adds its own key
-  management ASDUs; the APCI carries both like any other. `sec` is
-  sans-IO: an `Endpoint` takes received ASDUs and the time and returns the
-  ASDUs to send, so the same code would serve an IEC 60870-5-101 link.
+What is deliberately not shared: there is no universal client or server
+interface across the companion standards. IEC 103 (protection equipment,
+function type and information number) and IEC 102 (integrated totals) get
+APIs that follow their own application models.
 
-## Packages and import rules
+## Import rules
 
-```text
-iec104 (root)      errors, State, Logger, Metrics
-  ├── apci         frames, sequence arithmetic, Params          imports: nothing
-  ├── asdu         ASDU model and codec                         imports: nothing
-  ├── sec          IEC 62351-5 A-Profile, sans-IO               imports: asdu
-  ├── internal/link  connection state machine                   imports: root, apci, logx
-  ├── internal/logx  structured or formatted log entries        imports: root
-  ├── client       controlling station                          imports: root, apci, asdu, sec, link
-  └── server       controlled station                           imports: root, apci, asdu, sec, link
-```
+- `cp`, `ft12` import only the standard library.
+- `link` imports `ft12`.
+- `asdu` imports `cp`; `telecontrol` imports `asdu`.
+- `iec101` imports `asdu`, `ft12`, `link`; `iec101/client` and
+  `iec101/server` add `telecontrol` and `internal/logx`.
+- The `iec104` tree imports `asdu`, `sec` and the root package; nothing
+  outside `iec104/` imports it.
+- The root package `iec60870` holds only the `Logger` interfaces; every
+  package may import it.
+- The graph is acyclic; `go vet` enforces it.
 
-- `apci` and `asdu` import nothing from the module and nothing outside the
-  standard library. They do no I/O beyond `apci.ReadFrame(io.Reader)`.
-- `internal/link` deals in raw ASDU bytes. It never imports `asdu` or
-  `sec`: the protocol machine is independent of what the I frames carry. It
-  sees the security through a small interface (`link.Security`) that
-  `*sec.Endpoint` satisfies.
-- `sec` imports `asdu` for the field sizes and type identifications only,
-  and nothing outside the standard library: the cryptography is
-  `crypto/...`.
-- `client` and `server` never import each other (their tests do, to use the
-  other side as a peer).
-- The root package imports `apci` and `asdu` only for the types in its
-  `Metrics` and `NegativeError` signatures.
+## IEC 101 stations
 
-## One connection
+### Transport
 
-Both stations run the same machine, `link.Link`, with a role flag. A link
-owns an established `net.Conn` and three goroutines:
+Every serial station takes an `io.ReadWriter` and owns it: `Close` closes
+it when it is an `io.Closer`. A station runs two goroutines on it:
 
-```text
-           ┌────────┐  frames   ┌──────────────────────────┐  events  ┌────────────┐
- net.Conn ─► reader ├──────────►│ loop                     ├─────────►│ dispatcher ├─► callbacks
-           └────────┘           │  owns V(S) V(R) ack      │  (queue) └────────────┘   OnASDU
-                                │  unacked[], timers,      │                           OnState
- Send/StartDT/StopDT ──────────►│  STARTDT/STOPDT state    │                           OnClose
-   (channels)                   │  performs every write    ├─► net.Conn
-                                └──────────────────────────┘
-```
+- a reader that decodes FT 1.2 frames (`ft12.Decoder`, resynchronizing
+  after noise) and hands each frame to the station logic;
+- a writer that sends queued frames, so a station never blocks its receive
+  path on a full transport. Balanced stations answer from the reader while
+  their peer does the same; with synchronous transports (`net.Pipe`) a
+  direct write would deadlock.
 
-- **The loop owns all protocol state** and is the only writer. There are no
-  locks around sequence numbers or timers because nothing else touches them.
-  `Send` and the U-frame procedures are requests on channels; the loop stops
-  receiving from the send channel while `k` I frames are unacknowledged,
-  which is what makes `Send` block.
-- **One timer** is armed for the earliest deadline among `t1` (oldest
-  unacknowledged I frame, each pending U activation), `t2` (first
-  unacknowledged received I frame) and `t3` (idle).
-- **The dispatcher decouples callbacks from the protocol.** A handler may
-  take as long as it likes, and may call `Send`, without stalling
-  acknowledgements or test frames. Events are delivered in order: an ASDU,
-  a start/stop notification and the final close arrive exactly as they
-  happened on the wire.
-- **Receive flow control uses the protocol's own window.** When 256 events
-  wait for the dispatcher the loop stops acknowledging received I frames,
-  so the peer stops after `k` more. Frames are still read: the peer's
-  acknowledgements keep arriving, which matters when the slow handler is
-  itself blocked in `Send`. Only a peer that ignores its window (or has an
-  enormous `k`) reaches the second limit, where the loop stops reading and
-  TCP pushes back. Memory per connection is bounded either way.
+IEC 60870-5-1 also requires a receiver to discard a frame interrupted by a
+line idle interval. A generic `io.Reader` does not expose character timing,
+so `ft12` validates structure and checksum only; see
+[LIMITATIONS.md](LIMITATIONS.md).
 
-### Security in the loop
+### Link layer
 
-With an `Endpoint` the loop passes every received I frame's ASDU through
-`Receive`, and every ASDU to send through `Protect`, on its own goroutine.
-Both return ASDUs to send (key management, Secure Data, segments), which go
-into one ordered transmit queue that the loop drains as the `k` window
-allows: the receiver accepts Secure Data only with increasing sequence
-numbers, and the segments of one message must not be interleaved. A send
-request that finds no session keys (`ErrNotReady`) is held, and the send
-channel is not read, until the endpoint announces a change; a held request
-whose caller gives up is cancelled without being sent. The endpoint's
-deadline joins the loop's one timer.
+`link.Primary` (unbalanced) serializes exchanges: one message out, wait
+`Config.Timeout` for the response, repeat the identical frame (same FCB)
+up to `Config.Retries` times. It toggles FCB per secondary for each new
+message with FCV set and clears it after reset of remote link.
 
-The connections that one controlling station keeps to a station (a client
-`Group`) share one `Endpoint`, and with it the association: `Attach` when
-data transfer starts hands it to that connection, `Detach` takes it away. A
-connection that does not carry the association drops what it receives.
+`link.Secondary` keeps its expected FCB; a message with FCV set whose FCB
+equals the previous one is a repetition and is answered with the stored
+previous response without calling the user again. This is what keeps a
+lost ACK from executing a command twice (test
+`TestRepetitionNotProcessedTwice`).
 
-A station keeps one association per controlling station. Its sessions do
-not know at first whose connection they are: a session's `link.Security`
-is a router that holds back what the station sends until the first
-security message arrives, takes the AIM from it (`sec.AssociationOf`),
-fetches or makes that station's `Endpoint` in the redundancy group, attaches
-to it and from then on hands everything to it.
+`link.Balanced` is a primary for its own direction and a secondary for the
+peer's, over a full-duplex line, with the DIR bit set by station A.
 
-### Conformance decisions
+### Application layer
 
-| Situation | Behaviour |
-|-----------|-----------|
-| I frame with unexpected N(S) | Close (`ErrProtocol`) |
-| N(R) acknowledging frames never sent | Close (`ErrProtocol`) |
-| I frame received while stopped | Close (`ErrProtocol`) |
-| STOPDT act sent (client) | Received I frames are acknowledged first, and at once until the con arrives |
-| I frame received between STOPDT act and con | Accepted and acknowledged immediately |
-| `t1` expires on an I frame or a U activation | Close (`ErrTimeout`) |
-| `w` I frames received, or `t2` since the first | S frame |
-| Own I frame sent | Counts as the acknowledgement; no S frame |
-| `t3` without any received frame | TESTFR act, supervised by `t1` |
-| STOPDT act received (server) | Acknowledge what was received; STOPDT con once the peer has acknowledged every I frame sent to it (`t1` applies) |
-| STARTDT/STOPDT act received by a client | Ignored with a warning |
-| U confirmation nobody asked for | Ignored with a warning |
+`iec101/client` runs one goroutine per role:
 
-## Client
+- unbalanced: a poller that initializes the link (request status of link,
+  reset of remote link), sends queued user data, and polls class 1 while
+  the station reports ACD, class 2 otherwise, pausing `PollInterval` when
+  the station has nothing; DFC holds back user data;
+- balanced: a supervisor that initializes this station's direction and
+  sends the test function for link when idle.
 
-`client.Client` wraps at most one link and adds:
+Received ASDUs go to `telecontrol.Requester.Dispatch`; what no request
+consumes is delivered to the application's handler on a goroutine of its
+own, in order, so a handler may issue requests.
 
-- **Connection lifecycle**: `Connect` dials (bounded by `t0`), starts the
-  link and sends STARTDT. With `WithReconnect` a loop re-dials with
-  exponential backoff after a loss.
-- **Request matching**: IEC 60870-5-104 has no transaction identifier. An
-  answer is recognised by type identification, common address, information
-  object address and cause of transmission. Each request method registers an
-  *exchange* (a matcher plus a queue), sends, and consumes what the matcher
-  selects. Two identical requests would be indistinguishable, so the second
-  fails with `ErrBusy`.
-- **Delivery**: every ASDU goes to the `Handler`, whether an exchange took
-  it or not. Request methods are a convenience on top of the stream, never a
-  filter in front of it.
-- **Retries**: every request method runs through one function that bounds
-  each attempt, repeats only requests marked idempotent and only for
-  transport failures, and reports to metrics and log. Commands are not
-  marked, by design.
-
-`client.Group` composes several clients into a redundancy group. A supervisor
-goroutine, woken by the clients' state changes, keeps every connection
-established and exactly one started. It is the protocol's own notion of
-multiple connections; a pool of interchangeable connections would contradict
-how a station sends its data.
-
-## Server
-
-`server.Server` accepts connections and wraps each in a `Session`. A session
-decodes received ASDUs, applies the common address filter and calls the
-`Handler` on the session's dispatcher goroutine: one session is served
-serially, sessions are served concurrently. `Mux` is a `Handler` that routes
-by type identification and produces the negative answers of the standard for
-what is not registered.
-
-Events take a different path from replies. `Server.Enqueue` appends to one
-queue per redundancy group; a pump goroutine per group sends the oldest
-pending event on the group's active session and marks it in flight. The link
-reports when the peer has acknowledged that I frame, and only then is the
-event removed. A session that stops or ends returns its in-flight events to
-pending, in their original order. That is what makes delivery "at least
-once" across a switchover without the application tracking anything.
+`iec101/server` holds class 1 and class 2 queues (unbalanced) or a send
+queue (balanced). Control-direction ASDUs are queued to a handler goroutine;
+when that queue is full the link answers NACK with DFC set, as
+IEC 60870-5-2 provides. After the first reset of remote link it sends end of
+initialization (M_EI_NA_1).
 
 ## Testing
 
-| Layer | How it is tested |
-|-------|------------------|
-| `apci`, `asdu` | Byte vectors from the standard, round trips over every type identification, error tables, fuzzing (parse, re-encode, fixed point) |
-| `internal/link` | A scripted peer writing raw APDUs over loopback TCP: windows, each timer, each violation |
-| `sec` | Octet strings from cB-Sigma/iec60870's encoder and RFC 3394 and RFC 5869 vectors; two endpoints on a simulated connection with their own clock: every procedure, retransmission, failure and backoff, tampering, replay, restarts, crossing requests, refused certificates and algorithms; fuzzing |
-| `client`, `server` | Against each other over loopback TCP, including TLS, reconnect and server restart |
-| `e2e` | Client against server of this module, end to end over TCP, TLS and with the A-Profile (HMAC, and AES-256-GCM over TLS), with the fixture-driven station of `internal/station` |
-| `interop` | Against lib60870-C, OpenMUC j60870 and wendy512/iec104 in containers, as client and as server (`make interop`) |
-| `interop/cbsigma` | `sec` against cB-Sigma/iec60870 in process, a module of its own (`make test-cbsigma`) |
-
-Everything runs with the race detector.
+See [TESTING.md](TESTING.md). The IEC 101 layers are tested bottom up:
+`ft12` with known frames, every truncation and a fuzz target; `link` over
+`net.Pipe` with lossy wrappers and scripted peers that send wrong or negative
+answers; `iec101/e2e` runs client against server in both modes, including
+link loss and recovery. Interoperability with independent implementations
+runs from otfabric/iec60870-5-interop.

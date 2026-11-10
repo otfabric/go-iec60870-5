@@ -1,6 +1,13 @@
-# Errors: otfabric/go-iec104
+# Errors: otfabric/go-iec60870-5
 
-How go-iec104 reports failures. For signatures see [API.md](API.md).
+How go-iec60870-5 reports failures. For signatures see [API.md](API.md) and
+[docs/api](docs/api/README.md).
+
+The IEC 60870-5-104 packages (`iec104`, `iec104/client`, `iec104/server`,
+`sec`, `asdu`) keep the error model of go-iec104 v0.3.0, described in the
+sections below up to [Detection patterns](#detection-patterns). The serial
+companion standards add their own layers, described in
+[Serial companion standards](#serial-companion-standards).
 
 ## Table of contents
 
@@ -15,6 +22,7 @@ How go-iec104 reports failures. For signatures see [API.md](API.md).
 - [Retries](#retries)
 - [What is not an error](#what-is-not-an-error)
 - [Detection patterns](#detection-patterns)
+- [Serial companion standards](#serial-companion-standards)
 
 ## Quick reference
 
@@ -218,3 +226,60 @@ case errors.Is(err, asdu.ErrInvalidValue):
 	// programming error: the command cannot be encoded
 }
 ```
+
+## Serial companion standards
+
+IEC 60870-5-101 (and the -102/-103 stations built on the same layers)
+report failures layer by layer. Every sentinel is wrapped with detail: test
+with `errors.Is`.
+
+### Time tags (`cp`)
+
+| Sentinel | Meaning |
+|---|---|
+| `cp.ErrShort` | the buffer is shorter than the time tag. Out-of-range fields are not errors: they decode with `Invalid` set. |
+
+### FT 1.2 frames (`ft12`)
+
+| Sentinel | Meaning |
+|---|---|
+| `ft12.ErrInvalidParams` | link address size other than 0, 1 or 2 |
+| `ft12.ErrMalformed` | wrong start or stop character, the two length octets differ, a length below control and address size |
+| `ft12.ErrChecksum` | the checksum does not match |
+| `ft12.ErrTooLong` | user data does not fit one frame (L at most 255) |
+| `ft12.ErrInvalidAddress` | link address wider than the address field |
+| `ft12.ErrShort` | the buffer ends before the frame: more octets may complete it |
+
+`ft12.Decoder` never returns `ErrMalformed` or `ErrChecksum`: it skips the
+octets and resynchronizes, reporting them to `OnDiscard`. It returns the
+reader's error, or `io.ErrUnexpectedEOF` when the stream ends inside a
+frame.
+
+### Link procedures (`link`)
+
+| Sentinel | Meaning | Link |
+|---|---|---|
+| `link.ErrTimeout` | no response after `Config.Retries` repetitions | the caller re-initializes it |
+| `link.ErrNack` | the secondary answered NACK (function 1): message not accepted | stays up |
+| `link.ErrDataFlow` | DFC is set: the secondary cannot take more user data now | stays up |
+| `link.ErrNotFunctioning` | function 14: link service not functioning | stays up |
+| `link.ErrNotImplemented` | function 15: link service not implemented | stays up |
+| `link.ErrUnexpected` | a response that does not answer the request | stays up |
+| `link.ErrClosed` | the station was closed, or the transport failed (wrapped with the transport error) | gone |
+| `link.ErrInvalidConfig` | a `Config` a station cannot be built with | - |
+
+### IEC 60870-5-101 stations (`iec101`, `iec101/client`, `iec101/server`)
+
+| Sentinel | Meaning |
+|---|---|
+| `iec101.ErrLinkDown` | a request while the link is not initialized; outstanding requests fail with it (wrapping the link error) when the link is lost |
+| `iec101.ErrClosed` | an operation on a closed client or server |
+| `iec101.ErrInvalidConfig` | invalid parameters (wraps the `ft12`, `asdu` or `link` error) |
+| `server.ErrQueueFull` | a class 1 or class 2 queue (or the balanced send queue) is full |
+
+Requests of `iec101/client` return `*telecontrol.NegativeError` for a
+negative confirmation or an "unknown ..." cause, `telecontrol.ErrBusy` for a
+request whose answers could not be told apart from a pending identical one,
+and wrap `context.DeadlineExceeded` when no answer arrives within
+`Config.RequestTimeout`.
+

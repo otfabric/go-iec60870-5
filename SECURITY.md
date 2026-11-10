@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in `go-iec104`, please report it responsibly.
+If you discover a security vulnerability in `go-iec60870-5`, please report it responsibly.
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 

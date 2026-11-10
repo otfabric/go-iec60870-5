@@ -1,28 +1,36 @@
 # Limitations
 
-What go-iec104 does not do, or does only partly. The interoperability list, clause by clause, is in [INTEROPERABILITY.md](INTEROPERABILITY.md).
+What go-iec60870-5 does not do, or does only partly. IEC 60870-5-104 has its
+own list: [docs/iec104/LIMITATIONS.md](docs/iec104/LIMITATIONS.md).
 
-## Scope not implemented
+## Scope
 
-- **IEC 60870-5-101** serial links: not in this module. The `asdu` package takes the 101 field sizes so that a separate module can build on it.
-- **File deletion and the query log**: their types are in the codec, with no procedure.
-- **IEC 62351-5**: no broadcast key, no IEC 62351-8 tokens, no secp256k1, X448 or brainpool. See [SECURITY.md](SECURITY.md#application-layer-security-iec-62351-5).
-- **Event queue**: in memory. It survives an absent control centre, not a restart of the station.
+- **IEC 60870-5-103 and IEC 60870-5-102 are not implemented.** See
+  [docs/ROADMAP.md](docs/ROADMAP.md).
+- Nothing is certified or conformance tested. Interoperability runs are not
+  conformance tests.
 
-## Verification
+## IEC 60870-5-101
 
-- Independently verified against lib60870-C, OpenMUC j60870, wendy512/iec104 and cB-Sigma/iec60870, at the versions and with the results in [INTEROPERABILITY.md](INTEROPERABILITY.md#verification-status).
-- IEC 62351-5 was derived from cB-Sigma/iec60870, not from the IEC documents, and is verified against that one implementation only.
-- File upload, the file directory, TLS, interrogation groups, a quality on bitstrings and server redundancy against another implementation: the `interop` suite has the tests, for every reference that declares each feature (container contract 1.3). They run against the pinned images of iec104-interop v0.5.0; wendy512 has no TLS, upload or redundancy station, so the client tests skip it there. Redundancy over TLS has no case. See [INTEROPERABILITY.md](INTEROPERABILITY.md#verification-status).
-- Tested against recorded traffic of other implementations (testdata/captures): software testbeds and one recording of unknown origin. None of the recordings found comes from a device that can be identified as physical.
-- Not verified against certified test equipment or field devices.
-- Certification: none.
-
-## Known deviations
-
-- **The `default` redundancy group is not one in the sense of IEC 60870-5-104 edition 2, clause 10 (redundant connections).** Without `WithRedundancyGroups`, every client is an independent session that can be started next to the others: a STARTDT closes nothing, the one that is not active still gets answers, and when the active one stops the queue moves to another started one. A group named with `WithRedundancyGroups` has one started connection: a takeover closes the other.
-
-- The client's activation confirmation wait does not extend to the activation termination of a command; the termination reaches the `Handler`.
-- A received ASDU that cannot be decoded is dropped without a negative answer. The recorded IEC TestServer answers some such requests (a C_RD_NA_1 with an extra octet) with a negative confirmation; go-iec104's server drops them and serves on, and its client drops such answers (IEC TestServer's C_RP_NA_1 confirmations without the qualifier octet).
-- A CP56Time2a keeps only whether its day of week is used (`Timestamp.NoWeekday`); a day of week that does not match the date is encoded again as the date's.
-- Reserved bits (in quality descriptors, SCO, protection events) are decoded and written as zero.
+- **No independent interoperability evidence yet**
+  ([INTEROPERABILITY.md](INTEROPERABILITY.md)).
+- **Character timing.** IEC 60870-5-1 requires a receiver to reject a frame
+  with an idle interval between its characters and a line idle interval
+  between frames. `ft12.Decoder` works on an `io.Reader` and cannot see
+  timing; it validates structure and checksum and resynchronizes. On a real
+  line, configure the serial port's read timeout accordingly.
+- **One controlled station per client.** The link layer filters by address
+  and a `link.Primary` can poll several secondaries, but `iec101/client`
+  serves one link address. Multidrop polling needs one client per address on
+  separate lines, or the link layer directly.
+- **No file transfer** and **no application-layer security** over IEC 101,
+  although the ASDU codec carries the file transfer types.
+- **Class assignment** is the application's: `server.Send` queues class 1,
+  `server.SendClass` chooses. The library does not move class 2 data to
+  class 1 when class 2 is empty.
+- **Balanced test function** is sent every `TestInterval` regardless of
+  other traffic.
+- **Text we do not hold.** IEC 60870-5-2 and -101 are not in our document
+  set; the link procedures follow the extracts quoted in IEC 60870-5-103 and
+  the behaviour of independent implementations
+  ([docs/STANDARDS.md](docs/STANDARDS.md)).

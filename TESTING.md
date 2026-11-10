@@ -1,6 +1,6 @@
 # Testing
 
-How to run each test tier of go-iec104. What is implemented and at which evidence level: [docs/FEATURE-STATUS.md](docs/FEATURE-STATUS.md). Interop results: [INTEROPERABILITY.md](INTEROPERABILITY.md#verification-status).
+How to run each test tier of go-iec60870-5. What is implemented and at which evidence level: [docs/FEATURE-STATUS.md](docs/FEATURE-STATUS.md). Interop results: [INTEROPERABILITY.md](docs/iec104/INTEROPERABILITY.md#verification-status).
 
 ## Tiers
 
@@ -8,6 +8,7 @@ How to run each test tier of go-iec104. What is implemented and at which evidenc
 |---|---|---|---|
 | Unit and package tests, race detector | `make test` | none | CI workflow, Go 1.26 and 1.27 |
 | End-to-end, on loopback TCP | `make e2e` (also part of `make test`) | none | CI workflow |
+| IEC 101 end-to-end: client against server over in-memory and lossy lines, unbalanced and balanced (`iec101/e2e`) | `make test` | none | CI workflow |
 | Coverage gate | `make coverage-check` | none | CI workflow |
 | Per-package coverage floor | `make coverage-pkg-check` | none | CI workflow, `Per-package coverage` |
 | Fuzz | `make fuzz` | none | CI workflow, 10s per discovered target; `Extended` workflow, 5 minutes per target |
@@ -29,7 +30,7 @@ The `Extended` workflow runs nightly: every fuzz target for 5 minutes and the ch
 ## What each suite does
 
 - **Package tests**: `apci`, `asdu`, `sec` and `internal/link` test the codecs and the protocol machine; `internal/link` also runs against scripted peers, for what a correct peer never sends.
-- **`e2e`**: go-iec104 client against go-iec104 server.
+- **`e2e`**: go-iec60870-5 client against go-iec60870-5 server.
   - `e2e_test.go` runs the station scenarios on the baseline fixture (`internal/station/baseline.json`) over plain TCP, TLS, `k = w = 1`, IEC 62351-5 with HMAC, and IEC 62351-5 with AES-256-GCM over TLS.
   - `matrix_test.go` sends every type identification through both codecs and both protocol machines, repeats this with other field sizes, and wraps the sequence numbers.
   - `features_test.go` covers states, logs, metrics, retries, admission, the event queue and failing requests.
@@ -37,7 +38,7 @@ The `Extended` workflow runs nightly: every fuzz target for 5 minutes and the ch
   - `chaos_test.go` runs seeded random operations while connections are cut.
   - `hostile_test.go` sends broken framing, control fields, sequence numbers, idle and flooding peers, malformed ASDUs and out-of-turn file transfer to the server, and plays a hostile station against the client; each case checks the time bound, that a legitimate client is then served, and goroutines. `FuzzServerStream` (in `hostile_fuzz_test.go`) feeds arbitrary octets to a running server over an in-memory connection.
 - **Recorded traffic** ([testdata/captures](testdata/captures/README.md)): `internal/capture` reads the captures (pcap, pcapng, gzip), reassembles TCP and checks every conversation's sequence numbers, acknowledgements and procedures; `TestCorpusReencode` decodes and encodes every APDU; `TestOracleTshark` and `TestOracleZeek` compare the decoded fields with Wireshark's (the `*.tshark.tsv.gz` files next to the captures) and with CERT.LV's Zeek logs; `TestManifest` checks testdata/captures/manifest.json. `client/capture_test.go` plays every recorded controlled station against the client (through `Send`, and through the request and file methods), `server/capture_test.go` every recorded controlling station against the server. The comparison rules: sequence numbers are rebuilt from the live link, ASDU octets are compared as recorded, and every difference is classified in the test that finds it. `IEC104_CAPTURE_EXTENDED=1` adds the files of `make captures-fetch`.
-- **`interop`** (build tag `interop`): go-iec104 as client and as server against the images of [otfabric/iec104-interop](https://github.com/otfabric/iec104-interop). The images are pinned by digest in `interop/harness.go`, the Makefile and `.github/workflows/interop.yml`; keep the three in step.
+- **`interop`** (build tag `interop`): go-iec60870-5 as client and as server against the images of [otfabric/iec104-interop](https://github.com/otfabric/iec104-interop). The images are pinned by digest in `interop/harness.go`, the Makefile and `.github/workflows/interop.yml`; keep the three in step.
 - **`interop/cbsigma`**: `sec` against cB-Sigma/iec60870 in memory.
 
 ## Options
@@ -57,7 +58,7 @@ The `Extended` workflow runs nightly: every fuzz target for 5 minutes and the ch
 
 The tests that can skip are:
 
-- Interop tests skip what a reference image does not declare in `print-capabilities`, and the read cases of j60870 listed as a known bug. Those cases fail when the bug no longer reproduces ([INTEROPERABILITY.md](INTEROPERABILITY.md#verification-status)). A test that no reference at all can run skips only without `IEC104_REQUIRE_INTEROP=1`.
+- Interop tests skip what a reference image does not declare in `print-capabilities`, and the read cases of j60870 listed as a known bug. Those cases fail when the bug no longer reproduces ([INTEROPERABILITY.md](docs/iec104/INTEROPERABILITY.md#verification-status)). A test that no reference at all can run skips only without `IEC104_REQUIRE_INTEROP=1`.
 - Three tests in `client` skip when their port cannot be bound again.
 - `make interop` without Docker fails; it does not skip.
 

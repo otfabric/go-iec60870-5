@@ -64,7 +64,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer srv.Close()
+	defer func() { _ = srv.Close() }()
 
 	c, err := client.New(controlling, client.Config{
 		Params: p, LinkAddr: 3,
@@ -73,7 +73,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer c.Close()
+	defer func() { _ = c.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

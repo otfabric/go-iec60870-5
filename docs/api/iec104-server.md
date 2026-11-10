@@ -331,7 +331,7 @@ WithEventQueue sets how many events each redundancy group buffers for [Server.En
 #### func WithLogger
 
 ```go
-func WithLogger(l iec104.Logger) Option
+func WithLogger(l iec60870.Logger) Option
 ```
 
 WithLogger sets the logger. Nil, the default, disables logging.
@@ -388,7 +388,7 @@ With security, an ASDU that is not protected is discarded, the [Handler](#type-h
 func WithStateHandler(f func(s *Session, state iec104.State, err error)) Option
 ```
 
-WithStateHandler registers a callback for session state changes: [iec104.StateStopped](https://pkg.go.dev/github.com/otfabric/go-iec104#StateStopped) when a connection is accepted and after STOPDT, [iec104.StateStarted](https://pkg.go.dev/github.com/otfabric/go-iec104#StateStarted) after STARTDT and [iec104.StateDisconnected](https://pkg.go.dev/github.com/otfabric/go-iec104#StateDisconnected) when the session ends, with err holding the reason (nil when the server closed it).
+WithStateHandler registers a callback for session state changes: [iec104.StateStopped](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#StateStopped) when a connection is accepted and after STOPDT, [iec104.StateStarted](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#StateStarted) after STARTDT and [iec104.StateDisconnected](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#StateDisconnected) when the session ends, with err holding the reason (nil when the server closed it).
 
 For one session the callback and the [Handler](#type-handler) run on the same goroutine, in protocol order.
 
@@ -659,7 +659,7 @@ Security returns the association of the controlling station on this session: nil
 func (s *Session) Send(ctx context.Context, a *asdu.ASDU) error
 ```
 
-Send transmits one ASDU to the controlling station. It fails with [iec104.ErrNotStarted](https://pkg.go.dev/github.com/otfabric/go-iec104#ErrNotStarted) while data transfer is stopped, and blocks while the send window is full (k unacknowledged I frames) until the peer acknowledges, ctx ends or the session ends.
+Send transmits one ASDU to the controlling station. It fails with [iec104.ErrNotStarted](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#ErrNotStarted) while data transfer is stopped, and blocks while the send window is full (k unacknowledged I frames) until the peer acknowledges, ctx ends or the session ends.
 
 #### func (Session) Started
 
