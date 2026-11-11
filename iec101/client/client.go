@@ -66,7 +66,11 @@ type Config struct {
 	// interrogation or read (also returned by those calls). It runs on a
 	// goroutine of its own, in order; it may issue requests.
 	Handler func(a *asdu.ASDU)
-	// OnState is called with each change of the link state.
+	// OnState is called with each change of the link state, from the
+	// goroutine that changed it. WaitUp returns only after OnState for the
+	// change to StateUp has returned, so what the callback sets up is in
+	// place when WaitUp returns. State reports a change before OnState
+	// for it is called.
 	OnState func(s iec101.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger
@@ -84,10 +88,11 @@ type Client struct {
 	sends   chan sendReq // unbalanced: user data for the poller
 	handled chan *asdu.ASDU
 
-	mu    sync.Mutex
-	state iec101.State
-	upCh  chan struct{} // closed while the link is up
-	kick  chan struct{} // the link went down: re-initialize now
+	mu     sync.Mutex
+	state  iec101.State
+	upCh   chan struct{} // closed while the link is up and OnState was told
+	upTold bool          // OnState(StateUp) returned for the current up period
+	kick   chan struct{} // the link went down: re-initialize now
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -179,18 +184,18 @@ func (c *Client) State() iec101.State {
 	return c.state
 }
 
-// WaitUp waits until the link is initialized.
+// WaitUp waits until the link is initialized and OnState has been told
+// (Config.OnState).
 func (c *Client) WaitUp(ctx context.Context) error {
 	for {
 		c.mu.Lock()
-		st, ch := c.state, c.upCh
+		st, ch, told := c.state, c.upCh, c.upTold
 		c.mu.Unlock()
-		switch st {
-		case iec101.StateUp:
+		switch {
+		case st == iec101.StateUp && told:
 			return nil
-		case iec101.StateClosed:
+		case st == iec101.StateClosed:
 			return iec101.ErrClosed
-		case iec101.StateDown:
 		}
 		select {
 		case <-ch:
@@ -231,9 +236,9 @@ func (c *Client) setState(s iec101.State, err error) {
 		return
 	}
 	c.state = s
-	if s == iec101.StateUp {
-		close(c.upCh)
-	} else {
+	up := c.upCh
+	if s != iec101.StateUp {
+		c.upTold = false
 		select {
 		case <-c.upCh:
 			c.upCh = make(chan struct{})
@@ -251,6 +256,16 @@ func (c *Client) setState(s iec101.State, err error) {
 	c.log.Info("link state", "state", s.String(), "err", err)
 	if c.cfg.OnState != nil {
 		c.cfg.OnState(s, err)
+	}
+	if s == iec101.StateUp {
+		// WaitUp returns only now, after OnState(StateUp) returned, and
+		// only if the link is still in this up period.
+		c.mu.Lock()
+		if c.state == iec101.StateUp && c.upCh == up && !c.upTold {
+			c.upTold = true
+			close(up)
+		}
+		c.mu.Unlock()
 	}
 }
 

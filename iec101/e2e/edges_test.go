@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -339,5 +340,32 @@ func TestClientSendRefusals(t *testing.T) {
 		if err := r.c.Send(context.Background(), asdu.New(asdu.CauseActivation, ca, asdu.ResetProcess{Qualifier: 1})); err == nil {
 			t.Errorf("%v: send after close succeeded", mode)
 		}
+	}
+}
+
+// WaitUp returns only after OnState for the change to StateUp has
+// returned: a slow callback is complete when WaitUp returns.
+func TestWaitUpAfterOnState(t *testing.T) {
+	for _, mode := range []iec101.Mode{iec101.ModeUnbalanced, iec101.ModeBalanced} {
+		a, b := net.Pipe()
+		p := params(mode)
+		s, _ := server.New(b, server.Config{Params: p, LinkAddr: 3, Remote: 1, CommonAddr: ca, Handler: &station{}})
+		var told atomic.Bool
+		c, _ := client.New(a, client.Config{Params: p, LinkAddr: 3, OwnAddr: 1, OnState: func(st iec101.State, _ error) {
+			if st == iec101.StateUp {
+				time.Sleep(100 * time.Millisecond)
+				told.Store(true)
+			}
+		}})
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := c.WaitUp(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if !told.Load() {
+			t.Errorf("%v: WaitUp returned before OnState(StateUp) returned", mode)
+		}
+		cancel()
+		_ = c.Close()
+		_ = s.Close()
 	}
 }
