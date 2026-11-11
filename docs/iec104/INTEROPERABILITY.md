@@ -464,7 +464,7 @@ segmented messages, renewal, crossing requests and Curve25519 certificates
 issued by an authority.
 
 The container suite below runs it against cB-Sigma too, through the
-security flags of container contract 1.2 (now part of contract 2.1 of
+security flags of container contract 1.2 (now part of contract 2.2 of
 iec60870-5-interop): our
 client against the cB-Sigma station and the cB-Sigma client against our
 station, with certificates issued by an authority and pinned
@@ -480,8 +480,8 @@ Besides its own tests the library is run against five independent
 implementations, as client and as server, on every push and pull request that changes more
 than Markdown (Interop workflow). The reference
 builds are the IEC 104 images of
-[otfabric/iec60870-5-interop v0.2.1](https://github.com/otfabric/iec60870-5-interop/releases/tag/v0.2.1)
-(container contract 2.1, which for IEC 104 is contract 1.3 of the earlier
+[otfabric/iec60870-5-interop v0.3.0](https://github.com/otfabric/iec60870-5-interop/releases/tag/v0.3.0)
+(container contract 2.2, which for IEC 104 is contract 1.3 of the earlier
 otfabric/iec104-interop under new image names, entrypoint and readiness
 path), pinned by the digests of the release's `manifest.json`. Until
 2026-11-11 the suite ran against iec104-interop v0.5.0, which had the

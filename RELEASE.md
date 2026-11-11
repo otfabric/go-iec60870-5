@@ -71,8 +71,9 @@ images. Several behaviours change; see "Behaviour changes".
   `iec102`): the gisce/iec870ree controlling station (REE profile,
   iec60870-5-interop contract 2.2) against `iec102/server`: 18 pass, 0
   fail. The first independent IEC 102 evidence, for the server only.
-- The IEC 104 interop suite runs against the IEC 104 images of
-  otfabric/iec60870-5-interop v0.2.1 instead of iec104-interop v0.5.0, with
+- All interop suites pin the images of otfabric/iec60870-5-interop v0.3.0
+  (contract 2.2). The IEC 104 suite runs against its IEC 104 images
+  instead of iec104-interop v0.5.0, with
   pascaldekloe/part5 as a fifth independent reference: 519 subtests pass,
   0 fail.
 

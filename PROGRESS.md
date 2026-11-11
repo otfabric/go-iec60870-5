@@ -12,7 +12,8 @@ otfabric/iec60870-5-interop). Newest first. Plan: [docs/ROADMAP.md](docs/ROADMAP
   `ErrLinkDown`); the one-bit FCB limit documented.
 - IEC 104 checked clause by clause against edition 1 (2000), four fixes;
   the interop suite moved to the IEC 104 images of iec60870-5-interop
-  v0.2.1 with pascaldekloe/part5 as fifth reference.
+  with pascaldekloe/part5 as fifth reference. All suites pin the
+  iec60870-5-interop v0.3.0 images.
 - IEC 102: first independent evidence, gisce/iec870ree (REE profile)
   against `iec102/server` (`make interop-iec102`, contract 2.2), on the
   image of iec60870-5-interop v0.3.0 pinned by digest.

@@ -100,9 +100,8 @@ make interop-iec101 interop-iec103 interop-iec102  # the serial standards (Docke
 
 Independent reference implementations live in
 [otfabric/iec60870-5-interop](https://github.com/otfabric/iec60870-5-interop)
-(IEC 101/102/103/104). The IEC 101, 103 and 104 suites run against its
-v0.2.1 images; the IEC 102 image comes with its v0.3.0 release and is a
-local build until then.
+(IEC 101/102/103/104). All four suites run against its v0.3.0 images,
+pinned by digest.
 
 ## Relation to go-iec104
 

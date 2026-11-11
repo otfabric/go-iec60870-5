@@ -13,14 +13,14 @@ IEC 60870-5-103-2005.
 | annex | the octet example of annex B, encoded and decoded |
 | e2e | `iec103/client` against `iec103/server` over `net.Pipe`, also over a line that drops frames, or one of the two against a bare `link.Primary`, a scripted handler or a hostile raw peer, and both over a faulty line (`iec103/e2e`) |
 | fuzz | `FuzzDecode` in `iec103`: decode, encode, decode, encode is stable; `server.FuzzDispatch` and `client.FuzzReceive` for the stations' receive paths |
-| independent | a passing run against an independent implementation: the reference images of otfabric/iec60870-5-interop (v0.2.1, contract 2.1), `make interop-iec103` ([below](#independent-implementations)) |
+| independent | a passing run against an independent implementation: the reference images of otfabric/iec60870-5-interop (v0.3.0, contract 2.2), `make interop-iec103` ([below](#independent-implementations)) |
 | recorded | frames of other implementations captured by others ([iec103/testdata/captures](../../iec103/testdata/captures/README.md)): three SEL RTAC serial-line excerpts (level B) decoded, re-encoded byte for byte and compared with Wireshark; not replayed against the client or server |
 
 ## Independent implementations
 
 `iec103/interop` (build tag `interop`, `make interop-iec103`) runs this
 module against the IEC 103 images of otfabric/iec60870-5-interop
-(v0.2.1, contract 2.1; images pinned by digest in
+(v0.3.0, contract 2.2; images pinned by digest in
 `iec103/interop/harness.go`). Expected outcomes are the
 harness's own: its case table (`testdata/cases.tsv`), its value and
 session checks (`scripts/interop-iec103.sh`) and the fixture the images
@@ -62,7 +62,7 @@ client shows against vitusdong: link start-up, addressed clock
 synchronization, the GI termination with the scan number, an idle line.
 
 Not exercised by any reference: ASDU 2, 4, 10, 11, 21, 23 to 31 (generic
-services, disturbance data: contract 2.1 lists them as capabilities but
+services, disturbance data: contract 2.2 lists them as capabilities but
 defines no client operation for them), broadcast synchronization (the
 contract has `clock-sync --broadcast`, the case table no case with it),
 test mode, DFC.

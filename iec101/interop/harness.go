@@ -25,12 +25,12 @@ import (
 	"github.com/otfabric/go-iec60870-5/iec101/server"
 )
 
-// The references: otfabric/iec60870-5-interop v0.2.1 (contract 2.1),
+// The references: otfabric/iec60870-5-interop v0.3.0 (contract 2.2),
 // lib60870-C v2.4.1 and cB-Sigma/iec60870 v0.3.0, pinned by multi-arch
 // index digest (the release's manifest.json).
 var stacks = []struct{ name, env, image string }{
-	{"lib60870", "IEC101_INTEROP_LIB60870_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec101-lib60870@sha256:dfad176d87432463526d262c4b60c831ff04828eb3ae8e257c05c5745ef3e5d6"},
-	{"cbsigma", "IEC101_INTEROP_CBSIGMA_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec101-cbsigma@sha256:f381e0c37a51f0e5bc5149d93ded82e96f7e4635b3ad8aafa720b6d7e1e62236"},
+	{"lib60870", "IEC101_INTEROP_LIB60870_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec101-lib60870@sha256:4ae9405390e397f85a37a38c0f078f4b3a10f3f0eca278b247ed6ad51a4480b8"},
+	{"cbsigma", "IEC101_INTEROP_CBSIGMA_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec101-cbsigma@sha256:31d0e159182cd2271ae3579b73c8ae1833447f9428d81badf5f2de784bdd5d86"},
 }
 
 var modes = []string{"unbalanced", "balanced"}

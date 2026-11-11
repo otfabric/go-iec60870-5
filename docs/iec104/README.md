@@ -494,8 +494,8 @@ cloned or built here. Scenarios, expected values and assertions live in this
 repository.
 
 This version is qualified against the IEC 104 images of
-[iec60870-5-interop v0.2.1](https://github.com/otfabric/iec60870-5-interop/releases/tag/v0.2.1)
-(container contract 2.1, for IEC 104 contract 1.3 of the earlier
+[iec60870-5-interop v0.3.0](https://github.com/otfabric/iec60870-5-interop/releases/tag/v0.3.0)
+(container contract 2.2, for IEC 104 contract 1.3 of the earlier
 iec104-interop under new names; lib60870-C v2.4.1, j60870 1.8.0,
 wendy512/iec104 v1.0.4 on go-iecp5 v1.2.6, cB-Sigma/iec60870 v0.3.0,
 pascaldekloe/part5 v0.3.0). The five images are pinned by digest in

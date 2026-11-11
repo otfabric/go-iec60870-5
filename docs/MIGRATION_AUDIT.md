@@ -100,7 +100,7 @@ deviations fixed after the edition 1 check) is in
   `telecontrol`;
 - the IEC 104 interop suite pinned iec104-interop v0.5.0, while
   iec104-interop v0.6.0 added part5. Resolved in v0.3.0: the suite runs
-  against the IEC 104 images of otfabric/iec60870-5-interop v0.2.1, part5
+  against the IEC 104 images of otfabric/iec60870-5-interop (v0.3.0), part5
   included;
 - `asdu` names some 101-only behaviour in IEC 104 terms (for example
   `asdu.IEC104` params, `MaxSize` default 249).

@@ -6,7 +6,7 @@
 // IEC 60870-5-104 implementations: MZ Automation lib60870-C, OpenMUC j60870,
 // wendy512/iec104, cB-Sigma/iec60870 and pascaldekloe/part5, packaged as
 // container images by otfabric/iec60870-5-interop (its IEC 104 images,
-// container contract 2.1, which for IEC 104 is contract 1.3 of the earlier
+// container contract 2.2, which for IEC 104 is contract 1.3 of the earlier
 // iec104-interop under new names).
 //
 // Both directions are covered:
