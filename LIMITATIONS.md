@@ -13,8 +13,7 @@ own list: [docs/iec104/LIMITATIONS.md](docs/iec104/LIMITATIONS.md).
 
 - **Independent interoperability evidence covers the default field sizes
   only**, against two references that are not fully independent of each
-  other, run locally (not in CI: the reference images are not published
-  yet). See [INTEROPERABILITY.md](INTEROPERABILITY.md).
+  other (the Interop workflow runs the suite). See [INTEROPERABILITY.md](INTEROPERABILITY.md).
 - **Line idle after an error.** IEC 60870-5-101:2003 relaxes the
   inter-character rule (6.1: the receiver need not measure gaps), but after
   a receive error a station looks for a line idle of 33 bits (figures 6 and

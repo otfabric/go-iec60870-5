@@ -18,7 +18,7 @@ Evidence levels used below:
 Independent evidence for IEC 101 comes from `make interop-iec101`
 (`iec101/interop`), run locally on 2026-11-11 against the lib60870-C v2.4.1
 and cB-Sigma/iec60870 v0.3.0 images of otfabric/iec60870-5-interop
-(contract 2.0, commit a071afd, local builds, not yet published), with the
+(v0.1.0, contract 2.0, images pinned by digest in `iec101/interop/harness.go`), with the
 contract's defaults (1-octet link address, COT 1, CA 1, IOA 2):
 
 - this module's client against each reference server, unbalanced and

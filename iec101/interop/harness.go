@@ -25,12 +25,12 @@ import (
 	"github.com/otfabric/go-iec60870-5/iec101/server"
 )
 
-// The references: otfabric/iec60870-5-interop contract 2.0. The images are
-// not published yet; the defaults are the local builds of `make images` in
-// that repository (commit a071afd). Pin them by digest once released.
+// The references: otfabric/iec60870-5-interop v0.1.0 (contract 2.0),
+// lib60870-C v2.4.1 and cB-Sigma/iec60870 v0.3.0, pinned by multi-arch
+// index digest (the release's manifest.json).
 var stacks = []struct{ name, env, image string }{
-	{"lib60870", "IEC101_INTEROP_LIB60870_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec101-lib60870:dev"},
-	{"cbsigma", "IEC101_INTEROP_CBSIGMA_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec101-cbsigma:dev"},
+	{"lib60870", "IEC101_INTEROP_LIB60870_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec101-lib60870@sha256:1bc5600cc95d18300383de8162f34eb7a6bf360c998ddb5814de966a192d3261"},
+	{"cbsigma", "IEC101_INTEROP_CBSIGMA_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec101-cbsigma@sha256:b6c0079c8df60230ab71d03d7b44a1649088d09e5fc70a7a32f059fc264b140f"},
 }
 
 var modes = []string{"unbalanced", "balanced"}

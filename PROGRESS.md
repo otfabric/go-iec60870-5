@@ -3,6 +3,27 @@
 Working log of the IEC 60870-5 program (go-iec60870-5 and
 otfabric/iec60870-5-interop). Newest first. Plan: [docs/ROADMAP.md](docs/ROADMAP.md).
 
+## 2026-11-11 (later)
+
+- Repositories public on GitHub (otfabric/go-iec60870-5,
+  otfabric/iec60870-5-interop). iec60870-5-interop v0.1.0 released (7
+  multi-arch images, digests in its manifest.json); IEC 101 interop pinned
+  to them and in the Interop workflow.
+- Standard texts obtained: IEC 60870-5-101:2003 (GOST R IDT) and IEC TS
+  60870-5-7:2025. Read-only audits against both: 101 fixes applied (delay
+  acquisition, counter freeze), remaining 101 deviations and the TS-7
+  gaps are listed in LIMITATIONS.md and SECURITY.md. The same `sec` gaps
+  exist in go-iec104 (not modified here).
+- Beckhoff TwinCAT TS650x manual (IEC 60870-5-101/-102/-103/-104, 511 pages)
+  obtained: vendor documentation of a commercial implementation, the main
+  available source for IEC 102 types until the standard is held.
+- Public captures for 101/102/103/104 surveyed (sources noted for the
+  capture hardening).
+
+Next: v0.2.0 = capture (pcap/pcapng) hardening for 101/103/104, the TS-7
+gaps (statistics reporting, RBAC file delete, MONITOR DATA, key-usage
+defaults, MAC defaults), the 101 link-state deviations; then IEC 102.
+
 ## 2026-11-11
 
 State:
