@@ -78,9 +78,33 @@ func RequiredPermission(t asdu.TypeID) Permission {
 	return 0
 }
 
+// RequiredPermissionOf is the permission request a needs: that of its
+// type, except that F_SC_NA_1 with the qualifier "delete file" needs file
+// management, the permission "to delete existing files on a device"
+// (IEC TS 60870-5-7:2025 8.2, FILEMNGT).
+func RequiredPermissionOf(a *asdu.ASDU) Permission {
+	if a.Type == asdu.F_SC_NA_1 {
+		for _, o := range a.Objects {
+			if c, ok := o.(asdu.FileCall); ok && c.Qualifier&0x0F == asdu.FileDelete {
+				return PermFileManagement
+			}
+		}
+	}
+	return RequiredPermission(a.Type)
+}
+
 // Authorized reports whether any of the roles may request type t.
 func Authorized(roles []AccessRole, t asdu.TypeID) bool {
-	p := RequiredPermission(t)
+	return granted(roles, RequiredPermission(t))
+}
+
+// AuthorizedASDU reports whether any of the roles may make request a; see
+// [RequiredPermissionOf].
+func AuthorizedASDU(roles []AccessRole, a *asdu.ASDU) bool {
+	return granted(roles, RequiredPermissionOf(a))
+}
+
+func granted(roles []AccessRole, p Permission) bool {
 	if p == 0 {
 		return true
 	}
@@ -91,3 +115,11 @@ func Authorized(roles []AccessRole, t asdu.TypeID) bool {
 	}
 	return false
 }
+
+// IsMonitorData reports whether type t carries the runtime data values of
+// the monitor direction that only a role with MONITOR DATA may receive,
+// "whether sent spontaneously or sent in response to a request"
+// (IEC TS 60870-5-7:2025 8.2): the process information types 1 to 44.
+// End of initialization, confirmations of commands (which mirror the
+// control-direction type), file transfer and security messages are not.
+func IsMonitorData(t asdu.TypeID) bool { return t >= 1 && t <= 44 }
