@@ -138,8 +138,8 @@ func replay(t *testing.T, p capture.Params, addr uint16, steps []capture.Step) {
 		t.Fatalf("%d requests sent, %d recorded", len(sent), len(reqs))
 	}
 	for k, i := range reqs {
-		if !bytes.Equal(sent[k], steps[i].Frame.Frame.Data) {
-			t.Errorf("request %d:\n  recorded % x\n  sent     % x", k, steps[i].Frame.Frame.Data, sent[k])
+		if !bytes.Equal(sent[k], steps[i].Data) {
+			t.Errorf("request %d:\n  recorded % x\n  sent     % x", k, steps[i].Data, sent[k])
 		}
 	}
 	// Every recorded ASDU delivered, unchanged and in order.
@@ -160,8 +160,8 @@ func replay(t *testing.T, p capture.Params, addr uint16, steps []capture.Step) {
 	}
 	for i := range min(len(got), len(want)) {
 		enc, err := got[i].Encode(ap)
-		if err != nil || !bytes.Equal(enc, want[i].Frame.Frame.Data) {
-			t.Errorf("ASDU %d (frame %d): delivered %s\n  recorded % x\n  delivered % x (%v)", i, want[i].Last, got[i], want[i].Frame.Frame.Data, enc, err)
+		if err != nil || !bytes.Equal(enc, want[i].Data) {
+			t.Errorf("ASDU %d (frame %d): delivered %s\n  recorded % x\n  delivered % x (%v)", i, want[i].Last, got[i], want[i].Data, enc, err)
 		}
 	}
 	t.Logf("%d station ASDUs, %d requests, %d delivered", len(steps)-len(reqs), len(reqs), len(got))

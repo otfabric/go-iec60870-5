@@ -56,6 +56,11 @@ APIs that follow their own application models.
   outside `iec104/` imports it.
 - The root package `iec60870` holds only the `Logger` interfaces; every
   package may import it.
+- Test infrastructure of the capture suites: `internal/pcapio` (pcap,
+  pcapng, TCP reassembly, RTAC serial lines) imports only the standard
+  library; `internal/serialcap` adds `ft12` and `link`;
+  `internal/testutil/corpus` adds `pcapio`. The `<standard>/internal/capture`
+  packages build on them; no production package imports any of them.
 - The graph is acyclic; `go vet` enforces it.
 
 ## IEC 101 stations

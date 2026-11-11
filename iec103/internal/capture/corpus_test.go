@@ -392,7 +392,7 @@ func TestGenerateFuzzSeeds(t *testing.T) {
 				seen[key] = true
 				corpus.FuzzSeed(t, "../../../ft12/testdata/fuzz/FuzzDecode", d.Raw, 1)
 				if d.ASDU != nil {
-					corpus.FuzzSeed(t, "../../testdata/fuzz/FuzzDecode", d.Frame.Frame.Data)
+					corpus.FuzzSeed(t, "../../testdata/fuzz/FuzzDecode", d.Data)
 				}
 			}
 		}

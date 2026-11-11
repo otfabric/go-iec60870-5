@@ -74,9 +74,9 @@ func replayServer(t *testing.T, p capture.Params, addr uint16, steps []capture.S
 			reqs = append(reqs, s.ASDU)
 			continue
 		}
-		want = append(want, hex.EncodeToString(s.Frame.Frame.Data))
+		want = append(want, hex.EncodeToString(s.Data))
 		if len(reqs) == 0 {
-			before = append(before, hex.EncodeToString(s.Frame.Frame.Data))
+			before = append(before, hex.EncodeToString(s.Data))
 			continue
 		}
 		answers[len(reqs)-1] = append(answers[len(reqs)-1], s.ASDU)

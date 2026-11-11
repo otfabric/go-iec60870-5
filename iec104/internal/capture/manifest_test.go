@@ -92,9 +92,6 @@ const (
 	srcWSWiki  = "wireshark-wiki"
 	srcWSIssue = "wireshark-issues"
 	srcEmre    = "EmreEkin/ICS-Pcaps"
-
-	wsUpload = "https://gitlab.com/-/project/7898047/uploads/"
-	emreTree = "https://github.com/EmreEkin/ICS-Pcaps/blob/0ffbf023afb4e39373228b54851bb4a1f33a3ab8/"
 )
 
 var manifestSources = []source{

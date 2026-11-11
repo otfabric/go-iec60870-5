@@ -175,5 +175,5 @@ func (s *Station) data() ft12.Frame {
 	}
 	d := s.Steps[s.next].Decoded
 	s.next++
-	return ft12.Frame{Kind: ft12.KindVariable, Control: byte(link.SecondaryControl(link.FuncUserData, s.ready(), false, false)), Addr: s.Addr, Data: d.Frame.Frame.Data}
+	return ft12.Frame{Kind: ft12.KindVariable, Control: byte(link.SecondaryControl(link.FuncUserData, s.ready(), false, false)), Addr: s.Addr, Data: d.Data}
 }

@@ -58,6 +58,11 @@ own list: [docs/iec104/LIMITATIONS.md](docs/iec104/LIMITATIONS.md).
 
 ## IEC 60870-5-103
 
+- ASDU 9 with more than nine measurands is refused (`iec103.ErrInvalid`,
+  clause 7.3.1.8), and `iec103/client` drops it with a warning. Recorded
+  protection equipment on an SEL RTAC line sends 14 and 16
+  (iec103/testdata/captures); there is no option to accept them yet.
+
 - **No independent interoperability evidence yet.**
 - One controlling system polls one protection device per client (no shared
   line with several devices).
