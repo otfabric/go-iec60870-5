@@ -126,9 +126,22 @@ func (c *Client) ReadEntry(ctx context.Context, gin iec103.GIN, kod iec103.KOD) 
 	return c.GenericRead(ctx, iec103.InfReadEntry, iec103.Item{GIN: gin, KOD: kod})
 }
 
+func writeCauses(inf iec103.InfoNumber) ([]iec103.Cause, error) {
+	switch inf {
+	case iec103.InfWriteEntry:
+		return nil, nil
+	case iec103.InfWriteConfirm:
+		return []iec103.Cause{iec103.CauseGenericWriteConf, iec103.CauseGenericWriteNack}, nil
+	case iec103.InfWriteExecute, iec103.InfWriteAbort:
+		return []iec103.Cause{iec103.CauseGenericWriteAck, iec103.CauseGenericWriteNack}, nil
+	default:
+		return nil, fmt.Errorf("%w: INF %d is not a generic write", iec103.ErrInvalid, inf)
+	}
+}
+
 // GenericWrite sends a generic write command (ASDU 10, cause 40, clause
 // 7.4.8.6.3) with information number inf and the data sets, split over
-// several ASDUs with the same RII when they need it:
+// several ASDUs with the same RII and COUNT toggling when they need it:
 //
 //   - 248 (write entry) has no application answer; it returns nil, nil
 //     once the link layer confirmed the last ASDU;
@@ -136,48 +149,133 @@ func (c *Client) ReadEntry(ctx context.Context, gin iec103.GIN, kod iec103.KOD) 
 //   - 250 (write with execution) waits for cause 40 or 41;
 //   - 251 (write abort) waits for cause 40.
 //
-// Cause 41 returns the answer with an error wrapping [iec103.ErrNegative];
-// the data sets of the answer carry the generic reply codes. Clause
-// 7.4.8.4 allows one generic write at a time.
+// For 250 and 251 every ASDU but the last carries INF 248 and CONT = 1,
+// and the last INF 250 or 251 and CONT = 0 (figure 17); [Client.BeginWrite]
+// builds such a write over several calls. Cause 41 returns the answer with
+// an error wrapping [iec103.ErrNegative]; the data sets of the answer
+// carry the generic reply codes. Clause 7.4.8.4 allows one generic write
+// at a time.
 func (c *Client) GenericWrite(ctx context.Context, inf iec103.InfoNumber, sets ...iec103.DataSet) (*GenericResult, error) {
-	var causes []iec103.Cause
-	switch inf {
-	case iec103.InfWriteEntry:
-	case iec103.InfWriteConfirm:
-		causes = []iec103.Cause{iec103.CauseGenericWriteConf, iec103.CauseGenericWriteNack}
-	case iec103.InfWriteExecute, iec103.InfWriteAbort:
-		causes = []iec103.Cause{iec103.CauseGenericWriteAck, iec103.CauseGenericWriteNack}
-	default:
-		return nil, fmt.Errorf("%w: INF %d is not a generic write", iec103.ErrInvalid, inf)
-	}
-	if err := lock(&c.writeMu); err != nil {
+	if _, err := writeCauses(inf); err != nil {
 		return nil, err
 	}
-	defer c.writeMu.Unlock()
-	ctx, cancel := c.bound(ctx)
-	defer cancel()
-	rii := c.next()
-	bodies, err := iec103.PackGenericData(rii, sets)
+	w, err := c.BeginWrite()
 	if err != nil {
 		return nil, err
 	}
-	var w *waiter
+	if inf == iec103.InfWriteEntry || inf == iec103.InfWriteConfirm {
+		w.inf = inf // every ASDU with the same INF
+	}
+	return w.finish(ctx, inf, sets)
+}
+
+// StagedWrite is a generic write built over several calls (clause
+// 7.4.8.6.3, figure 17): ASDUs 10 with INF 248 (write entry) and CONT = 1,
+// then a last ASDU with INF 250 (write with execution) or 251 (write
+// abort) and CONT = 0, all with one RII and COUNT toggling from ASDU to
+// ASDU. It holds the client's one generic write (clause 7.4.8.4) until
+// [StagedWrite.Execute] or [StagedWrite.Abort]; a StagedWrite is not safe
+// for concurrent use.
+type StagedWrite struct {
+	c     *Client
+	rii   uint8
+	count bool              // COUNT of the next ASDU
+	inf   iec103.InfoNumber // INF of every ASDU but the last: 248, or 249 for GenericWrite
+	done  bool
+}
+
+// BeginWrite starts a staged generic write with a new RII. It returns
+// [iec103.ErrBusy] while another generic write runs. The caller must end
+// it with [StagedWrite.Execute] or [StagedWrite.Abort].
+func (c *Client) BeginWrite() (*StagedWrite, error) {
+	if err := lock(&c.writeMu); err != nil {
+		return nil, err
+	}
+	return &StagedWrite{c: c, rii: c.next(), inf: iec103.InfWriteEntry}, nil
+}
+
+// RII returns the return information identifier of the write.
+func (w *StagedWrite) RII() uint8 { return w.rii }
+
+var errWriteEnded = fmt.Errorf("%w: staged write already executed or aborted", iec103.ErrClosed)
+
+// Stage sends sets with INF 248 and CONT = 1, in as many ASDUs as they
+// need. Nothing is answered; the equipment keeps the data until the write
+// is executed or aborted.
+func (w *StagedWrite) Stage(ctx context.Context, sets ...iec103.DataSet) error {
+	if w.done {
+		return errWriteEnded
+	}
+	if len(sets) == 0 {
+		return nil
+	}
+	ctx, cancel := w.c.bound(ctx)
+	defer cancel()
+	return w.send(ctx, iec103.InfWriteEntry, sets, true)
+}
+
+// Execute sends the last ASDU with INF 250 (write with execution) and
+// CONT = 0, carrying sets (more ASDUs with INF 248 before it when they need
+// them), and waits for the answer: cause 40, or 41 with an error wrapping
+// [iec103.ErrNegative] and the generic reply codes in the answer.
+func (w *StagedWrite) Execute(ctx context.Context, sets ...iec103.DataSet) (*GenericResult, error) {
+	return w.finish(ctx, iec103.InfWriteExecute, sets)
+}
+
+// Abort sends INF 251 (write abort) with CONT = 0: the equipment drops the
+// staged data without activating it. It waits for the answer, cause 40.
+func (w *StagedWrite) Abort(ctx context.Context) (*GenericResult, error) {
+	return w.finish(ctx, iec103.InfWriteAbort, nil)
+}
+
+// send sends sets in ASDUs 10 with the RII of w: every one but the last
+// with w.inf and CONT = 1, the last with inf and CONT = more.
+func (w *StagedWrite) send(ctx context.Context, inf iec103.InfoNumber, sets []iec103.DataSet, more bool) error {
+	bodies, err := iec103.PackGenericData(w.rii, sets)
+	if err != nil {
+		return err
+	}
+	for i, b := range bodies {
+		last := i == len(bodies)-1
+		in := w.inf
+		if last {
+			in = inf
+		}
+		b.NGD = iec103.Counted{Count: w.count, Cont: !last || more}
+		if err := w.c.Send(ctx, iec103.New(iec103.CauseGenericWrite, w.c.ca, iec103.FunGeneric, in, b)); err != nil {
+			return err
+		}
+		w.count = !w.count
+	}
+	return nil
+}
+
+func (w *StagedWrite) finish(ctx context.Context, inf iec103.InfoNumber, sets []iec103.DataSet) (*GenericResult, error) {
+	if w.done {
+		return nil, errWriteEnded
+	}
+	w.done = true
+	defer w.c.writeMu.Unlock()
+	c := w.c
+	ctx, cancel := c.bound(ctx)
+	defer cancel()
+	causes, _ := writeCauses(inf)
+	var wt *waiter
 	if causes != nil {
-		if w, err = c.watch(genericMatch(c.ca, inf, rii, causes...)); err != nil {
+		var err error
+		if wt, err = c.watch(genericMatch(c.ca, inf, w.rii, causes...)); err != nil {
 			return nil, err
 		}
-		defer c.unwatch(w)
+		defer c.unwatch(wt)
 	}
-	for _, b := range bodies {
-		if err := c.Send(ctx, iec103.New(iec103.CauseGenericWrite, c.ca, iec103.FunGeneric, inf, b)); err != nil {
-			return nil, err
-		}
+	if err := w.send(ctx, inf, sets, false); err != nil {
+		return nil, err
 	}
-	if w == nil {
+	if wt == nil {
 		return nil, nil
 	}
 	res := &GenericResult{}
-	if err := c.collect(ctx, w, res); err != nil {
+	if err := c.collect(ctx, wt, res); err != nil {
 		return res, fmt.Errorf("iec103: generic write INF %d: %w", inf, err)
 	}
 	if res.Cause == iec103.CauseGenericWriteNack {

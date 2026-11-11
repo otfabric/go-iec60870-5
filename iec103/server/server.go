@@ -57,7 +57,15 @@ func (f HandlerFunc) HandleASDU(s *Server, a *iec103.ASDU) { f(s, a) }
 const (
 	DefaultQueueSize   = 1024
 	DefaultSyncTimeout = 23 * time.Hour // clause 7.4.2
+	// DefaultBitRate is the lower of the two standard rates of clause
+	// 6.2.4 (9.6 and 19.2 kbit/s).
+	DefaultBitRate = 9600
 )
+
+// syncFrameBits is the length in bits of the FT 1.2 frame of an ASDU 6
+// with a one-octet link address: 68H L L 68H, C, A, 13 octets of ASDU, CS,
+// 16H, 21 characters of 11 bits (start, 8 data, even parity, stop).
+const syncFrameBits = 21 * 11
 
 // Config configures a server.
 type Config struct {
@@ -70,7 +78,9 @@ type Config struct {
 	// (clause 7.2.4).
 	CommonAddr uint8
 	// Fun is the main function type of the equipment, which the
-	// identification messages carry (table 8, note 2).
+	// identification messages and the list of recorded disturbances carry
+	// (table 8, note 2; clause 7.3.1.11). It is required: zero is refused
+	// with [iec103.ErrInvalidConfig].
 	Fun iec103.FunctionType
 	// Identification is the body of the identification (ASDU 5).
 	Identification iec103.Identification
@@ -95,9 +105,20 @@ type Config struct {
 	// synchronization. Zero means [DefaultSyncTimeout].
 	SyncTimeout time.Duration
 	// SyncDelay is added to a received synchronization time: the
-	// transmission time of the ASDU 6, length times bit time (clause
-	// 7.4.2), which the line speed determines.
+	// transmission time of the ASDU 6, its length in bits times the bit
+	// time (clause 7.4.2). Zero means the length of the FT 1.2 frame (21
+	// characters of 11 bits) at BitRate; negative means no correction, for
+	// a transport that is not a serial line.
 	SyncDelay time.Duration
+	// BitRate is the line speed in bit/s from which the default SyncDelay
+	// is computed. Zero means [DefaultBitRate].
+	BitRate int
+	// AnswerBroadcastSync makes the server answer a broadcast time
+	// synchronization (send/no reply to address 255) with the
+	// monitor-direction ASDU 6 too. Off by default: figure 5 of clause
+	// 7.4.2 has broadcast messages need no answer; an addressed
+	// synchronization is always answered.
+	AnswerBroadcastSync bool
 	// OnTimeSync is called with each received synchronization time.
 	OnTimeSync func(t time.Time, broadcast bool)
 
@@ -128,7 +149,7 @@ type Server struct {
 	sec *link.Secondary
 
 	mu         sync.Mutex
-	class      [2][][]byte
+	class      [2][]queued
 	state      iec103.State
 	started    bool // the start identification was sent
 	cmdPending bool // a general command waits for its acknowledgement
@@ -142,6 +163,22 @@ type Server struct {
 	wg     sync.WaitGroup
 }
 
+// queued is a monitor-direction ASDU waiting to be polled; cycle marks the
+// answers of a general interrogation (of generic data), which a new one
+// replaces (clauses 7.4.3 and 7.4.8.7).
+type queued struct {
+	raw   []byte
+	cycle cycle
+}
+
+type cycle uint8
+
+const (
+	noCycle  cycle = iota
+	giCycle        // answers to ASDU 7, the termination, the list after it
+	ggiCycle       // answers to the general interrogation of generic data
+)
+
 type inbound struct {
 	a         *iec103.ASDU
 	broadcast bool
@@ -153,6 +190,21 @@ type inbound struct {
 func New(rw io.ReadWriter, cfg Config) (*Server, error) {
 	if cfg.LinkAddr == 255 {
 		return nil, fmt.Errorf("%w: link address 255 is the broadcast address", iec103.ErrInvalidConfig)
+	}
+	if cfg.Fun == 0 {
+		return nil, fmt.Errorf("%w: no function type (Config.Fun)", iec103.ErrInvalidConfig)
+	}
+	if cfg.BitRate < 0 {
+		return nil, fmt.Errorf("%w: bit rate %d", iec103.ErrInvalidConfig, cfg.BitRate)
+	}
+	if cfg.BitRate == 0 {
+		cfg.BitRate = DefaultBitRate
+	}
+	switch {
+	case cfg.SyncDelay == 0:
+		cfg.SyncDelay = time.Duration(syncFrameBits) * time.Second / time.Duration(cfg.BitRate)
+	case cfg.SyncDelay < 0:
+		cfg.SyncDelay = 0
 	}
 	cfg.Link.FT12 = ft12.Params{AddrSize: 1}
 	if cfg.QueueSize <= 0 {
@@ -232,15 +284,33 @@ func (s *Server) Now() cp.Timestamp {
 }
 
 // Send queues a monitor-direction ASDU as class 1 or class 2 data.
-func (s *Server) Send(a *iec103.ASDU, c Class) error {
+func (s *Server) Send(a *iec103.ASDU, c Class) error { return s.send(a, c, noCycle) }
+
+func (s *Server) send(a *iec103.ASDU, c Class, cy cycle) error {
 	raw, err := a.AppendIn(nil, s.cfg.Location)
 	if err != nil {
 		return err
 	}
-	return s.queue(raw, c, false)
+	return s.queue(queued{raw: raw, cycle: cy}, c, false)
 }
 
-func (s *Server) queue(raw []byte, c Class, front bool) error {
+// purge drops the queued answers of an interrupted interrogation cycle.
+func (s *Server) purge(cy cycle) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var q []queued
+	for _, x := range s.class[0] {
+		if x.cycle != cy {
+			q = append(q, x)
+		}
+	}
+	if n := len(s.class[0]) - len(q); n > 0 {
+		s.log.Debug("interrogation cycle aborted", "dropped", n)
+	}
+	s.class[0] = q
+}
+
+func (s *Server) queue(raw queued, c Class, front bool) error {
 	if s.ctx.Err() != nil {
 		return iec103.ErrClosed
 	}
@@ -254,7 +324,7 @@ func (s *Server) queue(raw []byte, c Class, front bool) error {
 		return ErrQueueFull
 	}
 	if front {
-		s.class[i] = append([][]byte{raw}, s.class[i]...)
+		s.class[i] = append([]queued{raw}, s.class[i]...)
 	} else {
 		s.class[i] = append(s.class[i], raw)
 	}
@@ -281,7 +351,9 @@ func (s *Server) Event(cause iec103.Cause, fun iec103.FunctionType, inf iec103.I
 // it queues data with cause 9, the scan number as SIN of time-tagged
 // messages, then the termination (ASDU 8) with the scan number. With a
 // [DisturbanceSource] the list of recorded disturbances follows (ASDU 23,
-// cause 31, clause 7.4.7).
+// cause 31, with the function type of the equipment, clauses 7.3.1.11 and
+// 7.4.7). A new ASDU 7 that arrives before the cycle was polled drops what
+// is left of it, termination included (clause 7.4.3).
 func (s *Server) AnswerGI(req *iec103.ASDU, data ...*iec103.ASDU) error {
 	scn := req.Body.(iec103.GIInit).SCN
 	for _, a := range data {
@@ -295,15 +367,15 @@ func (s *Server) AnswerGI(req *iec103.ASDU, data ...*iec103.ASDU) error {
 			b.SIN = scn
 			c.Body = b
 		}
-		if err := s.Send(&c, Class1); err != nil {
+		if err := s.send(&c, Class1, giCycle); err != nil {
 			return err
 		}
 	}
-	if err := s.Send(iec103.New(iec103.CauseGITermination, s.ca, iec103.FunGlobal, iec103.InfGIEnd, iec103.GITermination{SCN: scn}), Class1); err != nil {
+	if err := s.send(iec103.New(iec103.CauseGITermination, s.ca, iec103.FunGlobal, iec103.InfGIEnd, iec103.GITermination{SCN: scn}), Class1, giCycle); err != nil {
 		return err
 	}
 	if s.cfg.Disturbances != nil {
-		return s.sendList(req.Fun)
+		return s.sendList(giCycle)
 	}
 	return nil
 }
@@ -314,10 +386,14 @@ func (s *Server) AnswerGI(req *iec103.ASDU, data ...*iec103.ASDU) error {
 // followed by the change of state with cause 12, which the application
 // sends ([Server.Event]).
 func (s *Server) AckCommand(req *iec103.ASDU, positive bool) error {
-	cmd := req.Body.(iec103.GeneralCommand)
 	s.mu.Lock()
 	s.cmdPending = false
 	s.mu.Unlock()
+	return s.ack(req, positive)
+}
+
+func (s *Server) ack(req *iec103.ASDU, positive bool) error {
+	cmd := req.Body.(iec103.GeneralCommand)
 	cause := iec103.CauseCommandAck
 	if !positive {
 		cause = iec103.CauseCommandNack
@@ -340,16 +416,16 @@ func riiOf(req *iec103.ASDU) uint8 {
 // or 44 for writes, 9 for the general interrogation of generic data) and
 // the data sets, split over several ASDUs when they need it.
 func (s *Server) GenericAnswer(req *iec103.ASDU, cause iec103.Cause, sets ...iec103.DataSet) error {
-	return s.generic(req.Inf, riiOf(req), cause, sets)
+	return s.generic(req.Inf, riiOf(req), cause, sets, noCycle)
 }
 
-func (s *Server) generic(inf iec103.InfoNumber, rii uint8, cause iec103.Cause, sets []iec103.DataSet) error {
+func (s *Server) generic(inf iec103.InfoNumber, rii uint8, cause iec103.Cause, sets []iec103.DataSet, cy cycle) error {
 	bodies, err := iec103.PackGenericData(rii, sets)
 	if err != nil {
 		return err
 	}
 	for _, b := range bodies {
-		if err := s.Send(iec103.New(cause, s.ca, iec103.FunGeneric, inf, b), Class1); err != nil {
+		if err := s.send(iec103.New(cause, s.ca, iec103.FunGeneric, inf, b), Class1, cy); err != nil {
 			return err
 		}
 	}
@@ -358,15 +434,17 @@ func (s *Server) generic(inf iec103.InfoNumber, rii uint8, cause iec103.Cause, s
 
 // AnswerGenericGI answers the general interrogation of generic data req
 // (ASDU 21, INF 245, clause 7.4.8.7): ASDU 10 with INF 244 and cause 9
-// carrying the data sets, then the end (INF 245, cause 10, NGD 0).
+// carrying the data sets, then the end (INF 245, cause 10, NGD 0). A new
+// general interrogation of generic data that arrives before the cycle was
+// polled drops what is left of it, end included (clause 7.4.8.7).
 func (s *Server) AnswerGenericGI(req *iec103.ASDU, sets ...iec103.DataSet) error {
 	rii := riiOf(req)
 	if len(sets) > 0 {
-		if err := s.generic(iec103.InfReadEntry, rii, iec103.CauseGI, sets); err != nil {
+		if err := s.generic(iec103.InfReadEntry, rii, iec103.CauseGI, sets, ggiCycle); err != nil {
 			return err
 		}
 	}
-	return s.generic(iec103.InfGenericGI, rii, iec103.CauseGITermination, nil)
+	return s.generic(iec103.InfGenericGI, rii, iec103.CauseGITermination, nil, ggiCycle)
 }
 
 // GenericIdentAnswer answers a read of the directory of a single entry
@@ -384,7 +462,15 @@ func (s *Server) GenericIdentAnswer(req *iec103.ASDU, cause iec103.Cause, gin ie
 	return nil
 }
 
+// receive takes user data from the link. While DFC is set (the queue to
+// the handler is more than half full) user data is refused with NACK
+// (clause 6.3: a command sent anyway is not processed and is answered
+// with function 1); a broadcast is the exception and is taken while there
+// is room.
 func (s *Server) receive(data []byte, broadcast bool) bool {
+	if !broadcast && s.busy() {
+		return false
+	}
 	a, err := iec103.DecodeIn(data, s.cfg.Location)
 	if err != nil {
 		s.log.Warn("undecodable ASDU dropped", "err", err)
@@ -421,6 +507,12 @@ func (s *Server) dispatch(m inbound) {
 		s.timeSync(b.Time.Time, m)
 		return
 	case iec103.GeneralCommand:
+		if !iec103.CommandAllowed(a.Fun, a.Inf, b.DCO) {
+			// Clause 7.2.6.4 and table 17: a DCO that is not used, or OFF
+			// where only ON is defined, is acknowledged negatively.
+			_ = s.ack(a, false)
+			return
+		}
 		s.mu.Lock()
 		pending := s.cmdPending
 		s.cmdPending = true
@@ -428,10 +520,7 @@ func (s *Server) dispatch(m inbound) {
 		if pending {
 			// Clause 7.4.4: a command before the previous one was
 			// acknowledged is rejected.
-			_ = s.AckCommand(a, false)
-			s.mu.Lock()
-			s.cmdPending = true
-			s.mu.Unlock()
+			_ = s.ack(a, false)
 			return
 		}
 		if s.cfg.Handler == nil {
@@ -439,9 +528,14 @@ func (s *Server) dispatch(m inbound) {
 			return
 		}
 	case iec103.GIInit:
+		s.purge(giCycle)
 		if s.cfg.Handler == nil {
 			_ = s.AnswerGI(a)
 			return
+		}
+	case iec103.GenericCommand:
+		if a.Inf == iec103.InfGenericGI && a.Cause == iec103.CauseGI {
+			s.purge(ggiCycle)
 		}
 	case iec103.DisturbanceOrder:
 		if s.cfg.Disturbances != nil && a.Cause == iec103.CauseDisturbanceData {
@@ -454,10 +548,10 @@ func (s *Server) dispatch(m inbound) {
 	}
 }
 
-// timeSync applies a time synchronization (clause 7.4.2) and answers with
-// ASDU 6 in the monitor direction carrying the corrected time. We answer a
-// broadcast synchronization as well: figure 5 shows the monitor-direction
-// ASDU 6 after both forms.
+// timeSync applies a time synchronization (clause 7.4.2) and answers an
+// addressed one with ASDU 6 in the monitor direction carrying the
+// corrected time; a broadcast one only with [Config.AnswerBroadcastSync]
+// (figure 5: broadcast messages need no answer).
 func (s *Server) timeSync(t time.Time, m inbound) {
 	t = t.Add(s.cfg.SyncDelay)
 	s.mu.Lock()
@@ -466,6 +560,9 @@ func (s *Server) timeSync(t time.Time, m inbound) {
 	s.mu.Unlock()
 	if s.cfg.OnTimeSync != nil {
 		s.cfg.OnTimeSync(t, m.broadcast)
+	}
+	if m.broadcast && !s.cfg.AnswerBroadcastSync {
+		return
 	}
 	_ = s.Send(iec103.New(iec103.CauseTimeSync, s.ca, iec103.FunGlobal, iec103.InfTimeSync, iec103.TimeSync{Time: s.Now()}), Class1)
 }
@@ -479,7 +576,7 @@ func (s *Server) identify(cause iec103.Cause, front bool) {
 	}[cause]
 	raw, err := iec103.New(cause, s.ca, s.cfg.Fun, inf, s.cfg.Identification).AppendIn(nil, s.cfg.Location)
 	if err == nil {
-		err = s.queue(raw, Class1, front)
+		err = s.queue(queued{raw: raw}, Class1, front)
 	}
 	if err != nil {
 		s.log.Warn("identification not queued", "err", err)
@@ -493,7 +590,7 @@ func (s *Server) identify(cause iec103.Cause, front bool) {
 func (s *Server) reset(clear bool) {
 	s.mu.Lock()
 	if clear {
-		s.class = [2][][]byte{}
+		s.class = [2][]queued{}
 	}
 	first := !s.started
 	s.started = true
@@ -529,7 +626,7 @@ func (u secondaryUser) pop(i int) []byte {
 	}
 	d := q[0]
 	u.s.class[i] = q[1:]
-	return d
+	return d.raw
 }
 
 func (u secondaryUser) Class1() []byte { return u.pop(0) }
@@ -550,7 +647,9 @@ func (u secondaryUser) ResetFCB() { u.s.reset(false) }
 
 // Busy sets DFC while the handler queue is more than half full (clause
 // 6.3).
-func (u secondaryUser) Busy() bool { return len(u.s.in) > cap(u.s.in)/2 }
+func (u secondaryUser) Busy() bool { return u.s.busy() }
+
+func (s *Server) busy() bool { return len(s.in) > cap(s.in)/2 }
 
 // Implemented accepts the primary function codes of clause 6.2.3 and 6.3:
 // 0, 3, 4, 7, 9, 10 and 11.

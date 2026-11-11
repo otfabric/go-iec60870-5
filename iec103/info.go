@@ -107,8 +107,9 @@ var monitorInfo = []InfoSpec{
 	{71, "trip L3", false, ty(2), c17, fDOTL},
 	{72, "trip I>> (back-up operation)", false, ty(2), c17, fD},
 	// The text we hold lists TYP 2 for INF 73, although ASDU 4 is the one
-	// that carries the fault location SCL (clause 7.3.1.4); kept as printed.
-	{73, "fault location X in ohms", false, ty(2), c17, fDO},
+	// that carries the fault location SCL (clauses 7.2.6.20 and 7.3.1.4):
+	// both are listed so that an ASDU 4 with INF 73 resolves.
+	{73, "fault location X in ohms", false, ty(2, 4), c17, fDO},
 	{74, "fault forward/line", false, ty(2), c17, fDO},
 	{75, "fault reverse/busbar", false, ty(2), c17, fDO},
 	{76, "teleprotection signal transmitted", false, ty(2), c17, fDO},
@@ -287,4 +288,24 @@ func (c *Catalog) Lookup(dir Direction, typ TypeID, fun FunctionType, inf InfoNu
 		return s, true
 	}
 	return InfoSpec{}, false
+}
+
+// CommandAllowed reports whether a general command (ASDU 20) with double
+// command dco may be sent with (fun, inf): DCO is OFF or ON (clause
+// 7.2.6.4: 0 and 3 are not used), and for a compatible function type the
+// COM column of table 17 allows only ON for INF 19 (LED reset) and 23 to
+// 26 (activate characteristic 1 to 4).
+func CommandAllowed(fun FunctionType, inf InfoNumber, dco DPI) bool {
+	if dco != DPIOff && dco != DPIOn {
+		return false
+	}
+	if !fun.Compatible() {
+		return true
+	}
+	switch inf {
+	case InfLEDReset, 23, 24, 25, 26:
+		return dco == DPIOn
+	default:
+		return true
+	}
 }

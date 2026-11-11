@@ -30,6 +30,15 @@ type device struct {
 	block   chan struct{} // INF 23 waits for it before acknowledging
 	entered chan struct{} // INF 23 arrived
 	gis     int
+	writes  []writeASDU // every ASDU 10 of a write, as received
+}
+
+// writeASDU is what the device saw of one ASDU 10 of a generic write.
+type writeASDU struct {
+	inf iec103.InfoNumber
+	rii uint8
+	ngd iec103.Counted
+	n   int
 }
 
 func newDevice() *device {
@@ -106,6 +115,7 @@ func (d *device) generic(s *server.Server, a *iec103.ASDU, b iec103.GenericComma
 func (d *device) write(s *server.Server, a *iec103.ASDU, b iec103.GenericData) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.writes = append(d.writes, writeASDU{inf: a.Inf, rii: b.RII, ngd: b.NGD, n: len(b.Sets)})
 	d.queued = append(d.queued, b.Sets...)
 	if b.NGD.Cont {
 		return
@@ -168,6 +178,21 @@ func (r *records) Record(fan uint16) (*iec103.Disturbance, bool) {
 	return r.rec, fan == r.rec.FAN
 }
 
+// waitAcks waits for the final acknowledgement of a transfer, which
+// reaches the source on the server's goroutine after the client's link
+// layer saw it confirmed.
+func (r *records) waitAcks(t *testing.T) []bool {
+	t.Helper()
+	eventually(t, "final acknowledgement", func() bool {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		return len(r.acks) > 0
+	})
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]bool(nil), r.acks...)
+}
+
 func (r *records) Transmitted(_ uint16, ok bool) {
 	r.mu.Lock()
 	r.acks = append(r.acks, ok)
@@ -214,6 +239,11 @@ type options struct {
 	noDist   bool           // no disturbance source
 	timeout  time.Duration  // client request timeout
 	onState  func(iec103.State, error)
+	// server is applied to the server configuration; wrap to the client's
+	// side of the line.
+	server func(*server.Config)
+	wrap   func(io.ReadWriteCloser) io.ReadWriteCloser
+	link   time.Duration // link time-out, default 50 ms
 }
 
 func start(t *testing.T, o options) *rig {
@@ -222,6 +252,9 @@ func start(t *testing.T, o options) *rig {
 	r := &rig{dev: newDevice(), rec: newRecords(), got: make(chan *iec103.ASDU, 1024)}
 	r.line = &lossy{ReadWriteCloser: b, n: o.dropN}
 	lc := link.Config{Timeout: 50 * time.Millisecond, Retries: 3}
+	if o.link > 0 {
+		lc.Timeout = o.link
+	}
 	var h server.Handler = r.dev
 	if !o.handler {
 		h = nil
@@ -233,16 +266,24 @@ func start(t *testing.T, o options) *rig {
 	if o.noDist {
 		src = nil
 	}
-	var err error
-	r.s, err = server.New(r.line, server.Config{
+	scfg := server.Config{
 		Link: lc, LinkAddr: 3, Fun: fun, Handler: h, Disturbances: src,
 		Identification: iec103.IdentificationOf(iec103.COLWithGeneric, "OTFABRIC", [4]byte{1, 0, 0, 0}),
 		OnTimeSync:     func(time.Time, bool) { r.sync.Add(1) },
-	})
+	}
+	if o.server != nil {
+		o.server(&scfg)
+	}
+	var err error
+	r.s, err = server.New(r.line, scfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.c, err = client.New(a, client.Config{
+	var cl io.ReadWriteCloser = a
+	if o.wrap != nil {
+		cl = o.wrap(a)
+	}
+	r.c, err = client.New(cl, client.Config{
 		Link: lc, LinkAddr: 3, ResetFCB: o.resetFCB, NoInitGI: o.noInit, NoInitTimeSync: o.noInit,
 		PollInterval: 5 * time.Millisecond, RetryInterval: 50 * time.Millisecond, RequestTimeout: o.timeout,
 		Handler: func(a *iec103.ASDU) { r.got <- a }, OnState: o.onState,
@@ -348,7 +389,7 @@ func TestGeneralInterrogation(t *testing.T) {
 
 // TestTimeSync covers clause 7.4.2, addressed and broadcast.
 func TestTimeSync(t *testing.T) {
-	r := start(t, options{noInit: true, handler: true})
+	r := start(t, options{noInit: true, handler: true, server: func(sc *server.Config) { sc.AnswerBroadcastSync = true }})
 	want := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
 	got, err := r.c.ClockSync(ctx(t), want)
 	if err != nil {
@@ -525,17 +566,7 @@ func TestDisturbanceTransfer(t *testing.T) {
 			t.Fatalf("channel %d: %+v", i, ch)
 		}
 	}
-	// The client returns when it has sent the acknowledgement; the server
-	// records it when the next poll delivers it.
-	var acks []bool
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
-		r.rec.mu.Lock()
-		acks = append([]bool(nil), r.rec.acks...)
-		r.rec.mu.Unlock()
-		if len(acks) > 0 || time.Now().After(deadline) {
-			break
-		}
-	}
+	acks := r.rec.waitAcks(t)
 	if len(acks) != 1 || !acks[0] {
 		t.Fatalf("acknowledgements %v", acks)
 	}

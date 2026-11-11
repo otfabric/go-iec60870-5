@@ -37,6 +37,8 @@ BroadcastAddr is the link address of send/no reply to all stations (clause 6.2.3
 ```go
 type Client struct {
 
+	// broadcasts: sent whatever DFC says (clause 6.3)
+
 	// closed while the link is up
 	// closed when the link goes down after being up
 
@@ -55,13 +57,21 @@ func New(rw io.ReadWriter, cfg Config) (*Client, error)
 
 New starts a controlling system on rw. Close stops it and closes rw when it is an io.Closer.
 
+#### func (Client) BeginWrite
+
+```go
+func (c *Client) BeginWrite() (*StagedWrite, error)
+```
+
+BeginWrite starts a staged generic write with a new RII. It returns [iec103.ErrBusy](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#ErrBusy) while another generic write runs. The caller must end it with [StagedWrite.Execute](#func-stagedwrite-execute) or [StagedWrite.Abort](#func-stagedwrite-abort).
+
 #### func (Client) Broadcast
 
 ```go
 func (c *Client) Broadcast(a *iec103.ASDU) error
 ```
 
-Broadcast transmits a control-direction ASDU with send/no reply to link address 255 (clause 6.2.3). Nothing is confirmed.
+Broadcast transmits a control-direction ASDU with send/no reply to link address 255 (clause 6.2.3), between two exchanges of the link, also while the equipment sets DFC (clause 6.3). Nothing is confirmed.
 
 #### func (Client) BroadcastClockSync
 
@@ -69,7 +79,7 @@ Broadcast transmits a control-direction ASDU with send/no reply to link address 
 func (c *Client) BroadcastClockSync(t time.Time) error
 ```
 
-BroadcastClockSync sends ASDU 6 with the global common address to link address 255 (send/no reply, clause 7.4.2). The ASDU 6 each item of equipment then sends reaches the Handler.
+BroadcastClockSync sends ASDU 6 with the global common address to link address 255 (send/no reply, clause 7.4.2), with t advanced by the time it waited for the link like [Client.ClockSync](#func-client-clocksync). Equipment that answers a broadcast synchronization with ASDU 6 delivers it to the Handler.
 
 #### func (Client) ClockSync
 
@@ -77,7 +87,7 @@ BroadcastClockSync sends ASDU 6 with the global common address to link address 2
 func (c *Client) ClockSync(ctx context.Context, t time.Time) (cp.Timestamp, error)
 ```
 
-ClockSync synchronizes the clock of the protection equipment with an addressed ASDU 6 (send/confirm, clause 7.4.2) and returns the time of the ASDU 6 it answers with: the time of the command, corrected by the equipment for transmission and processing.
+ClockSync synchronizes the clock of the protection equipment with an addressed ASDU 6 (send/confirm, clause 7.4.2) and returns the time of the ASDU 6 it answers with: the time of the command, corrected by the equipment for transmission and processing. The command carries t advanced by the time it waited for the link, the time of its transmission.
 
 #### func (Client) Close
 
@@ -93,7 +103,7 @@ Close stops the station. Outstanding requests fail with [iec103.ErrClosed](https
 func (c *Client) Command(ctx context.Context, fun iec103.FunctionType, inf iec103.InfoNumber, dco iec103.DPI) error
 ```
 
-Command sends a general command (ASDU 20, clause 7.4.4) and waits for its acknowledgement: ASDU 1 with the same FUN and INF, cause 20 or 21 and the command's RII as SIN. A negative acknowledgement returns an error wrapping [iec103.ErrNegative](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#ErrNegative). The change of state the command causes follows with cause 12 and reaches the Handler. Clause 7.4.4 allows one command procedure at a time: a second concurrent call returns [iec103.ErrBusy](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#ErrBusy).
+Command sends a general command (ASDU 20, clause 7.4.4) and waits for its acknowledgement: ASDU 1 with the same FUN and INF, cause 20 or 21 and the command's RII as SIN. A negative acknowledgement returns an error wrapping [iec103.ErrNegative](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#ErrNegative). The change of state the command causes follows with cause 12 and reaches the Handler. Clause 7.4.4 allows one command procedure at a time: a second concurrent call returns [iec103.ErrBusy](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#ErrBusy). A DCO that [iec103.CommandAllowed](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#CommandAllowed) refuses (0 or 3, or OFF where table 17 defines only ON) returns [iec103.ErrInvalid](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#ErrInvalid).
 
 #### func (Client) CommonAddr
 
@@ -113,11 +123,11 @@ Disturbance transfers the recorded disturbance fan of function type fun with the
 
  1. ASDU 24 "selection of fault", answered by ASDU 26;
  2. ASDU 24 "request for disturbance data", answered by ASDU 28;
- 3. ASDU 24 "request for tags", answered by ASDUs 29 and an ASDU 31, acknowledged by ASDU 25 "tags transmitted successfully";
- 4. for each ASDU 27 the equipment offers: ASDU 24 "channel request", answered by ASDUs 30 and an ASDU 31, acknowledged by ASDU 25 positive when NFE runs without gaps up to NOE, negative otherwise;
- 5. the ASDU 31 "end of disturbance data", acknowledged by ASDU 25.
+ 3. ASDU 24 "request for tags", answered by ASDUs 29 and an ASDU 31, acknowledged by ASDU 25 "tags transmitted successfully", or "not successfully" when the equipment aborted them (TOO 40) or the initial states were not at position 0 (clause 7.4.7);
+ 4. for each ASDU 27 the equipment offers: ASDU 24 "channel request", answered by ASDUs 30 and an ASDU 31, acknowledged by ASDU 25 positive when NFE runs without gaps up to NOE, negative otherwise or when the equipment aborted the channel (TOO 37);
+ 5. the ASDU 31 "end of disturbance data", acknowledged by ASDU 25: negative when tags or a channel were, or when fewer channels came than NOC announced.
 
-A channel acknowledged negatively makes the final acknowledgement negative too and the call returns the record with an error wrapping [iec103.ErrNegative](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#ErrNegative); clause 7.4.7 lets the equipment then offer the transfer again. An abortion by the equipment returns [iec103.ErrAborted](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#ErrAborted). The ctx should allow for the whole transfer; on its expiry the transfer is left as it is (no abortion order is sent). One transfer at a time.
+A negative acknowledgement returns the record with an error wrapping [iec103.ErrNegative](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#ErrNegative); clause 7.4.7 lets the equipment then offer the transfer again. An abortion of the whole transfer by the equipment (TOO 34) is acknowledged negatively and returns [iec103.ErrAborted](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#ErrAborted). The ctx should allow for the whole transfer; on its expiry the transfer is left as it is (no abortion order is sent). One transfer at a time.
 
 #### func (Client) DisturbanceList
 
@@ -149,14 +159,14 @@ GenericRead sends a generic read command (ASDU 21, cause 42) with information nu
 func (c *Client) GenericWrite(ctx context.Context, inf iec103.InfoNumber, sets ...iec103.DataSet) (*GenericResult, error)
 ```
 
-GenericWrite sends a generic write command (ASDU 10, cause 40, clause 7.4.8.6.3) with information number inf and the data sets, split over several ASDUs with the same RII when they need it:
+GenericWrite sends a generic write command (ASDU 10, cause 40, clause 7.4.8.6.3) with information number inf and the data sets, split over several ASDUs with the same RII and COUNT toggling when they need it:
 
   - 248 (write entry) has no application answer; it returns nil, nil once the link layer confirmed the last ASDU;
   - 249 (write with confirmation) waits for the echo with cause 44;
   - 250 (write with execution) waits for cause 40 or 41;
   - 251 (write abort) waits for cause 40.
 
-Cause 41 returns the answer with an error wrapping [iec103.ErrNegative](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#ErrNegative); the data sets of the answer carry the generic reply codes. Clause 7.4.8.4 allows one generic write at a time.
+For 250 and 251 every ASDU but the last carries INF 248 and CONT = 1, and the last INF 250 or 251 and CONT = 0 (figure 17); [Client.BeginWrite](#func-client-beginwrite) builds such a write over several calls. Cause 41 returns the answer with an error wrapping [iec103.ErrNegative](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#ErrNegative); the data sets of the answer carry the generic reply codes. Clause 7.4.8.4 allows one generic write at a time.
 
 #### func (Client) Identification
 
@@ -299,3 +309,48 @@ type GenericResult struct {
 ```
 
 GenericResult is the answer to a generic service (clause 7.4.8): the data sets of every ASDU 10, or the GIN and description elements of every ASDU 11, with the same RII, in order.
+
+### type StagedWrite
+
+```go
+type StagedWrite struct {
+
+	// COUNT of the next ASDU
+	// INF of every ASDU but the last: 248, or 249 for GenericWrite
+
+}
+```
+
+StagedWrite is a generic write built over several calls (clause 7.4.8.6.3, figure 17): ASDUs 10 with INF 248 (write entry) and CONT = 1, then a last ASDU with INF 250 (write with execution) or 251 (write abort) and CONT = 0, all with one RII and COUNT toggling from ASDU to ASDU. It holds the client's one generic write (clause 7.4.8.4) until [StagedWrite.Execute](#func-stagedwrite-execute) or [StagedWrite.Abort](#func-stagedwrite-abort); a StagedWrite is not safe for concurrent use.
+
+#### func (StagedWrite) Abort
+
+```go
+func (w *StagedWrite) Abort(ctx context.Context) (*GenericResult, error)
+```
+
+Abort sends INF 251 (write abort) with CONT = 0: the equipment drops the staged data without activating it. It waits for the answer, cause 40.
+
+#### func (StagedWrite) Execute
+
+```go
+func (w *StagedWrite) Execute(ctx context.Context, sets ...iec103.DataSet) (*GenericResult, error)
+```
+
+Execute sends the last ASDU with INF 250 (write with execution) and CONT = 0, carrying sets (more ASDUs with INF 248 before it when they need them), and waits for the answer: cause 40, or 41 with an error wrapping [iec103.ErrNegative](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#ErrNegative) and the generic reply codes in the answer.
+
+#### func (StagedWrite) RII
+
+```go
+func (w *StagedWrite) RII() uint8
+```
+
+RII returns the return information identifier of the write.
+
+#### func (StagedWrite) Stage
+
+```go
+func (w *StagedWrite) Stage(ctx context.Context, sets ...iec103.DataSet) error
+```
+
+Stage sends sets with INF 248 and CONT = 1, in as many ASDUs as they need. Nothing is answered; the equipment keeps the data until the write is executed or aborted.

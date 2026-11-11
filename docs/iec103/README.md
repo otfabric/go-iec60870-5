@@ -56,19 +56,30 @@ case iec103.Raw: // private type or private cause: every octet kept
   interprets such an ASDU with the compatible structure when a station
   keeps it.
 - Encode writes the VSQ the body defines (0x81, or the number of
-  measurands or disturbances); the VSQ field of a decoded ASDU is what was
-  received. The "not used" octets of ASDUs 23 to 31 are written as 0 and
+  measurands or disturbances); decode checks it (clause 7.2.2: 0x81 for a
+  single information object, SQ = 0 for ASDUs 3, 9 and 23) and keeps it in
+  the VSQ field. The "not used" octets of ASDUs 23 to 31 are written as 0 and
   ignored on receive, except the INF position, which `ASDU.Inf` keeps.
 - `MEA` holds MVAL as the integer in -4096..4095 with `OV` and `ER`;
-  `MEAOf` and `Value` convert from and to the fraction of full scale.
+  `MEAOf` and `Value` convert from and to the fraction of full scale (full
+  scale is 1.2 or 2.4 times the rated value, clause 7.2.6.8).
+- Time tags: the bit after the minutes is RES1 in IEC 103 (clauses
+  7.2.6.28, 7.2.6.29), not the GEN flag of 101/104: ignored on decode
+  (`cp.Timestamp.Substituted` stays false) and written as 0.
 - Generic data: `Value` is a GDD with its GID. `ASCII`, `Uints`, `Ints`,
   `Float32s`, `Float64s`, `Reply` and `Structure` build values; `Text`,
   `Uint`, `Int`, `Float` and `Fields` read them. `PackGenericData` and
   `PackGenericIdent` split long answers over ASDUs with COUNT and CONT.
+  A GDD needs DATASIZE 1..255 and NUMBER 1..127 (clause 7.2.6.32) and an
+  ASDU 11 at least one description element (NDE 1..63, clause 7.2.6.35);
+  encode and decode refuse others with `ErrInvalid`.
 - Function types and information numbers: `FunctionType.Compatible`
   implements the ranges of clause 7.2.5.1; `StandardInfo` returns the
   entries of tables 8 to 18; a `Catalog` adds private FUN/INF semantics and
-  looks up both.
+  looks up both. INF 73 (fault location) is listed with types 2 and 4
+  (interpretation 7). `CommandAllowed` checks a double command against
+  clause 7.2.6.4 (DCO 1 or 2) and the COM column of table 17 (only ON for
+  INF 19 and 23 to 26).
 
 ## Controlling system
 
@@ -82,6 +93,9 @@ t, err := c.ClockSync(ctx, time.Now())       // addressed ASDU 6; BroadcastClock
 err = c.Command(ctx, iec103.FunDistance, iec103.InfLEDReset, iec103.DPIOn)
 res, err := c.ReadEntry(ctx, iec103.GIN{Group: 2, Entry: 1}, iec103.KODActualValue)
 res, err = c.GenericWrite(ctx, iec103.InfWriteExecute, sets...)
+w, err := c.BeginWrite()                     // staged: 248 ... 250 with one RII
+err = w.Stage(ctx, part1...)
+res, err = w.Execute(ctx, part2...)          // or w.Abort(ctx): INF 251
 rec, err := c.Disturbance(ctx, iec103.FunDistance, fan)
 ```
 
@@ -89,7 +103,29 @@ rec, err := c.Disturbance(ctx, iec103.FunDistance, fan)
   (function 0) or, with `Config.ResetFCB`, reset FCB (function 7); class 1
   is polled while the equipment sets ACD, class 2 otherwise. While the
   equipment sets DFC, control-direction ASDUs stay queued (clause 6.3);
-  broadcasts are sent anyway.
+  broadcasts are sent anyway. Broadcasts go through the same loop as
+  every other message, between two link exchanges.
+- Time synchronization (clause 7.4.2): `ClockSync` and
+  `BroadcastClockSync` encode the ASDU 6 when it is transmitted, with the
+  given time advanced by the time it waited for the link, so the command
+  carries the time of its transmission.
+- `Command` refuses a DCO that `iec103.CommandAllowed` refuses with
+  `ErrInvalid`.
+- Generic writes (clause 7.4.8.6.3, figure 17): `GenericWrite` with INF
+  250 or 251 sends every ASDU but the last with INF 248 and CONT = 1, the
+  last with INF 250/251 and CONT = 0, one RII, COUNT toggling.
+  `BeginWrite` returns a `StagedWrite` that builds the same sequence over
+  several calls (`Stage`, then `Execute` or `Abort`); it holds the one
+  generic write of clause 7.4.8.4 until it ends.
+- Disturbance data (clause 7.4.7, figure 10): every ASDU 31 is
+  acknowledged with an ASDU 25. Tags or a channel the equipment aborted
+  (TOO 40, 37) are acknowledged negatively (TOO 69, 67) and the transfer
+  goes on; the end of the disturbance data is then acknowledged negatively
+  (TOO 65) and the record returned with `ErrNegative`. The tags are also
+  acknowledged negatively when the initial states are not at position 0,
+  the end when fewer channels came than NOC announced. An abortion of the
+  whole transfer (TOO 34) is acknowledged with TOO 65 and returns
+  `ErrAborted`.
 - After every initialization the client synchronizes the time and runs a
   general interrogation (clause 7.4.1, figure 3) unless `NoInitTimeSync` /
   `NoInitGI` are set. The identification (ASDU 5) is kept and available
@@ -105,7 +141,7 @@ rec, err := c.Disturbance(ctx, iec103.FunDistance, fan)
 import "github.com/otfabric/go-iec60870-5/iec103/server"
 
 s, err := server.New(port, server.Config{
-	LinkAddr: 1, Fun: iec103.FunDistance,
+	LinkAddr: 1, Fun: iec103.FunDistance, // Fun is required
 	Identification: iec103.IdentificationOf(iec103.COLWithGeneric, "VENDOR", [4]byte{}),
 	Handler: server.HandlerFunc(func(s *server.Server, a *iec103.ASDU) { ... }),
 	Disturbances: recorder, // optional DisturbanceSource
@@ -116,29 +152,60 @@ s.Send(measurands, server.Class2)
 
 - The server answers the link itself: functions 0, 3, 4, 7, 9, 10 and 11;
   any other is answered with function 15 (clauses 6.2.3 and 6.3). DFC is
-  set while the queue of received ASDUs is more than half full, and a
-  message it cannot take is answered NACK.
+  set while the queue of received ASDUs is more than half full; user data
+  that arrives while DFC is set is not processed and is answered NACK
+  (clause 6.3), a broadcast is taken while there is room.
 - Reset CU clears both queues; reset CU and reset FCB queue the
   identification (cause 4, INF 3, or cause 3, INF 2) ahead of everything
   else; after the first reset since start the identification with cause 6
   (power on) or 5 (`StartCause`) follows (clause 7.4.1, table 8).
 - Time synchronization is handled by the server: it keeps the offset,
-  answers with ASDU 6, and `Now` returns time tags with IV set until the
-  first synchronization and after `SyncTimeout` (23 h) without one (clause
-  7.4.2).
+  answers an addressed synchronization with ASDU 6, and `Now` returns time
+  tags with IV set until the first synchronization and after `SyncTimeout`
+  (23 h) without one (clause 7.4.2). The received time is corrected by
+  `SyncDelay`, by default the transmission time of the ASDU 6 frame (21
+  characters of 11 bits) at `BitRate` (default 9600 bit/s, clause 6.2.4);
+  a negative `SyncDelay` turns the correction off. A broadcast
+  synchronization is answered only with `AnswerBroadcastSync` (figure 5:
+  broadcast messages need no answer).
 - The handler answers with `AnswerGI` (cause 9, SCN as SIN, ASDU 8),
   `AckCommand` (ASDU 1, cause 20/21, RII as SIN), `GenericAnswer`,
-  `AnswerGenericGI` and `GenericIdentAnswer`. A command received before
-  the previous one was acknowledged is refused by the server (clause
-  7.4.4).
+  `AnswerGenericGI` and `GenericIdentAnswer`. A new ASDU 7 (or ASDU 21 with
+  INF 245) drops the queued rest of the previous cycle, its termination
+  included (clauses 7.4.3 and 7.4.8.7). A command received before the
+  previous one was acknowledged is refused by the server (clause 7.4.4),
+  and so is one with a DCO that `iec103.CommandAllowed` refuses.
 - With a `DisturbanceSource` the server runs the disturbance data transfer
-  of clause 7.4.7 itself, including the list after a GI and after a
-  transfer.
+  of clause 7.4.7 itself, including the list (ASDU 23 with the function
+  type of the equipment, cause 31) after a GI and after a completed or
+  aborted transfer. An implausible order ends the transfer in progress
+  with TOO 34, then the list follows.
+
+## Changes for v0.2.0
+
+API and behaviour changes of the audit against IEC 60870-5-103:1997:
+
+- `server.Config.Fun` is required (zero is `ErrInvalidConfig`).
+- `server.Config.SyncDelay` zero now means the frame transmission time at
+  the new `server.Config.BitRate` (default `server.DefaultBitRate`, 9600);
+  negative means no correction (zero meant that before).
+- `server.Config.AnswerBroadcastSync` (new, default off): the server no
+  longer answers a broadcast synchronization with ASDU 6 unless set.
+- `client.Client.BeginWrite` and `client.StagedWrite` (new);
+  `GenericWrite` with INF 250/251 over several ASDUs uses INF 248 for all
+  but the last.
+- `iec103.CommandAllowed` (new); `client.Command` and the server refuse
+  other DCOs.
+- Decoding is stricter: VSQ, GDD DATASIZE/NUMBER and NDE are checked;
+  `PackGenericIdent` and `Structure` refuse empty input.
+- `client.Broadcast` and `BroadcastClockSync` are sent by the link loop
+  and wait for it.
 
 ## Not implemented
 
 See [INTEROPERABILITY.md](INTEROPERABILITY.md#not-implemented): one
 primary polling several items of equipment on a shared line, the test mode
-and the monitor-direction blocking as server features, splitting one
-generic data element over several ASDUs, and abortion of a disturbance
-transfer by the client.
+and the monitor-direction blocking as server features (the application
+sends the causes and indications, see `TestTestModeAndBlocking`),
+splitting one generic data element over several ASDUs, and abortion of a
+disturbance transfer by the client.

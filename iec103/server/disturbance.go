@@ -29,9 +29,11 @@ type distState struct {
 // SendDisturbanceList queues the list of recorded disturbances (ASDU 23,
 // cause 31) of the [DisturbanceSource]: how the equipment announces a new
 // disturbance (clause 7.4.7).
-func (s *Server) SendDisturbanceList() error { return s.sendList(s.cfg.Fun) }
+func (s *Server) SendDisturbanceList() error { return s.sendList(noCycle) }
 
-func (s *Server) sendList(fun iec103.FunctionType) error {
+// sendList queues ASDU 23 with the function type of the equipment (clause
+// 7.3.1.11).
+func (s *Server) sendList(cy cycle) error {
 	if s.cfg.Disturbances == nil {
 		return nil
 	}
@@ -39,7 +41,7 @@ func (s *Server) sendList(fun iec103.FunctionType) error {
 	if len(l) > iec103.MaxDisturbances {
 		l = l[len(l)-iec103.MaxDisturbances:]
 	}
-	return s.Send(iec103.New(iec103.CauseDisturbanceData, s.ca, fun, 0, iec103.DisturbanceList{Faults: l}), Class1)
+	return s.send(iec103.New(iec103.CauseDisturbanceData, s.ca, s.cfg.Fun, 0, iec103.DisturbanceList{Faults: l}), Class1, cy)
 }
 
 func (s *Server) distSend(fun iec103.FunctionType, b iec103.Body) {
@@ -68,18 +70,28 @@ func (s *Server) setDist(d *distState) {
 	s.mu.Unlock()
 }
 
+// abort ends the transfer in progress with the end of disturbance data
+// aborted by the protection equipment (TOO 34), then sends the updated
+// list (clause 7.4.7: after a completed or aborted transfer).
+func (s *Server) abort(fun iec103.FunctionType, rec *iec103.Disturbance) {
+	s.setDist(nil)
+	s.end(fun, iec103.TOOEndDataAbortProt, rec.TOV, rec.FAN, iec103.ACCGlobal)
+	_ = s.sendList(noCycle)
+}
+
 // disturbance runs one step of the transfer of clause 7.4.7 (figure 10).
 // An order that does not fit the transfer in progress ("implausible
 // orders", clause 7.4.7) is answered with the end of disturbance data
-// aborted by the protection equipment (TOO 34); that choice of TOO is our
-// reading of the clause.
+// aborted by the protection equipment (TOO 34), which ends the transfer;
+// that choice of TOO is our reading of the clause. Without a transfer in
+// progress the TOO 34 answers the order and no list follows.
 func (s *Server) disturbance(a *iec103.ASDU, o iec103.DisturbanceOrder) {
 	fun := a.Fun
 	src := s.cfg.Disturbances
 	if !o.Ack {
 		switch o.TOO {
 		case iec103.TOORequestList:
-			_ = s.sendList(fun)
+			_ = s.sendList(noCycle)
 			return
 		case iec103.TOOSelectFault:
 			rec, ok := src.Record(o.FAN)
@@ -111,9 +123,9 @@ func (s *Server) disturbance(a *iec103.ASDU, o iec103.DisturbanceOrder) {
 		case iec103.TOODataOK, iec103.TOODataFailed:
 			s.setDist(nil)
 			src.Transmitted(rec.FAN, o.TOO == iec103.TOODataOK)
-			_ = s.sendList(fun)
+			_ = s.sendList(noCycle)
 		default:
-			s.end(fun, iec103.TOOEndDataAbortProt, rec.TOV, rec.FAN, iec103.ACCGlobal)
+			s.abort(fun, rec)
 		}
 		return
 	}
@@ -128,13 +140,13 @@ func (s *Server) disturbance(a *iec103.ASDU, o iec103.DisturbanceOrder) {
 	case iec103.TOOAbortData:
 		s.setDist(nil)
 		s.end(fun, iec103.TOOEndDataAbortCtrl, rec.TOV, rec.FAN, iec103.ACCGlobal)
-		_ = s.sendList(fun)
+		_ = s.sendList(noCycle)
 	case iec103.TOOAbortChannel:
 		s.end(fun, iec103.TOOEndChannelAbortCtl, rec.TOV, rec.FAN, o.ACC)
 	case iec103.TOOAbortTags:
 		s.end(fun, iec103.TOOEndTagsAbortCtrl, rec.TOV, rec.FAN, iec103.ACCGlobal)
 	default:
-		s.end(fun, iec103.TOOEndDataAbortProt, rec.TOV, rec.FAN, iec103.ACCGlobal)
+		s.abort(fun, rec)
 	}
 }
 
