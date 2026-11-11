@@ -160,3 +160,19 @@ func TestWaitUpCancelled(t *testing.T) {
 	}
 	_ = c.Close()
 }
+
+// TestWaitUpAfterOnState: WaitUp returns only after OnState for the change
+// to StateUp has returned (the cause of a rare TestBusy failure under
+// load: WaitUp used to return before the callback ran).
+func TestWaitUpAfterOnState(t *testing.T) {
+	var told atomic.Bool
+	start(t, options{custom: silent, noDist: true, onState: func(st iec103.State, _ error) {
+		if st == iec103.StateUp {
+			time.Sleep(100 * time.Millisecond)
+			told.Store(true)
+		}
+	}})
+	if !told.Load() {
+		t.Fatal("WaitUp returned before OnState(StateUp) returned")
+	}
+}

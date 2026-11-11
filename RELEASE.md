@@ -1,5 +1,20 @@
 # Release notes
 
+## v0.2.1
+
+**Date:** not released (prepared)
+**Previous release:** v0.2.0
+
+- `iec101/client` and `iec103/client`: `WaitUp` returns only after
+  `Config.OnState` for the change to `StateUp` has returned. It used to
+  return as soon as the state changed, before the callback ran, so what an
+  application set up in `OnState` could be missing right after `WaitUp`
+  (found as a rare `TestBusy` failure under load: 2 in 200 runs; none in
+  260 runs after the fix). `State` still reports a change before
+  `OnState` for it is called.
+
+---
+
 ## v0.2.0
 
 **Date:** 2026-11-11

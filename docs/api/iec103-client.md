@@ -39,7 +39,8 @@ type Client struct {
 
 	// broadcasts: sent whatever DFC says (clause 6.3)
 
-	// closed while the link is up
+	// closed while the link is up and OnState was told
+	// OnState(StateUp) returned for the current up period
 	// closed when the link goes down after being up
 
 	// RII and SCN
@@ -238,7 +239,7 @@ State returns the link state.
 func (c *Client) WaitUp(ctx context.Context) error
 ```
 
-WaitUp waits until the link is initialized.
+WaitUp waits until the link is initialized and OnState has been told (Config.OnState).
 
 ### type Config
 
@@ -283,7 +284,11 @@ type Config struct {
 	// requests included (they are also returned by the request). It runs
 	// on a goroutine of its own, in order; it may issue requests.
 	Handler func(a *iec103.ASDU)
-	// OnState is called with each change of the link state.
+	// OnState is called with each change of the link state, from the
+	// goroutine that changed it. WaitUp returns only after OnState for the
+	// change to StateUp has returned, so what the callback sets up is in
+	// place when WaitUp returns. State reports a change before OnState
+	// for it is called.
 	OnState func(s iec103.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger
