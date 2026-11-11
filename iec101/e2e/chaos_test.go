@@ -83,9 +83,9 @@ func (tr *frameTrace) dump() string {
 // and remembers how often it did.
 type chaosStation struct {
 	trace *frameTrace
-	mu   sync.Mutex
-	runs map[asdu.IOA]int
-	dup  []asdu.IOA
+	mu    sync.Mutex
+	runs  map[asdu.IOA]int
+	dup   []asdu.IOA
 }
 
 func (st *chaosStation) HandleASDU(s *server.Server, a *asdu.ASDU) {
