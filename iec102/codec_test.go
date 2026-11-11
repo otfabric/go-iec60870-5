@@ -311,6 +311,31 @@ func TestREEBodies(t *testing.T) {
 	}
 }
 
+// TestREERequestVSQ checks the variable structure qualifier of the REE
+// requests against the frames gisce/iec870ree sent in the iec102/interop
+// suite: 0 for a request without information elements (C_FS_NA_2:
+// "BB 00 06 01 00 00"), 1 for one with them (C_TA_VM_2: two times a).
+func TestREERequestVSQ(t *testing.T) {
+	for _, tc := range []struct {
+		body iec102.Body
+		want []byte
+	}{
+		{ree.Request{T: ree.C_FS_NA_2}, []byte{0xBB, 0x00, 0x06, 0x01, 0x00, 0x00}},
+		{ree.Request{T: ree.C_TA_VC_2}, []byte{0x85, 0x00, 0x06, 0x01, 0x00, 0x86}},
+		{ree.Request{T: ree.C_TA_VM_2, From: ta, To: ta}, append([]byte{0x86, 0x01, 0x06, 0x01, 0x00, 0x86}, append(ta.AppendTo(nil), ta.AppendTo(nil)...)...)},
+		{ree.Request{T: ree.C_CB_UN_2, Object: 10, From: ta, To: ta}, append([]byte{0xBE, 0x01, 0x06, 0x01, 0x00, 0x0B, 10}, append(ta.AppendTo(nil), ta.AppendTo(nil)...)...)},
+	} {
+		rec := tc.want[5]
+		b, err := iec102.New(iec102.CauseActivation, 1, rec, tc.body).Encode(iec102.Params{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(b, tc.want) {
+			t.Errorf("%#v encodes as % X, want % X", tc.body, b, tc.want)
+		}
+	}
+}
+
 // FuzzDecode decodes arbitrary octets with and without the REE profile;
 // whatever decodes must encode back to the same octets.
 func FuzzDecode(f *testing.F) {

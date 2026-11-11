@@ -151,10 +151,13 @@ const (
 // Has reports whether all bits of f are set.
 func (q Quality) Has(f Quality) bool { return q&f == f }
 
-// Objects of the REE requests: gisce/iec870ree writes a variable structure
-// qualifier of 1 for every request except C_SP_NB_2, also those without
-// information elements; daiiniel/IEC60870-5-102 writes 1 for C_AC_NA_2
-// and C_CB_NT_2; the recorded traffic mirrors C_AC_NA_2 with 1.
+// Objects of the REE requests with an information object: 1.
+// gisce/iec870ree writes a variable structure qualifier of 1 for its
+// requests with information elements and 0 for those without (C_FS_NA_2,
+// C_TA_VC_2, ...: seen on the wire in the iec102/interop suite, "BB 00 06"
+// for C_FS_NA_2), as the Beckhoff TS650x manual does for the standard
+// requests (section 4.22, nObj); daiiniel/IEC60870-5-102 writes 1 for
+// C_AC_NA_2 and C_CB_NT_2; the recorded traffic mirrors C_AC_NA_2 with 1.
 const requestObjects = 1
 
 // AccessKey is the body of C_AC_NA_2, start of session with the access key
@@ -205,8 +208,15 @@ type Request struct {
 // Type returns T.
 func (b Request) Type() iec102.TypeID { return b.T }
 
-// Objects returns 1.
-func (Request) Objects() int { return requestObjects }
+// Objects returns 0 for the requests without information elements
+// (C_FS_NA_2, C_TA_VC_2, C_RM_NA_2, C_PC_NA_2, C_DF_NA_2) and 1 for those
+// with a time range or an object.
+func (b Request) Objects() int {
+	if obj, times, ok := requestLayout(b.T); ok && !obj && times == 0 {
+		return 0
+	}
+	return requestObjects
+}
 
 func requestLayout(t iec102.TypeID) (object bool, times int, ok bool) {
 	switch t {

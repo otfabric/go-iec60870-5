@@ -144,7 +144,7 @@ only", section 9). The procedures below come from LOG and GI and are
 | refusal: the request mirrored with a cause 13..18 or P/N | `*iec102.RefusedError` | 16 unknown record or common address, 14 no totals of the family / unknown type, 18 no period, 17 no object in the address range | causes BK 9.1.11; which cause when is our choice |
 | session start C_AC_NA_2 (cause 6, key), confirmed with 7 | `ree.Login` | `ree.Session` (wrong key: 7 with P/N, our choice) | LOG, GI, DA |
 | end of session C_FS_NA_2, set clock C_CS_TA_2 (cause 6, confirmed with 7) | `ree.Logout`, `ree.SetTime` | `ree.Session` | GI |
-| VSQ of a request: 0 without object, 1 with one (BK); REE sends 1 always | `iec102.New` follows BK; `ree` request bodies count 1 | - | BK 4.22 (nObj); GI |
+| VSQ of a request: 0 without object, 1 with one | `iec102.New` follows BK; `ree` request bodies count 1, except those without information elements (0) | - | BK 4.22 (nObj); GI on the wire (interop suite) |
 
 ## Source conflicts
 
@@ -162,8 +162,15 @@ Recorded, not silently resolved:
    the bits inconsistently (`0x03` .. `0x08`), its encoder is used as the
    reference.
 3. **VSQ of requests.** BK: 0 for requests without object, 1 otherwise
-   (C_SP_NB_2: 1). GI: 1 for every request, 0 for C_SP_NB_2. The codec
-   writes what `ASDU.VSQ` holds; `iec102.New` follows BK.
+   (C_SP_NB_2: 1). GI: `ceil(data_length / 6)`, which is 0 for its
+   requests without information elements (C_TI_NA_2 `67 00 05`, C_FS_NA_2
+   `BB 00 06`, C_TA_VC_2: seen on the wire in the interop suite), 1 for
+   those with them, and 0 for C_SP_NB_2. This document said until v0.3.0
+   that GI writes 1 for every request, and `ree.Request` counted 1 object
+   for C_FS_NA_2, C_TA_VC_2, C_RM_NA_2, C_PC_NA_2 and C_DF_NA_2; it now
+   counts 0 for them, as BK and GI do (`TestREERequestVSQ`). C_SP_NB_2 is
+   the one remaining difference (BK 1, GI 0). The codec writes what
+   `ASDU.VSQ` holds; `iec102.New` follows BK.
 4. **Cause width.** BK and GI: 6 bits. DA: 5 bits. We use 6.
 5. **Names of causes 13..18** differ between BK and DA (numbers agree).
 6. **Day of week.** BK, GI, LOG: 1..7, Monday 1. DA: Sunday 0.
@@ -179,22 +186,70 @@ Recorded, not silently resolved:
 | unit | octets written from the BK layouts for every body; error paths | `iec102/codec_test.go` |
 | fuzz | `FuzzDecode`: whatever decodes encodes back to the same octets (plain, REE, one-octet common address) | `iec102/codec_test.go` |
 | e2e | `iec102/client` against `iec102/server` over `net.Pipe`: every read selection, address ranges, splitting, signatures, refusals, REE session, link sizes 0/1/2, link loss | `iec102/e2e` |
-| interop | **none**: no run against an independent implementation | - |
+| interop | **independent (gisce, REE profile)**: the controlling station of gisce/iec870ree v0.14.1 against `iec102/server` with `ree.Session`, 18 checks, every result document compared with the harness's fixture (below) | `iec102/interop` (`make interop-iec102`) |
 
-The e2e tests show that our two sides agree with each other, not that they
-agree with anything else.
+The e2e tests show that our two sides agree with each other; the interop
+suite that our server agrees with one independent master of the REE
+profile. Nothing shows that the client agrees with an independent meter.
+
+## Independent evidence: gisce/iec870ree
+
+`iec102/interop` (build tag `interop`, `make interop-iec102`) runs the
+`iec102-gisce` image of otfabric/iec60870-5-interop (contract 2.2):
+gisce/iec870ree v0.14.1 (commit `993242da`, AGPL-3.0, Python), a master of
+the Spanish REE profile, in a container of its own; nothing of it is linked
+into this module. Until the harness release v0.3.0 publishes the image the
+suite uses the local `:dev` build (`IEC102_INTEROP_GISCE_IMAGE` selects
+another); afterwards it is pinned by digest in `iec102/interop/harness.go`.
+
+The station is `iec102/server` with `ree.Profile`, `ree.Session` (key from
+the fixture, `OnSetTime` setting the station's clock) and, behind it, a
+handler of the suite for the REE tariff requests (`ree.TariffInfo`, one
+record per ASDU, as gisce decodes only the first record of an ASDU). It
+serves the harness's baseline fixture, read from the image
+(`print-fixture`): measuring point address 1, three hourly periods of six
+totals on record 11, absolute and incremental, with quality bits set;
+tariff information of register 134; a clock that stands still until set.
+Each connection gets a fresh server on a listener on `0.0.0.0:0`, which
+the container reaches as `host.docker.internal`; the store and the clock
+are shared.
+
+| Check | gisce sends | Result |
+|---|---|---|
+| link start-up | request status of link (9), reset of remote link (0) | pass; another link address: `link-init-timeout` |
+| `connect`, `connect --profile ree` | C_AC_NA_2 (cause 6, VSQ 1, key), C_FS_NA_2 (cause 6, VSQ 0) | pass: both confirmed with cause 7 |
+| wrong access key | C_AC_NA_2 | pass: cause 7 with P/N, `login-refused` |
+| `read-product` | C_RD_NA_2 (cause 5) | pass: P_MP_NA_2 equal to the fixture |
+| `read-time` | C_TI_NA_2 (cause 5, VSQ 0) | pass: M_TI_TA_2 with the fixture's clock |
+| `read-totals` absolute, incremental (in a session), periods 2..3 and addresses 1..3 | C_CI_NT_2 / C_CI_NU_2 (cause 6, record 11, first, last, two times a) | pass: confirmation, one M_IT_TG_2 / M_IT_TK_2 per period equal to the fixture (addresses, values, quality octets, period end, SU and IV 0), termination |
+| refusals | C_CI_NT_2 out of the periods, of record 12, of addresses 7..8, to common address 2 | pass: causes 18, 16, 17, 16, nothing else |
+| `read-tariff` current, stored (range), unknown register | C_TA_VC_2 (VSQ 0), C_TA_VM_2 (two times a) on record 134; record 135 | pass: confirmation, each record equal to the fixture, termination; cause 16 |
+| `set-time`, then `read-time` | C_CS_TA_2 (cause 6, time b; SU from the Europe/Madrid rules) | pass: confirmed, the station's clock set to the time sent, read back |
+
+Known differences: none (`iec102/interop/testdata/known-bugs.tsv`, a copy
+of the harness's, is empty). Library defects found: none in the server.
+The run corrected one claim of this document and one encoding of the
+client (source conflict 3: VSQ 0 for REE requests without information
+elements).
+
+What it does not show: link address or common address of one octet (gisce
+has two only); the read commands other than C_CI_NT_2 and C_CI_NU_2; single
+points (C_SP_NB_2), blocks (C_CB_UN_2), configuration and contracted power
+requests; signatures; that the REE profile as gisce implements it is the
+REE profile; and anything about `iec102/client`, which has no independent
+peer. gisce cannot parse the single character E5h, so a station configured
+with `link.Config.SingleCharAck` would fail with it (not run: our server
+answers with fixed frames by default).
 
 ## Interoperability candidates
 
 Both open implementations are controlling stations (masters) only, so
 they could only test our server:
 
-- **gisce/iec870ree** (Python, AGPL-3.0): implements C_AC_NA_2, C_FS_NA_2,
-  C_RD_NA_2, C_TI_NA_2, C_CS_TA_2, C_CI_NT_2/NU_2, C_SP_NB_2, tariff and
-  block reads over TCP or modem. The AGPL allows running it as a separate
-  container in the interop repository (iec60870-5-interop), not linking it
-  into this module. javierdelapuente/reeprotocol is its ancestor and not an
-  independent second reference.
+- **gisce/iec870ree** (Python, AGPL-3.0): in use, see above. It runs as a
+  separate container of the interop repository (iec60870-5-interop), never
+  linked into this module. javierdelapuente/reeprotocol is its ancestor and
+  not an independent second reference.
 - **daiiniel/IEC60870-5-102** (C#): **no licence**, so it cannot be
   redistributed or packaged in an interop image; usable only for reading.
 
