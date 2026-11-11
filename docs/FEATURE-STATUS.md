@@ -7,19 +7,20 @@ library against itself), **independent** (pinned reference images),
 [iec104/FEATURE-STATUS.md](iec104/FEATURE-STATUS.md) and
 [iec104/INTEROPERABILITY.md](iec104/INTEROPERABILITY.md); IEC 101 in
 [../INTEROPERABILITY.md](../INTEROPERABILITY.md); IEC 103 in
-[iec103/INTEROPERABILITY.md](iec103/INTEROPERABILITY.md).
+[iec103/INTEROPERABILITY.md](iec103/INTEROPERABILITY.md); IEC 102 in
+[iec102/INTEROPERABILITY.md](iec102/INTEROPERABILITY.md).
 
 ## Capability matrix
 
 | Capability | IEC 101 | IEC 102 | IEC 103 | IEC 104 |
 |---|---|---|---|---|
-| Controlling station | yes: unit, e2e, independent (2 stacks), recorded | yes: unit, e2e, recorded (meter responses) | yes: unit, annex B, e2e, recorded, independent (1 stack, link start-up, clock and GI termination; its other answers deviate) | yes: unit, e2e, independent (5 stacks), recorded |
-| Controlled station | yes: unit, e2e, independent (2 stacks), recorded | yes: unit, e2e | yes: unit, annex B, e2e, independent (4 client stacks) | yes: unit, e2e, independent, recorded |
+| Controlling station | yes: unit, e2e, independent (2 stacks), recorded | yes: unit, e2e, recorded (meter responses); no independent peer (no open meter) | yes: unit, annex B, e2e, recorded, independent (1 stack, link start-up, clock and GI termination; its other answers deviate) | yes: unit, e2e, independent (5 stacks), recorded |
+| Controlled station | yes: unit, e2e, independent (2 stacks), recorded | yes: unit, e2e, independent (1 stack: gisce/iec870ree, REE profile; session, C_CI_NT_2/NU_2, clock read and set, product, tariff) | yes: unit, annex B, e2e, independent (4 client stacks) | yes: unit, e2e, independent, recorded |
 | Transport | any io.ReadWriter (serial, terminal server TCP stream) | any io.ReadWriter | any io.ReadWriter | TCP, TLS |
 | Link: unbalanced | yes: recorded, link states per 101:2003 figures 5-9 | yes (link address 0, 1, 2 octets) | yes (1-octet address, FC 7): recorded | n/a |
 | Link: balanced | yes | - | - | n/a |
 | Standard ASDU types | all of `asdu` (configurable sizes); recorded: 2, 4, 11, 13, 30-32, 34, 46, 100, 103, 104 | 40 standard types classified (37 with a vendor layout), 38 REE; recorded: 11, 123, 183 | all compatible types 1-11, 20-31; private types raw; recorded: 1, 5-9, 20, 45, 46, 205 (ASDU 9 with up to 127 measurands carried) | 67 + 2 (101-only) |
-| Interrogation, counters, read, clock, commands, SBO, test, reset | yes: e2e, independent (reset process e2e only), recorded (interrogation, SBO) | - | - | yes: independent |
+| Interrogation, counters, read, clock, commands, SBO, test, reset | yes: e2e, independent (reset process e2e only), recorded (interrogation, SBO) | integrated totals reads, clock: e2e; independent for C_CI_NT_2, C_CI_NU_2, C_TI_NA_2, C_RD_NA_2 and the REE C_CS_TA_2 (server) | - | yes: independent |
 | File transfer | no | - | - | yes: independent |
 | TLS (IEC 62351-3) | n/a | n/a | n/a | yes: independent |
 | IEC 62351-5 / TS 60870-5-7 | no | n/a | n/a | yes: independent (cB-Sigma); statistics reports, FILEMNGT and MONITOR DATA: unit and e2e |

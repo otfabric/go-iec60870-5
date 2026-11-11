@@ -20,8 +20,10 @@ commercial IEC 102 master), to recorded meter traffic and to independent
 implementations read for comparison. [INTEROPERABILITY.md](INTEROPERABILITY.md)
 classifies every type identification, cause, field and procedure as
 standard, REE profile, vendor-specific or unresolved, with its source and
-confidence, and lists where the sources disagree. There is no
-interoperability evidence against an independent implementation yet.
+confidence, and lists where the sources disagree. Independent evidence:
+the controlling station of gisce/iec870ree (REE profile) against
+`iec102/server` (`make interop-iec102`); the client has no independent
+peer.
 
 ## The ASDU model
 

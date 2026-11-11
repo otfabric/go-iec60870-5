@@ -61,8 +61,18 @@ own list: [docs/iec104/LIMITATIONS.md](docs/iec104/LIMITATIONS.md).
   interpretations of vendor documentation (Beckhoff TS650x), recorded
   traffic of one meter and other implementations; see
   [docs/iec102/INTEROPERABILITY.md](docs/iec102/INTEROPERABILITY.md).
-- **No independent interoperability evidence**: no open controlled station
-  (meter) exists; the open masters implement the Spanish REE profile.
+- **Independent evidence for the server only, and only for the REE
+  profile as one master uses it**: gisce/iec870ree (the iec102-gisce image
+  of iec60870-5-interop, contract 2.2) runs its session, integrated totals
+  (C_CI_NT_2, C_CI_NU_2), clock, product and tariff requests against
+  `iec102/server` with `ree.Session` (18 pass, 0 fail, 0 known
+  differences; `make interop-iec102`). Two octets of link and common
+  address only; the other read commands (C_CI_NA_2 .. C_CI_NS_2), single
+  points, blocks and the REE configuration requests are not exercised; the
+  tariff answers come from the suite's handler, not from `iec102/server`.
+  The client has no independent peer: no open controlled station (meter)
+  exists, so its evidence is the recorded traffic of one meter. The image
+  is a local build until the harness release (v0.3.0) publishes it.
 - The layout of M_EI_NA_2 (70) is unknown (carried raw); signatures are not
   checked; the server has no class 1 or spontaneous data and does not
   enforce a session; one station per client.

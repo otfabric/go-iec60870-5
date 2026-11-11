@@ -1,0 +1,9 @@
+# Copied from otfabric/iec60870-5-interop tests/iec102/known-bugs.tsv (contract 2.2, branch feat/iec102; v0.3.0 when released).
+# Known bugs of upstream versions for IEC 60870-5-102.
+# Same columns and rules as tests/iec104/known-bugs.tsv: adapter, upstream
+# version, a regular expression on the operation and its flags, what is wrong,
+# an id, and a URL (the issue upstream, or the source line at the pinned
+# commit). Every entry needs wire evidence from a run (docs/COMPATIBILITY.md).
+# None yet: gisce/iec870ree kept the contract in every run against the
+# scripted meter (tests/iec102/meter.py), which is not an implementation of
+# IEC 102, so this file says nothing about how gisce meets real meters.

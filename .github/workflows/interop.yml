@@ -142,6 +142,29 @@ jobs:
       - name: Run the IEC 103 interop suite
         run: make interop-iec103
 
+  # IEC 60870-5-102: the client of gisce/iec870ree (REE profile) of
+  # otfabric/iec60870-5-interop (contract 2.2) against iec102/server. The
+  # image is published by the harness release v0.3.0; until then this job
+  # cannot pull it. After the release it is pinned by digest in
+  # iec102/interop/harness.go and the variable below goes.
+  iec102:
+    name: IEC 102 against gisce/iec870ree (server)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      IEC102_INTEROP_GISCE_IMAGE: ghcr.io/otfabric/iec60870-5-interop-iec102-gisce:v0.3.0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+
+      - name: Run the IEC 102 interop suite
+        run: make interop-iec102
+
   # The application-layer security (IEC 62351-5) against cB-Sigma/iec60870,
   # in process: interop/cbsigma is a module of its own, so that go-iec60870-5
   # keeps no dependencies, and cB-Sigma needs Go 1.26.
