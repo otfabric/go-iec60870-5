@@ -318,3 +318,26 @@ func TestClientSendOnDeadLine(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Send refuses what it cannot or must not transmit before it reaches the
+// link: an ASDU that does not encode under the parameters, and under the
+// strict profile one IEC 60870-5-101:2003 does not define (7.2.1.1).
+func TestClientSendRefusals(t *testing.T) {
+	for _, mode := range []iec101.Mode{iec101.ModeUnbalanced, iec101.ModeBalanced} {
+		p := params(mode)
+		p.Strict = true
+		r := start(t, p, nil)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := r.c.Send(ctx, asdu.New(asdu.CauseActivation, 300, asdu.ResetProcess{Qualifier: 1})); !errors.Is(err, asdu.ErrInvalidValue) && !errors.Is(err, iec101.ErrProfile) {
+			t.Errorf("%v: common address 300 with a 1-octet field: %v", mode, err)
+		}
+		if err := r.c.Send(ctx, asdu.New(asdu.CauseActivation, ca, asdu.SingleCommand{IOA: 500, Value: true, Time: asdu.Now()})); !errors.Is(err, iec101.ErrProfile) {
+			t.Errorf("%v: C_SC_TA_1 (reserved in IEC 101): %v", mode, err)
+		}
+		cancel()
+		_ = r.c.Close()
+		if err := r.c.Send(context.Background(), asdu.New(asdu.CauseActivation, ca, asdu.ResetProcess{Qualifier: 1})); err == nil {
+			t.Errorf("%v: send after close succeeded", mode)
+		}
+	}
+}
