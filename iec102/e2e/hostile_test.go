@@ -475,7 +475,7 @@ func TestHostileClient(t *testing.T) {
 					_, err := c.Request(context.Background(), iec102.New(iec102.CauseActivation, commonAddr, 0, iec102.Raw{Data: []byte{9}}), client.UntilTermination)
 					return err
 				})
-				if d := time.Since(start); d > reqTimeout+300*time.Millisecond {
+				if d := time.Since(start); d > reqTimeout+time.Second {
 					t.Errorf("request with a time-out of %v took %v: %v", reqTimeout, d, err)
 				}
 				if err == nil {

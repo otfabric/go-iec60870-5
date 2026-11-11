@@ -179,6 +179,9 @@ Recorded, not silently resolved:
 | unit | octets written from the BK layouts for every body; error paths | `iec102/codec_test.go` |
 | fuzz | `FuzzDecode`: whatever decodes encodes back to the same octets (plain, REE, one-octet common address) | `iec102/codec_test.go` |
 | e2e | `iec102/client` against `iec102/server` over `net.Pipe`: every read selection, address ranges, splitting, signatures, refusals, REE session, link sizes 0/1/2, link loss | `iec102/e2e` |
+| hostile peer | a raw primary against the server (noise, broken and foreign frames, other addresses, unused functions, stuck FCB, malformed ASDUs of every length, request floods with a bounded queue, half-open line, slow drip, reset in the middle of a read) and a raw station against the client (silence, noise, wrong functions and addresses, ACD floods, answers that never end, undecodable data, NACK and function 14 forever): no panic, every request ends at its deadline, the station serves a peer that behaves afterwards, no goroutine left | `iec102/e2e/hostile_test.go` |
+| chaos | client and server over a line that drops, duplicates, corrupts, delays, splits, truncates and reorders frames: no private request executed twice, every request ends, the link comes up again | `iec102/e2e/chaos_test.go` (`make chaos`) |
+| fuzz | `FuzzServe` (`iec102/server`): arbitrary ASDUs served from a store, bounded queue; `FuzzClientAnswers` (`iec102/e2e`): arbitrary answers to the client's polls during every read | `iec102/server`, `iec102/e2e` |
 | interop | **none**: no run against an independent implementation | - |
 
 The e2e tests show that our two sides agree with each other, not that they

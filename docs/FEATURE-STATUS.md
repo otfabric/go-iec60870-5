@@ -26,6 +26,8 @@ library against itself), **independent** (pinned reference images),
 | Redundancy (104 cl. 10) | n/a | n/a | n/a | yes: independent |
 | Protection functions: GI, time sync, general commands, generic services, disturbance transfer | n/a | n/a | yes: e2e; independent for GI, time sync, general commands and class 2 measurands (server, 4 client stacks) | n/a |
 | Fuzzed decoders | ft12, asdu, cp | iec102 | iec103 | apci, asdu, sec, e2e |
+| Fuzzed protocol machines | link (secondary, balanced, primary), telecontrol dispatch, client and server receive paths | link, server, client answers | link, server dispatch, client receive | link, server stream |
+| Hostile peer and chaos (faulty line) | yes: e2e, unbalanced and balanced | yes: e2e | yes: e2e | yes: e2e |
 
 ## Security capability matrix
 

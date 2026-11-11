@@ -72,7 +72,7 @@ The deviations found and still open are listed in
 | FT 1.2 single character E5h, fixed and variable frames | yes | unit (`ft12`), fuzz, recorded |
 | Checksum, start/stop, double length check | yes | unit, recorded |
 | Resynchronization after noise or a broken frame | yes | unit (`TestDecoderResync`) |
-| Line idle interval / inter-character gap detection | **no** | - |
+| Line idle interval / inter-character gap detection | partly: the octets of a frame whose next octet comes later than `link.Config.FrameGap` (default: `Timeout`) are discarded, the stream approximation of rules R2/R4 of IEC 60870-5-1 6.2.4.2 (an interpretation); no 33-bit idle is measured | e2e hostile (`TestHostileServer`, half-open line with L = 255) |
 | Link address size 0, 1, 2 octets | yes (0 only balanced) | unit, e2e (1 and 2), unit balanced 0 |
 | Unbalanced: request status of link, reset of remote link, reset of user process | yes | unit, e2e, independent (status, reset of remote link), recorded (status) |
 | Unbalanced: send/confirm, send/no reply (broadcast), request class 1/2 | yes | unit, e2e, independent (send/confirm, class 1/2), recorded (send/confirm, class 1/2) |
@@ -90,6 +90,8 @@ The deviations found and still open are listed in
 | Empty user data refused (`link.ErrNoData`): without an ASDU a frame is fixed-length (6.1) | yes | unit (`TestEmptyUserData`) |
 | Balanced: both directions initialized, test function for link, DIR bit | yes | unit, e2e, independent |
 | Balanced address field: responses carry the receiver's address (6.2.1.2); `link.Config.SenderAddr` for the own address; either accepted | yes | unit (`TestBalancedReceiverAddr`), independent (lib60870-C, by hand) |
+| Hostile peer: noise, truncated, oversized and corrupted frames, other addresses, secondary frames to a secondary, unused function codes, stuck FCB, foreign and malformed ASDUs of every length, request floods, half-open line, slow drip, reset mid-exchange; a hostile station against the client (silence, noise, wrong functions and addresses, DFC and ACD floods, class 1 floods, stray answers, function 14) | the station stays silent or answers as the procedures say, keeps its queues bounded and serves a peer that behaves afterwards; a station that answers only with frames that cannot answer the message takes the link down like silence; a client polls at `PollInterval` after a failed poll | e2e (`iec101/e2e/hostile_test.go`) |
+| Faulty line (drop, duplicate, corrupt, delay, split, truncate, reorder, noise), unbalanced and balanced | no command executed twice, every request ends, the link comes up again when the faults stop | e2e (`TestChaos`, `make chaos`), fuzz (`link.FuzzSecondary`, `FuzzBalanced`, `FuzzPrimary`) |
 | Multiple secondaries on one line (multidrop) polled by one client | link layer yes, `iec101/client` **no** (one link address per client) | unit (address filtering), recorded (shared RTAC line, decoded only) |
 
 ## Application layer

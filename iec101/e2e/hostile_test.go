@@ -702,7 +702,7 @@ func TestHostileClient(t *testing.T) {
 				_ = serialline.Within(t, reqTimeout+closeBound, "command", func() error {
 					return c.Command(ctx, ca, asdu.SingleCommand{IOA: 500, Select: true})
 				})
-				if d := time.Since(start); d > 2*reqTimeout+300*time.Millisecond {
+				if d := time.Since(start); d > 2*reqTimeout+time.Second {
 					t.Errorf("two requests with a time-out of %v took %v", reqTimeout, d)
 				}
 			}

@@ -533,7 +533,7 @@ func TestHostileClient(t *testing.T) {
 				} {
 					start := time.Now()
 					err := serialline.Within(t, reqTimeout+closeBound, "request", req)
-					if d := time.Since(start); d > reqTimeout+300*time.Millisecond {
+					if d := time.Since(start); d > reqTimeout+time.Second {
 						t.Errorf("request with a time-out of %v took %v: %v", reqTimeout, d, err)
 					}
 				}

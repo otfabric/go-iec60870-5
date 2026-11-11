@@ -145,7 +145,7 @@ ResetProcess sends a reset process command (C\_RP\_NA\_1).
 func (c *Client) Send(ctx context.Context, a *asdu.ASDU) error
 ```
 
-Send transmits a in the control direction without waiting for an application answer. Answers reach the Handler.
+Send transmits a in the control direction without waiting for an application answer. It returns when the link layer confirmed it, or at the deadline of ctx: in unbalanced transmission the poller then still finishes the exchange, repeating the frame until it is answered or Link.Retries ran out. Answers reach the Handler.
 
 #### func (Client) SetDelay
 

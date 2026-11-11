@@ -71,7 +71,7 @@ BeginWrite starts a staged generic write with a new RII. It returns [iec103.ErrB
 func (c *Client) Broadcast(a *iec103.ASDU) error
 ```
 
-Broadcast transmits a control-direction ASDU with send/no reply to link address 255 (clause 6.2.3), between two exchanges of the link, also while the equipment sets DFC (clause 6.3). Nothing is confirmed.
+Broadcast transmits a control-direction ASDU with send/no reply to link address 255 (clause 6.2.3), between two exchanges of the link, also while the equipment sets DFC (clause 6.3). Nothing is confirmed. It returns [iec103.ErrLinkDown](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#ErrLinkDown) when the link goes down before the link loop took it.
 
 #### func (Client) BroadcastClockSync
 
@@ -222,7 +222,7 @@ ReadHeadings reads the headings of all defined groups (INF 240, clause 7.4.8.5.1
 func (c *Client) Send(ctx context.Context, a *iec103.ASDU) error
 ```
 
-Send transmits a control-direction ASDU with send/confirm and returns when the link layer confirmed it. Answers reach the Handler.
+Send transmits a control-direction ASDU with send/confirm and returns when the link layer confirmed it, or at the deadline of ctx: the link layer then still finishes the exchange, repeating the frame until it is answered or Link.Retries ran out. Answers reach the Handler.
 
 #### func (Client) State
 
