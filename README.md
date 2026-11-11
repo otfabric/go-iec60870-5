@@ -11,7 +11,7 @@ dependencies outside the standard library.
 |---|---|---|
 | IEC 60870-5-104 (TCP/IP) | [`iec104`](iec104), `iec104/client`, `iec104/server` | Production code carried over from go-iec104 v0.3.0, with its tests, captures and interop suite. See [docs/IEC104_PARITY.md](docs/IEC104_PARITY.md). |
 | IEC 60870-5-101 (serial) | [`iec101`](iec101), `iec101/client`, `iec101/server` | New. Controlling and controlled station, unbalanced and balanced. Tested client against server and against scripted link peers; **no independent interoperability evidence yet** (planned against lib60870-C, cB-Sigma, digitalpetri). |
-| IEC 60870-5-103 (protection equipment) | - | Not implemented yet. See [docs/ROADMAP.md](docs/ROADMAP.md). |
+| IEC 60870-5-103 (protection equipment) | [`iec103`](iec103), `iec103/client`, `iec103/server` | New. Own ASDU codec for every compatible type (cl. 7.3), controlling system and protection equipment: initialization, time sync, general interrogation, general commands, generic services, disturbance data transfer. Unit, annex B and e2e evidence; **no independent interoperability evidence yet**. See [docs/iec103](docs/iec103/README.md). |
 | IEC 60870-5-102 (integrated totals) | - | Not implemented yet. See [docs/ROADMAP.md](docs/ROADMAP.md). |
 
 What is implemented, clause by clause, and what evidence backs it:
@@ -31,6 +31,7 @@ standards share and nothing more ([ARCHITECTURE.md](ARCHITECTURE.md)):
 | `asdu` | IEC 60870-5-101/-104 | the telecontrol ASDU model and codec, configurable field sizes |
 | `telecontrol` | IEC 60870-5-5 as used by 101/104 | matching answers to requests: confirmations, interrogation, read, commands |
 | `iec101`, `iec101/client`, `iec101/server` | IEC 60870-5-101 | serial telecontrol stations |
+| `iec103`, `iec103/client`, `iec103/server` | IEC 60870-5-103 | protection equipment: own ASDU (FUN/INF), stations on `link` |
 | `iec104`, `iec104/apci`, `iec104/client`, `iec104/server` | IEC 60870-5-104 | TCP/IP telecontrol stations |
 | `sec` | IEC 62351-5 / IEC TS 60870-5-7 | application-layer security (used by `iec104`) |
 | root `iec60870` | - | the `Logger` interfaces |

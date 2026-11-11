@@ -12,18 +12,19 @@ library against itself), **independent** (pinned reference images),
 
 | Capability | IEC 101 | IEC 102 | IEC 103 | IEC 104 |
 |---|---|---|---|---|
-| Controlling station | yes: unit, e2e | no | no | yes: unit, e2e, independent (5 stacks), recorded |
-| Controlled station | yes: unit, e2e | no | no | yes: unit, e2e, independent, recorded |
-| Transport | any io.ReadWriter (serial, terminal server TCP stream) | - | - | TCP, TLS |
-| Link: unbalanced | yes | - | - | n/a |
+| Controlling station | yes: unit, e2e | no | yes: unit, annex B, e2e | yes: unit, e2e, independent (5 stacks), recorded |
+| Controlled station | yes: unit, e2e | no | yes: unit, annex B, e2e | yes: unit, e2e, independent, recorded |
+| Transport | any io.ReadWriter (serial, terminal server TCP stream) | - | any io.ReadWriter | TCP, TLS |
+| Link: unbalanced | yes | - | yes (1-octet address, FC 7) | n/a |
 | Link: balanced | yes | - | - | n/a |
-| Standard ASDU types | all of `asdu` (configurable sizes) | - | - | 67 + 2 (101-only) |
+| Standard ASDU types | all of `asdu` (configurable sizes) | - | all compatible types 1-11, 20-31; private types raw | 67 + 2 (101-only) |
 | Interrogation, counters, read, clock, commands, SBO, test, reset | yes: e2e | - | - | yes: independent |
 | File transfer | no | - | - | yes: independent |
 | TLS (IEC 62351-3) | n/a | n/a | n/a | yes: independent |
 | IEC 62351-5 / TS 60870-5-7 | no | n/a | n/a | yes: independent (cB-Sigma) |
 | Redundancy (104 cl. 10) | n/a | n/a | n/a | yes: independent |
-| Fuzzed decoders | ft12, asdu, cp | - | - | apci, asdu, sec, e2e |
+| Protection functions: GI, time sync, general commands, generic services, disturbance transfer | n/a | n/a | yes: e2e | n/a |
+| Fuzzed decoders | ft12, asdu, cp | - | iec103 | apci, asdu, sec, e2e |
 
 ## Security capability matrix
 

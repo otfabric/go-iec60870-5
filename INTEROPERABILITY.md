@@ -3,7 +3,9 @@
 What is implemented per companion standard, and how it was verified. IEC
 60870-5-104, clause by clause with its interop results, is in
 [docs/iec104/INTEROPERABILITY.md](docs/iec104/INTEROPERABILITY.md). This page
-covers IEC 60870-5-101.
+covers IEC 60870-5-101. IEC 60870-5-103 is in
+[docs/iec103/INTEROPERABILITY.md](docs/iec103/INTEROPERABILITY.md); no
+independent IEC 103 implementation has been tested against it yet.
 
 Evidence levels used below:
 

@@ -47,3 +47,16 @@ requirement whose standard text we do not hold ([STANDARDS.md](STANDARDS.md)).
 | 101-6 | Answers are recognised by type, CA, IOA and cause; a termination before the confirmation belongs to an earlier request | 104 practice, carried over | `telecontrol.TestRequests`, `TestMatching` |
 | 101-7 | Requests fail promptly while the link is down; the link is re-initialized automatically | engineering | `TestLinkRecovery`, `TestWaitUpTimeout` |
 | 101-8 | Undecodable user data is acknowledged at link level and dropped | engineering | `TestServerUnbalancedEdges`, `TestClientBalancedSupervision` |
+
+## IEC 60870-5-103 (`iec103`)
+
+Traced clause by clause in
+[iec103/INTEROPERABILITY.md](iec103/INTEROPERABILITY.md). Tests:
+
+| Area | Basis | Tests |
+|---|---|---|
+| ASDU layouts of every compatible type, private types kept raw | cl. 7.1-7.3 | `iec103.TestCompatibleTypes`, `TestRaw`, `FuzzDecode` |
+| Generic services octet examples | annex B.1-B.8 | `iec103.TestAnnexB` |
+| Link: FC 7 reset FCB, DFC, FC 15 for unlisted functions with FCB advancing | cl. 6.2.3, 6.3 | `link/ext_test.go` |
+| Initialization, identification (ASDU 5), time sync, GI, general commands, generic services, disturbance transfer, lossy line, link loss | cl. 7.4 | `iec103/e2e` (`TestInitialization*`, `TestGeneralInterrogation`, `TestTimeSync`, `TestCommands`, `TestGenericServices`, `TestDisturbance*`, `TestLossyLine`, `TestLinkLoss`, `TestServerLink`) |
+

@@ -5,8 +5,7 @@ own list: [docs/iec104/LIMITATIONS.md](docs/iec104/LIMITATIONS.md).
 
 ## Scope
 
-- **IEC 60870-5-103 and IEC 60870-5-102 are not implemented.** See
-  [docs/ROADMAP.md](docs/ROADMAP.md).
+- **IEC 60870-5-102 is not implemented.** See [docs/ROADMAP.md](docs/ROADMAP.md).
 - Nothing is certified or conformance tested. Interoperability runs are not
   conformance tests.
 
@@ -34,3 +33,19 @@ own list: [docs/iec104/LIMITATIONS.md](docs/iec104/LIMITATIONS.md).
   set; the link procedures follow the extracts quoted in IEC 60870-5-103 and
   the behaviour of independent implementations
   ([docs/STANDARDS.md](docs/STANDARDS.md)).
+
+## IEC 60870-5-103
+
+- **No independent interoperability evidence yet.**
+- One controlling system polls one protection device per client (no shared
+  line with several devices).
+- Test mode and monitor-direction blocking are not server features; the
+  application can send those causes itself.
+- A generic data element is never split over several ASDUs (the GDD CONT
+  bit); long answers are split by element.
+- The controlling side does not send abort orders during a disturbance
+  transfer.
+- The 15 s limit on DFC (cl. 6.3) is not enforced.
+- Interpretations of the text are listed in
+  [docs/iec103/INTEROPERABILITY.md](docs/iec103/INTEROPERABILITY.md).
+

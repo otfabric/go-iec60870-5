@@ -34,7 +34,7 @@ interoperability results.
 | IEC 60870-5-5 | Basic application functions | station initialization, interrogation, read, clock sync, commands, counters, test, file transfer (104) | no | 104 cl. 9 (held, ed. 1); 103 cl. 7.4 |
 | IEC 60870-5-101 (2003 + Amd. 1 2015) | Telecontrol, serial | implemented (`iec101`) | **no** | interpretation from parts above, the 104 text (which reuses 101's ASDUs) and independent implementations |
 | IEC 60870-5-102 (1996) | Integrated totals | not implemented | **no** | open implementations implement the Spanish REE profile only (iec60870-5-interop docs/REFERENCE_STACKS.md) |
-| IEC 60870-5-103 (1997) | Protection equipment | planned (next) | **yes** | clause references cite the GOST R translation's numbering, which follows the IEC text |
+| IEC 60870-5-103 (1997) | Protection equipment | implemented (`iec103`); see docs/iec103/INTEROPERABILITY.md for interpretations | **yes** | clause references cite the GOST R translation's numbering, which follows the IEC text |
 | IEC 60870-5-104 (2006 + Amd. 1 2016) | Telecontrol over TCP/IP | implemented (`iec104`) | ed. 1 (2000) only | docs/iec104/INTEROPERABILITY.md; interop against five independent stacks |
 | IEC 60870-5-6 | Conformance testing guidelines | not used | no | - |
 | IEC TS 60870-5-601 | Conformance test cases for 101 | not used | no | - |
@@ -59,5 +59,7 @@ From GOST R IEC 60870-5-103-2005 clause 6 (numbering as in IEC 60870-5-103):
 - 6.3: function code 7 (PRM=1) resets FCB, with FCB and FCV 0; function
   14 and 15 answers toggle the expected FCB; DFC set at most 15 s.
 
-These are implemented as options of `link` (address size 1, `ResetFCB`)
-and will be enforced by the IEC 103 stations, not by `link` itself.
+These are implemented as options and hooks of `link` (address size 1,
+`ResetFCB`, `FCBResetHandler`, `FlowControlHandler`, `FunctionFilter`) and
+enforced by the IEC 103 stations, not by `link` itself. The 15 s DFC limit
+is not enforced.

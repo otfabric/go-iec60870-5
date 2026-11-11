@@ -14,9 +14,9 @@ The packages follow that split, and share code only where the companion
 standards share the definition.
 
 ```text
-              iec101/client  iec101/server        iec104/client  iec104/server
-                     \           /                      \           /
-                      iec101  ----------- telecontrol ---  iec104 -- iec104/apci
+iec103/client iec103/server  iec101/client  iec101/server        iec104/client  iec104/server
+       \        /              \           /                      \           /
+        iec103 (cp)            iec101  ----------- telecontrol ---  iec104 -- iec104/apci
                         |                     |                       (TCP, APCI)
                         |                    asdu  ------------------ sec
                         |                     |
@@ -29,10 +29,11 @@ standards share the definition.
 
 | Package | Shared by | Why there and not elsewhere |
 |---|---|---|
-| `cp` | 101, 104, 103 (planned) | IEC 60870-5-4 defines the time tags once; 103 uses CP32Time2a and CP56Time2a with the same octets. |
+| `cp` | 101, 104, 103 | IEC 60870-5-4 defines the time tags once; 103 uses CP32Time2a and CP56Time2a with the same octets. |
 | `ft12` | 101, 102, 103 | IEC 60870-5-1 FT 1.2 is the only frame format the three serial companion standards allow (103: clause 6.1). |
 | `link` | 101, 102, 103 | IEC 60870-5-2 procedures. The companion standards restrict them (function codes, address size, single character) through `link.Config` and caller choices; nothing standard-specific is built in. The one extension, function code 7 "reset FCB" of IEC 60870-5-103 clause 6.3, is a separate method (`Primary.ResetFCB`) a 101 station never calls. |
 | `asdu` | 101, 104 | The telecontrol ASDU (type identifications 1..127 of IEC 60870-5-101 clause 7 and 104 clause 9) with configurable field sizes. IEC 102 and IEC 103 define different ASDUs and will have their own codecs. |
+| `iec103` | 103 only | Its own ASDU (one-octet data unit identifier, FUN/INF addressing, types 1-31), IEC 60870-5-103 cl. 7. |
 | `telecontrol` | 101 (104 later) | How a controlling station recognises the answers to its requests. Neither 101 nor 104 has a transaction identifier; both use the same matching rules. |
 | `iec104/...` | 104 only | APCI framing, sequence numbers, k/w, t0..t3, TLS, redundancy groups: nothing of it applies to a serial line. |
 | `sec` | 104 (101 planned) | IEC TS 60870-5-7 profiles IEC 62351-5 for 101 and 104; it is wired into 104 only. |
@@ -49,6 +50,8 @@ APIs that follow their own application models.
 - `asdu` imports `cp`; `telecontrol` imports `asdu`.
 - `iec101` imports `asdu`, `ft12`, `link`; `iec101/client` and
   `iec101/server` add `telecontrol` and `internal/logx`.
+- `iec103` imports `cp`; `iec103/client` and `iec103/server` add `ft12`,
+  `link` and `internal/logx`.
 - The `iec104` tree imports `asdu`, `sec` and the root package; nothing
   outside `iec104/` imports it.
 - The root package `iec60870` holds only the `Logger` interfaces; every
@@ -86,6 +89,11 @@ equals the previous one is a repetition and is answered with the stored
 previous response without calling the user again. This is what keeps a
 lost ACK from executing a command twice (test
 `TestRepetitionNotProcessedTwice`).
+
+IEC 103 adds optional secondary hooks a `SecondaryHandler` may implement:
+`FCBResetHandler` (function 7, 103 cl. 6.3), `FlowControlHandler` (DFC on
+every response) and `FunctionFilter` (function codes outside 103 cl. 6.2.3
+answered with 15, FCB still advancing). IEC 101 does not use them.
 
 `link.Balanced` is a primary for its own direction and a secondary for the
 peer's, over a full-duplex line, with the DIR bit set by station A.

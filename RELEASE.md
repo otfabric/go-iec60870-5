@@ -21,5 +21,10 @@ First version of go-iec60870-5.
 - `iec101`: IEC 60870-5-101 controlling station (`iec101/client`) and
   controlled station (`iec101/server`), unbalanced and balanced. No
   independent interoperability evidence yet.
+- `iec103`: IEC 60870-5-103 codec for every compatible type, controlling
+  system (`iec103/client`) and protection equipment (`iec103/server`),
+  quickstart example. No independent interoperability evidence yet.
+- `link` gains optional secondary hooks for IEC 103: `FCBResetHandler`,
+  `FlowControlHandler`, `FunctionFilter`.
 
 ---

@@ -20,15 +20,18 @@ State:
 - Interop harness: being built (contract v2.0, IEC 101 adapters lib60870-C
   and cB-Sigma first).
 
+- Phase 3: `iec103` codec, client and server done (commit b5e28e0): all
+  compatible types, annex B examples, e2e incl. lossy line; coverage
+  iec103 99.4 %, client 92.4 %, server 94.2 %. No independent evidence.
+- IEC 104 interop of the moved packages: 31 tests / 482 subtests pass
+  against iec104-interop v0.5.0 (local).
+
 Next:
 
 1. Record the IEC 104 interop run; write the IEC 101 consumer suite
    (`iec101/interop`, build tag `interop`) against the harness images.
-2. Phase 3, IEC 103 (text held): `iec103` codec for types 1-11, 20-31,
-   generic services; controlling station (polling, GI, time sync, general
-   commands, disturbance data transfer) and controlled station; scripted
-   tests from the standard's examples; adapters ARIEC103 and
-   vitusdong/iec103-dotnet in the harness.
+2. IEC 103 adapters (ARIEC103, vitusdong/iec103-dotnet) in the harness and
+   an `iec103/interop` consumer suite.
 3. Phase 4, IEC 102.
 
 Decisions:
