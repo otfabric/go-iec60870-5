@@ -1,17 +1,95 @@
 # Release notes
 
-## v0.2.1
+## v0.3.0
 
 **Date:** not released (prepared)
 **Previous release:** v0.2.0
 
-- `iec101/client` and `iec103/client`: `WaitUp` returns only after
-  `Config.OnState` for the change to `StateUp` has returned. It used to
-  return as soon as the state changed, before the callback ran, so what an
-  application set up in `OnState` could be missing right after `WaitUp`
-  (found as a rare `TestBusy` failure under load: 2 in 200 runs; none in
-  260 runs after the fix). `State` still reports a change before
-  `OnState` for it is called.
+Hardening: SAST to zero, chaos, hostile-peer and fuzz suites for the serial
+standards (and the defects they found), IEC 104 checked against its text,
+independent IEC 102 interoperability, and the IEC 104 suite on the harness
+images. Several behaviours change; see "Behaviour changes".
+
+### Fixed
+
+- `iec101/client`, `iec103/client`: `WaitUp` returns only after
+  `Config.OnState` for the change to `StateUp` has returned (the cause of a
+  rare `TestBusy` failure under load: 2 in 200 runs, none in 260 after the
+  fix). `State` still reports a change first.
+- `link`: line noise or a peer stopping in the middle of a frame no longer
+  silences a station: an unfinished frame followed by a pause longer than
+  `Config.FrameGap` (default `Timeout`; negative disables) is discarded
+  (`ft12.Decoder.Gap` for direct decoder users).
+- `link`: when only answers that cannot answer the message arrive until the
+  last time-out, `ErrUnexpected` also wraps `ErrTimeout`, so the IEC 101,
+  102 and 103 clients take the link down and initialize it again instead of
+  polling a confused station forever.
+- IEC 101 and IEC 103 client requests return at their context deadline even
+  while the link layer is still repeating their user data; after a failed
+  poll the clients wait `PollInterval` before polling again.
+- `iec103/client`: `Broadcast` and `BroadcastClockSync` return
+  `iec103.ErrLinkDown` when the link goes down before the broadcast was
+  sent, instead of blocking until Close.
+- IEC 60870-5-104, checked against edition 1 (2000):
+  - `apci`: an I frame without ASDU is refused on receipt (the connection
+    closes) and on send (clause 5);
+  - `apci`: `Params.Validate` accepts `w` up to 32767 independently of `k`
+    (5.5, clause 9);
+  - `iec104/client`: the test sequence counter of C_TS_TA_1 starts at 0
+    (8.8);
+  - `iec104/server`: `Mux` refuses a deactivation of C_CS_NA_1, C_RP_NA_1,
+    C_TS_TA_1 and P_ME_NA/NB/NC_1 with cause 45 (7.1, 7.6, 7.9, 7.10, 8.8).
+- `iec102/ree`: requests without information elements (C_FS_NA_2,
+  C_TA_VC_2, C_RM_NA_2, C_PC_NA_2, C_DF_NA_2) encode VSQ 0, as the Beckhoff
+  manual says and gisce sends (found on the wire).
+- `iec103`: a generic data value whose DATASIZE or NUMBER exceeds 255 fails
+  to encode instead of being announced modulo 256; `iec103/server` ends a
+  disturbance transfer with TOO 34 for a record with more than 255 channels
+  or 65535 values per channel instead of announcing a truncated count.
+
+### Security hardening
+
+- SAST (gosec, opengrep) at the lowest thresholds: 44 findings to 0. 34
+  integer conversions are bounded or masked to their field widths (`cp`,
+  `ft12`, `iec102`, `iec103`, `sec`, `telecontrol`); encodings are
+  byte-identical. 10 findings in test-only capture tooling are recorded as
+  false positives in the organisation's triage records.
+- `iec101/examples/serial`: `-link` and `-ca` above 65535 are refused.
+
+### Tests
+
+- Hostile-peer suites for IEC 101 (both modes), 102 and 103 (noise, broken
+  and foreign frames, FCB abuse, floods, half-open and slow lines, resets in
+  the middle of exchanges); chaos suites over a line that drops,
+  duplicates, corrupts, delays, splits and reorders (`make chaos`, Extended
+  workflow, one job per standard); fuzz targets for the link layer
+  (`FuzzSecondary`, `FuzzBalanced`, `FuzzPrimary`), `telecontrol`
+  (`FuzzDispatch`) and the station receive paths of IEC 101, 102 and 103.
+  Soak: 40 minutes under -race, about 400,000 frames, no duplicate
+  execution, no leak.
+- IEC 102 interop (`iec102/interop`, `make interop-iec102`, Interop job
+  `iec102`): the gisce/iec870ree controlling station (REE profile,
+  iec60870-5-interop contract 2.2) against `iec102/server`: 18 pass, 0
+  fail. The first independent IEC 102 evidence, for the server only.
+- The IEC 104 interop suite runs against the IEC 104 images of
+  otfabric/iec60870-5-interop v0.2.1 instead of iec104-interop v0.5.0, with
+  pascaldekloe/part5 as a fifth independent reference: 519 subtests pass,
+  0 fail.
+
+### Documentation
+
+- docs/iec104/INTEROPERABILITY.md: clause-by-clause result against IEC
+  60870-5-104 edition 1 (63 rows) and a clause 9 PICS summary; edition 2
+  behaviour marked as not verifiable from the held text.
+- New documented limit: the one-bit FCB of IEC 60870-5-2 cannot recognise a
+  repetition delivered after the next message.
+
+### Behaviour changes
+
+The frame gap in `link`, `ErrUnexpected` wrapping `ErrTimeout`, requests
+returning at their deadline, the IEC 103 broadcast error, the IEC 104 I
+frame and `w` validation, the C_TS_TA_1 counter start, and the IEC 104 Mux
+refusals.
 
 ---
 
