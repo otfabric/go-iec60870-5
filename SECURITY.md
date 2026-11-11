@@ -45,9 +45,10 @@ IEC 62351-5 authenticates application messages themselves, on top of or instead 
 
 - **Station Association**: the stations exchange X.509 certificates; each checks the other's against its `sec.Trust` (pinned fingerprints or public keys of self-signed certificates, or Central Authorities with an optional list of subjects). ECDH on secp256r1 or Curve25519 and HKDF give the update keys
 - **Session Key Change**: the controlling station sends fresh session keys, wrapped with AES-256 key wrap, at every connection, after `Settings.KeyLifetime` or `Settings.KeyUses`, and on `Endpoint.Renew`. A controlled station whose keys are not valid asks for new ones
-- **Secure Data**: every application ASDU travels in `S_SD_NA_1` with a sequence number, under HMAC-SHA-256 (16 octets of MAC over IEC 104; 8 octets is the serial-link profile, also accepted), HMAC-SHA3-256 or AES-256-GCM, which also encrypts it. An unprotected ASDU, a MAC that does not verify and a sequence number that does not increase are discarded
-- **Role-based access control**: `sec.Config.Roles` gives the controlling station roles of IEC TS 60870-5-7 at the station; a request they do not permit is answered with a negative confirmation with cause `asdu.CauseNotAuthorized` and never reaches the handler. The client reports it as `*iec104.NegativeError`
-- **Statistics and events**: the counters of IEC 62351-5 (`Endpoint.Statistics`) and its security events with their mnemonics (`Config.OnEvent`). They are not reported on the wire (see below)
+- **Secure Data**: every application ASDU travels in `S_SD_NA_1` with a sequence number, under HMAC-SHA-256 or HMAC-SHA3-256 (16 octets of MAC over TCP/IP; 8 octets on serial links, `sec.Config.Serial`, TS 9.3 and 9.5) or AES-256-GCM, which also encrypts it. A controlled station accepts only the MAC lengths of its link unless `AcceptMAC` and `AcceptDataProtection` list others. An unprotected ASDU, a MAC that does not verify and a sequence number that does not increase are discarded
+- **Role-based access control**: `sec.Config.Roles` gives the controlling station roles of IEC TS 60870-5-7 at the station; a request they do not permit is answered with a negative confirmation with cause `asdu.CauseNotAuthorized` and never reaches the handler. The client reports it as `*iec104.NegativeError`. Deleting a file (F_SC_NA_1 with the delete qualifier) needs FILEMNGT (TS 8.2); a role without MONITOR DATA receives no monitor-direction data (types 1 to 44): `Session.Send` fails with `sec.ErrNotPermitted`, `Server.Broadcast` skips the session and `Server.Enqueue` drops the event for it
+- **Statistics and events**: the counters of IEC 62351-5 (`Endpoint.Statistics`, 0 to 2^31-1) and its security events with their mnemonics (`Config.OnEvent`). A controlled station reports the statistics listed in `sec.Config.Reports` spontaneously in M_IT_TB_1 at their configured IOAs once they grew by their threshold (TS 5.4.2.3, 9.7; the default thresholds of Table 10). The reports are Secure Data and go to every role: they are security information, not process data (an interpretation: TS 8.2 does not say)
+- **Key usage**: the session keys are changed after 24 hours or 65535 messages by default (the lower ends of the ranges of TS Table 9); the controlled station allows twice that
 - **Keys at rest**: `sec.FileStore` keeps the association in a file with mode 0600, so that a restart does not need a new Station Association. The file holds the keys as they are: put it where only the station's account can read it, on encrypted storage, or implement `sec.KeyStore` against a key vault or HSM
 - **One association per controlling station**: every security message names its controlling station by the AIM, the controlling station's half of the association ID. `server.WithSecurity` makes the station's association for an AIM when that station is first heard, or refuses it; a connection is bound to its association by the first security message on it. The connections of one controlling station (a client redundancy group, which shares one `Endpoint`) share its association, carried by the connection that is started; other controlling stations, in the same redundancy group or not, have their own and take nothing over
 - **An AIM is a claim**: any station the `Trust` accepts can claim any AIM, and with it the association and roles of that AIM. Give each AIM a `Trust` that accepts only its own station (`Trust.Subjects` with an authority, or the pinned certificate), and the `Roles` of that station
@@ -70,38 +71,29 @@ IEC 62351-5:2023 (algorithm code numbers, HKDF inputs, the GCM nonce,
 the unsolicited key-management MAC inputs, replay rules) is still not
 checked against a standard text: we do not hold IEC 62351-5.
 
+Fixed after the check (v0.2.0): the security statistics are reported on
+the wire (TS 5.4.2.3, 9.7, `Config.Reports`), wrap at 2^31 and count an
+expired remote certificate as Remote Station's Certificate Expirations;
+file deletion needs FILEMNGT and monitor-direction data needs MONITOR
+DATA (TS 8.2); the key usage defaults are 24 hours / 65535 messages (TS
+Table 9); over TCP/IP a controlled station accepts only the 16-octet MACs
+(TS 9.3.3, 9.5.3).
+
 Gaps against the TS, open:
 
-- **Security statistics are not reported on the wire** (TS 5.4.2.3, 9.7):
-  the counters exist (`Endpoint.Statistics`), but there is no spontaneous
-  M_IT_TB_1 report at configured information object addresses, no
-  thresholds, the counters wrap at 2^32 instead of 2^31, and five counters
-  (remote certificate expiry, remote and local revocation, the two key
-  invalidations after revocation) are never incremented.
+- **Revocation statistics stay 0**: Remote and Local Station's Certificate
+  Revocations and the two Cryptographic Keys Invalidations after a
+  revocation are never incremented, since certificate revocation is not
+  checked (keep `Trust` current instead).
 - **Mandatory curves missing** (TS 9.2.1, 9.2.2): Curve448 and secp256k1
   are mandatory in the PICS and not implemented (the Go standard library
   has neither). A peer whose certificate uses them is refused.
-- **File deletion needs only "file read"** under role-based access control
-  (TS 8.2 FILEMNGT): F_SC_NA_1 is mapped to file read whatever its
-  qualifier. Do not implement file deletion in a handler of a secured
-  station that gives VIEWER or SECAUD roles.
-- **MONITOR DATA covers requests only** (TS 8.2): roles without it are
-  refused interrogation and read, but still receive spontaneous and
-  cyclic data.
-- **Key usage defaults** (TS 9.6, Table 9) follow IEC 62351-5 as cB-Sigma
-  does (15 minutes / 1000 messages at the controlling station, twice that
-  at the controlled station), below the TS's recommended range (24 hours
-  to a week, 2^16-1 to 2^31-1 messages). Set `Settings` explicitly against
-  peers configured to the TS.
 - **Open reading, field width**: the TS contradicts itself on the length
   of the controlled station's random data (CGL) in S_AP_NA_1, S_SI_NA_1
   and S_SP_NA_1: Figures 8, 11 and 14 draw two octets, the text of
   5.4.3.8.4 defines UI8. The code uses one octet, as cB-Sigma does
   (citing IEC 62351-5); the shared reading means our differential tests
   cannot decide it.
-- Over IEC 104 a controlled station also accepts the 8-octet MAC lengths
-  of the serial-link profile (TS 9.3.3 lists only 16-octet ones for
-  TCP/IP).
 - A Session Initiation Request received while waiting for a Session
   Response is accepted (crossing requests), where TS 5.3.4.3.3 discards
   it; the first Session Initiation Request of a restarted controlled

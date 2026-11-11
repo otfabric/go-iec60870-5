@@ -45,7 +45,7 @@ func TestConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s := e.cfg.Settings; s.KeyUses != 2000 || s.KeyLifetime != 30*time.Minute || s.ReplyTimeout != 2*time.Second || s.RequestTimeout != 6*time.Second || s.MaxReplyTimeouts != 3 {
+	if s := e.cfg.Settings; s.KeyUses != 2*65535 || s.KeyLifetime != 48*time.Hour || s.ReplyTimeout != 2*time.Second || s.RequestTimeout != 6*time.Second || s.MaxReplyTimeouts != 3 {
 		t.Errorf("controlled defaults %+v", s)
 	}
 	if e.Role() != Controlled || e.cfg.DataProtection != HMACSHA256.Code {
@@ -122,10 +122,10 @@ func TestLifecycle(t *testing.T) {
 	if !p.until(func() bool { return p.a.count(StatSuccessfulAssociations) == 2 && p.ready() }, time.Minute) {
 		t.Fatal("no new association")
 	}
-	if dl := p.a.e.Deadline(); !dl.Equal(p.now.Add(15 * time.Minute)) {
+	if dl := p.a.e.Deadline(); !dl.Equal(p.now.Add(DefaultKeyLifetime)) {
 		t.Errorf("key change due after %v", dl.Sub(p.now))
 	}
-	p.advance(15 * time.Minute)
+	p.advance(DefaultKeyLifetime)
 	p.mustReady()
 	if p.a.count(StatSuccessfulSessionKeyChanges) != 3 {
 		t.Errorf("session key changes %d", p.a.count(StatSuccessfulSessionKeyChanges))

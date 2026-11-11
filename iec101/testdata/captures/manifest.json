@@ -1,0 +1,661 @@
+{
+  "description": "Recorded IEC 60870-5-101 traffic go-iec60870-5 is tested against (testdata/captures/README.md). Files are byte-identical to their sources.",
+  "evidence_levels": {
+    "A": "verified physical-device traffic",
+    "B": "credibly documented physical-device traffic",
+    "C": "independent recorded traffic, hardware origin unknown",
+    "D": "simulated or software testbed",
+    "E": "standards-derived examples or generated fixtures"
+  },
+  "sources": [
+    {
+      "id": "wireshark-issue-15688",
+      "url": "https://gitlab.com/wireshark/wireshark/-/issues/15688",
+      "revision": "attachments 17041 and 17042 of bug 15688 (2019-04-09), migrated uploads",
+      "terms": "Attached to a public Wireshark issue by the reporter; no licence is stated for the attachments. Wireshark itself is GPL-2.0-or-later.",
+      "notes": "Issue \"Add support for IEC 60870-5-101\", reported by Chris Bontje, who wrote the IEC 101 dissector and the RTAC serial-line dissector. Both files are SEL RTAC serial-line captures (link type 250)."
+    },
+    {
+      "id": "wireshark-issue-16428",
+      "url": "https://gitlab.com/wireshark/wireshark/-/issues/16428",
+      "revision": "attachments of bug 16428 (2020-03-06), migrated uploads",
+      "terms": "Attached to a public Wireshark issue by the reporter; no licence is stated for the attachments.",
+      "notes": "Issue \"Dissector IEC 60870-5-101 can not decode some typeid information\", reported by João Paulo Rezende with the captures monitor_energisa_1_2020_03_05.pcapng (\"typeid 2\") and monitor_energisa_2.pcapng (\"typeid 30\"); iec101.tar.xz holds the same two files and two screenshots and is not committed."
+    },
+    {
+      "id": "wireshark-issue-17775",
+      "url": "https://gitlab.com/wireshark/wireshark/-/issues/17775",
+      "revision": "upload 64b2250b29a7ea42841126f6d5399b82 (2021-12-09)",
+      "terms": "Attached to a public Wireshark issue by a Wireshark developer; no licence is stated for the attachment.",
+      "notes": "Issue \"IEC 60870-5-101 link address field is 1 byte, but should have configurable length\": the developer \"added the frame of the screenshot\" of the reporter, one frame rebuilt from a screenshot."
+    },
+    {
+      "id": "unddef/StreamPacketizer",
+      "url": "https://github.com/unddef/StreamPacketizer/tree/01a394334a1962c9b3f5cb5d08226b1c70c231d3/VSC_proj",
+      "revision": "01a394334a1962c9b3f5cb5d08226b1c70c231d3",
+      "terms": "The repository has no licence file and states no terms.",
+      "notes": "A tool that cuts an IEC 101 byte stream into packets and writes them as TCP between 192.168.0.1:2424 and 192.168.0.2:1212 with whole-second time stamps and sequence numbers starting at 0 and 1000. test_output.pcap holds no frame and is not committed."
+    },
+    {
+      "id": "wireshark",
+      "url": "https://gitlab.com/wireshark/wireshark/-/blob/f7e10bdd477b2f8f4995aa45c8155a0768f433ab/test/captures/iec104_coverage.pcap.gz",
+      "revision": "f7e10bdd477b2f8f4995aa45c8155a0768f433ab",
+      "terms": "The Wireshark repository is GPL-2.0-or-later; the capture has no statement of its own.",
+      "notes": "The synthetic capture of the IEC 104 corpus (iec104/testdata/captures/wireshark), not committed twice: its TCP port 2405 carries generated IEC 101 frames."
+    }
+  ],
+  "files": [
+    {
+      "path": "../../../iec104/testdata/captures/wireshark/synthetic_synthetic_iec104-coverage.pcap.gz",
+      "source": "wireshark",
+      "original_name": "test/captures/iec104_coverage.pcap.gz",
+      "url": "https://gitlab.com/wireshark/wireshark/-/blob/f7e10bdd477b2f8f4995aa45c8155a0768f433ab/test/captures/iec104_coverage.pcap.gz",
+      "size": 13716,
+      "sha256": "792ca959feeba8476ea6a2b5dea04a281c515b1c9a82d13c2f13c5a5a27531a9",
+      "format": "pcap (gzip), Ethernet, IPv4, TCP 2405 (IEC 101 part)",
+      "recorded": "2023-11-14 22:13:20Z .. 2023-11-14 22:23:49Z",
+      "evidence": "E",
+      "evidence_basis": "Generated for Wireshark's dissector tests (commit message); the IEC 104 corpus records it as E too. The frames follow no exchange: responses without requests, FCB not toggled.",
+      "systems": [
+        "generated controlling station",
+        "generated controlled station at link address 5, common address 9"
+      ],
+      "operations": "every link function, E5h, monitor and control ASDUs of the common types",
+      "privacy": "documentation addresses (192.0.2.0/24)",
+      "missing_for_verification": "-",
+      "params": {
+        "link_address_octets": 1,
+        "cause_octets": 1,
+        "common_address_octets": 1,
+        "ioa_octets": 2
+      },
+      "counts": {
+        "lines": 1,
+        "frames": 22,
+        "single_characters": 2,
+        "fixed_frames": 9,
+        "variable_frames": 11,
+        "undecodable_stretches": 0,
+        "asdu_errors": 0,
+        "reencoded_exactly": 21,
+        "exchanges": 1,
+        "responses_before_first_request": 1,
+        "responses_overheard": 1,
+        "repetitions": 0,
+        "requests_abandoned": [
+          539,
+          541,
+          543,
+          567,
+          569
+        ],
+        "fcb_toggles_checked": 1,
+        "balanced": false,
+        "primary_functions": [
+          0,
+          3,
+          9,
+          10,
+          11
+        ],
+        "secondary_functions": [
+          0,
+          8,
+          11
+        ],
+        "type_identifications": [
+          1,
+          3,
+          9,
+          13,
+          30,
+          36,
+          45,
+          100,
+          103
+        ],
+        "causes": [
+          3,
+          6
+        ],
+        "asdus": {
+          "controlled M_DP_NA_1 cause 3": 1,
+          "controlled M_ME_NA_1 cause 3": 1,
+          "controlled M_ME_NC_1 cause 3": 1,
+          "controlled M_ME_TF_1 cause 3": 1,
+          "controlled M_SP_NA_1 cause 3": 2,
+          "controlled M_SP_TB_1 cause 3": 1,
+          "controlling C_CS_NA_1 cause 6": 1,
+          "controlling C_IC_NA_1 cause 6": 2,
+          "controlling C_SC_NA_1 cause 6": 1
+        },
+        "link_findings": [
+          "192.0.2.10:50101 -\u003e 192.0.2.20:2405: frame 543: FCB 0 in the first message with FCV set after a reset",
+          "192.0.2.10:50101 -\u003e 192.0.2.20:2405: frame 547: response fn=0 does not answer request PRM fn=11 (frame 545)",
+          "192.0.2.10:50101 -\u003e 192.0.2.20:2405: frame 549: response fn=11 without an outstanding request",
+          "192.0.2.10:50101 -\u003e 192.0.2.20:2405: frame 551: response fn=0 without an outstanding request",
+          "192.0.2.10:50101 -\u003e 192.0.2.20:2405: frame 553: response fn=11 without an outstanding request",
+          "192.0.2.10:50101 -\u003e 192.0.2.20:2405: frame 555: response fn=8 without an outstanding request",
+          "192.0.2.10:50101 -\u003e 192.0.2.20:2405: frame 557: response fn=8 without an outstanding request",
+          "192.0.2.10:50101 -\u003e 192.0.2.20:2405: frame 559: response fn=8 without an outstanding request",
+          "192.0.2.10:50101 -\u003e 192.0.2.20:2405: frame 561: response fn=8 without an outstanding request",
+          "192.0.2.10:50101 -\u003e 192.0.2.20:2405: frame 563: response fn=8 without an outstanding request",
+          "192.0.2.10:50101 -\u003e 192.0.2.20:2405: frame 565: response fn=8 without an outstanding request",
+          "192.0.2.10:50101 -\u003e 192.0.2.20:2405: frame 567: FCB not toggled for a new message to link address 5 (previous true)",
+          "192.0.2.10:50101 -\u003e 192.0.2.20:2405: frame 569: FCB not toggled for a new message to link address 5 (previous true)",
+          "192.0.2.10:50101 -\u003e 192.0.2.20:2405: frame 571: FCB not toggled for a new message to link address 5 (previous true)",
+          "192.0.2.10:50101 -\u003e 192.0.2.20:2405: frame 573: response fn=8 does not answer request PRM fn=3 (frame 571)",
+          "192.0.2.10:50101 -\u003e 192.0.2.20:2405: frame 576: FCB not toggled for a new message to link address 5 (previous true)"
+        ]
+      }
+    },
+    {
+      "path": "streampacketizer/synthetic_synthetic_class-polls.pcap",
+      "source": "unddef/StreamPacketizer",
+      "original_name": "VSC_proj/test.pcap",
+      "url": "https://github.com/unddef/StreamPacketizer/blob/01a394334a1962c9b3f5cb5d08226b1c70c231d3/VSC_proj/test.pcap",
+      "size": 1074,
+      "sha256": "9d3440a5be6339f2da3e82c46cca27cc42f6a6eb6e19410cda07cd303ba9805a",
+      "format": "pcap, Ethernet, IPv4, TCP 2424",
+      "recorded": "2025-01-15 17:30:12Z .. 2025-01-15 17:30:19Z",
+      "evidence": "E",
+      "evidence_basis": "Written by the StreamPacketizer tool (whole-second time stamps, made-up addresses and sequence numbers); the origin of the byte stream is not stated.",
+      "systems": [
+        "controlling station (generated)",
+        "controlled station at link address 1 (generated)"
+      ],
+      "operations": "class 1 and class 2 polls answered with \"no data\"",
+      "privacy": "made-up addresses",
+      "missing_for_verification": "the origin of the byte stream",
+      "params": {
+        "link_address_octets": 1,
+        "cause_octets": 1,
+        "common_address_octets": 1,
+        "ioa_octets": 2
+      },
+      "counts": {
+        "lines": 1,
+        "frames": 14,
+        "single_characters": 0,
+        "fixed_frames": 14,
+        "variable_frames": 0,
+        "undecodable_stretches": 0,
+        "asdu_errors": 0,
+        "reencoded_exactly": 14,
+        "exchanges": 7,
+        "responses_before_first_request": 0,
+        "responses_overheard": 0,
+        "repetitions": 0,
+        "fcb_toggles_checked": 6,
+        "balanced": false,
+        "primary_functions": [
+          11
+        ],
+        "secondary_functions": [
+          9
+        ],
+        "type_identifications": null,
+        "causes": null,
+        "asdus": {}
+      }
+    },
+    {
+      "path": "streampacketizer/synthetic_synthetic_interrogation-link-address-2.pcap",
+      "source": "unddef/StreamPacketizer",
+      "original_name": "VSC_proj/today.pcap",
+      "url": "https://github.com/unddef/StreamPacketizer/blob/01a394334a1962c9b3f5cb5d08226b1c70c231d3/VSC_proj/today.pcap",
+      "size": 16452,
+      "sha256": "f8dff43ed4e9965d2e96836f3442ab31074e0c23cedcd312434dd0f52b35b275",
+      "format": "pcap, Ethernet, IPv4, TCP 2424",
+      "recorded": "2025-03-21 07:01:35Z .. 2025-03-21 07:03:26Z",
+      "evidence": "E",
+      "evidence_basis": "Written by the StreamPacketizer tool; the origin of the byte stream is not stated. The one ASDU fixes the field sizes: 2-octet cause, common address 1000 in 2 octets, IOA 0 in 2 octets.",
+      "systems": [
+        "controlling station (generated)",
+        "controlled station at link address 1, 2-octet link address (generated)"
+      ],
+      "operations": "class 1 and class 2 polls answered with \"no data\", one station interrogation",
+      "privacy": "made-up addresses",
+      "missing_for_verification": "the origin of the byte stream",
+      "params": {
+        "link_address_octets": 2,
+        "cause_octets": 2,
+        "common_address_octets": 2,
+        "ioa_octets": 2
+      },
+      "counts": {
+        "lines": 1,
+        "frames": 216,
+        "single_characters": 0,
+        "fixed_frames": 215,
+        "variable_frames": 1,
+        "undecodable_stretches": 0,
+        "asdu_errors": 0,
+        "reencoded_exactly": 216,
+        "exchanges": 107,
+        "responses_before_first_request": 0,
+        "responses_overheard": 0,
+        "repetitions": 0,
+        "requests_abandoned": [
+          109
+        ],
+        "fcb_toggles_checked": 107,
+        "balanced": false,
+        "primary_functions": [
+          3,
+          11
+        ],
+        "secondary_functions": [
+          0,
+          9
+        ],
+        "type_identifications": [
+          100
+        ],
+        "causes": [
+          6
+        ],
+        "asdus": {
+          "controlling C_IC_NA_1 cause 6": 1
+        },
+        "link_findings": [
+          "192.168.0.2:1212 -\u003e 192.168.0.1:2424: frame 112: response fn=9 without an outstanding request"
+        ]
+      }
+    },
+    {
+      "path": "streampacketizer/synthetic_synthetic_status-polls.pcap",
+      "source": "unddef/StreamPacketizer",
+      "original_name": "VSC_proj/testing.pcap",
+      "url": "https://github.com/unddef/StreamPacketizer/blob/01a394334a1962c9b3f5cb5d08226b1c70c231d3/VSC_proj/testing.pcap",
+      "size": 4899,
+      "sha256": "95ea6a12bb2c99a4bdb56e74ec49c22e598b284ff6c8f63bff58a90373d38fca",
+      "format": "pcap, Ethernet, IPv4, TCP 2424",
+      "recorded": "2025-01-17 10:07:20Z .. 2025-01-17 10:08:09Z",
+      "evidence": "E",
+      "evidence_basis": "Written by the StreamPacketizer tool; the origin of the byte stream is not stated.",
+      "systems": [
+        "controlling station (generated)",
+        "controlled station at link address 1 (generated)"
+      ],
+      "operations": "requests of link status, answered several times in a row, and resets of the link",
+      "privacy": "made-up addresses",
+      "missing_for_verification": "the origin of the byte stream",
+      "params": {
+        "link_address_octets": 1,
+        "cause_octets": 1,
+        "common_address_octets": 1,
+        "ioa_octets": 2
+      },
+      "counts": {
+        "lines": 1,
+        "frames": 65,
+        "single_characters": 0,
+        "fixed_frames": 65,
+        "variable_frames": 0,
+        "undecodable_stretches": 0,
+        "asdu_errors": 0,
+        "reencoded_exactly": 65,
+        "exchanges": 29,
+        "responses_before_first_request": 0,
+        "responses_overheard": 0,
+        "repetitions": 0,
+        "fcb_toggles_checked": 25,
+        "balanced": false,
+        "primary_functions": [
+          0,
+          9,
+          11
+        ],
+        "secondary_functions": [
+          0,
+          9,
+          11
+        ],
+        "type_identifications": null,
+        "causes": null,
+        "asdus": {},
+        "link_findings": [
+          "192.168.0.2:1212 -\u003e 192.168.0.1:2424: frame 7: response fn=11 without an outstanding request",
+          "192.168.0.2:1212 -\u003e 192.168.0.1:2424: frame 8: response fn=11 without an outstanding request",
+          "192.168.0.2:1212 -\u003e 192.168.0.1:2424: frame 9: response fn=11 without an outstanding request"
+        ]
+      }
+    },
+    {
+      "path": "wireshark-issues/unknown_sel-rtac_class1-class2-polls.pcap",
+      "source": "wireshark-issue-15688",
+      "original_name": "IEC_101_Sample_Class_1_and_Class_2.pcap",
+      "url": "https://gitlab.com/-/project/7898047/uploads/3ffc535b6782d21c872a012abb940424/IEC_101_Sample_Class_1_and_Class_2.pcap",
+      "size": 11348,
+      "sha256": "63426a335a0b5023119e4a88e94a937fb082a858485717f965088f6635e665d9",
+      "format": "pcap, SEL RTAC serial line (link type 250)",
+      "recorded": "2019-04-04 11:37:56Z .. 2019-04-04 11:39:38Z",
+      "evidence": "B",
+      "evidence_basis": "Written by an SEL RTAC's serial-line capture: the frames carry the UART control lines (RTS, CTS, DSR, DTR) of a physical serial port. The RTAC is the controlled station; neither its model and firmware nor the controlling station are stated.",
+      "systems": [
+        "controlling station (not stated) on the RTAC's serial port",
+        "SEL RTAC as controlled station, link address 64, common address 64"
+      ],
+      "operations": "station interrogation (C_IC_NA_1) with confirmation and termination, class 1 and class 2 polls answered with M_SP_TB_1, M_DP_TB_1, M_ST_TB_1, M_ME_TD_1 (\"Class 1/2 Scans with Various Info Object Responses\")",
+      "privacy": "serial line only, no addresses",
+      "missing_for_verification": "the RTAC model and firmware, the controlling station",
+      "params": {
+        "link_address_octets": 1,
+        "cause_octets": 1,
+        "common_address_octets": 1,
+        "ioa_octets": 2
+      },
+      "counts": {
+        "lines": 1,
+        "frames": 44,
+        "single_characters": 0,
+        "fixed_frames": 23,
+        "variable_frames": 21,
+        "undecodable_stretches": 0,
+        "asdu_errors": 0,
+        "reencoded_exactly": 44,
+        "exchanges": 22,
+        "responses_before_first_request": 0,
+        "responses_overheard": 0,
+        "repetitions": 0,
+        "fcb_toggles_checked": 21,
+        "balanced": false,
+        "primary_functions": [
+          3,
+          10,
+          11
+        ],
+        "secondary_functions": [
+          0,
+          8,
+          9
+        ],
+        "type_identifications": [
+          30,
+          31,
+          32,
+          34,
+          100
+        ],
+        "causes": [
+          6,
+          7,
+          10,
+          20
+        ],
+        "asdus": {
+          "controlled C_IC_NA_1 cause 10": 1,
+          "controlled C_IC_NA_1 cause 7": 1,
+          "controlled M_DP_TB_1 cause 20": 2,
+          "controlled M_ME_TD_1 cause 20": 4,
+          "controlled M_SP_TB_1 cause 20": 11,
+          "controlled M_ST_TB_1 cause 20": 1,
+          "controlling C_IC_NA_1 cause 6": 1
+        }
+      }
+    },
+    {
+      "path": "wireshark-issues/unknown_sel-rtac_double-command-sbo.pcap",
+      "source": "wireshark-issue-15688",
+      "original_name": "IEC_101_control_capture.pcap",
+      "url": "https://gitlab.com/-/project/7898047/uploads/d5360b16b3b2bca36527fe9c2c8f313e/IEC_101_control_capture.pcap",
+      "size": 13795,
+      "sha256": "3e44f2f470a3767437e4ce5e3cde99d7569e0cf5f3dde58fcddf599da3400786",
+      "format": "pcap, SEL RTAC serial line (link type 250)",
+      "recorded": "2019-03-22 13:56:58Z .. 2019-03-22 13:58:13Z",
+      "evidence": "B",
+      "evidence_basis": "Written by an SEL RTAC's serial-line capture with the UART control lines of a physical port. The line is shared: the RTAC (link address 64) also records the polls of link addresses 78, 20 and 57 and the answers of the stations at 78 and 20.",
+      "systems": [
+        "controlling station (not stated)",
+        "SEL RTAC as controlled station, link address 64, common address 64",
+        "controlled stations at link addresses 78 and 20 (heard only)",
+        "a request of link status to link address 57 that no station answers"
+      ],
+      "operations": "class 2 polls and requests of link status of several link addresses, a double command (C_DC_NA_1, IOA 22003) as select and execute with confirmations and termination (\"IEC 101 Select-Before-Operate sample\")",
+      "privacy": "serial line only, no addresses",
+      "missing_for_verification": "the RTAC model and firmware, the controlling station, the stations at link addresses 78 and 20",
+      "params": {
+        "link_address_octets": 1,
+        "cause_octets": 1,
+        "common_address_octets": 1,
+        "ioa_octets": 2
+      },
+      "counts": {
+        "lines": 1,
+        "frames": 345,
+        "single_characters": 81,
+        "fixed_frames": 259,
+        "variable_frames": 5,
+        "undecodable_stretches": 0,
+        "asdu_errors": 0,
+        "reencoded_exactly": 345,
+        "exchanges": 172,
+        "responses_before_first_request": 0,
+        "responses_overheard": 84,
+        "repetitions": 0,
+        "requests_abandoned": [
+          331
+        ],
+        "fcb_toggles_checked": 166,
+        "balanced": false,
+        "primary_functions": [
+          3,
+          9,
+          10,
+          11
+        ],
+        "secondary_functions": [
+          0,
+          8,
+          9,
+          11
+        ],
+        "type_identifications": [
+          46
+        ],
+        "causes": [
+          6,
+          7,
+          10
+        ],
+        "asdus": {
+          "controlled C_DC_NA_1 cause 10": 1,
+          "controlled C_DC_NA_1 cause 7": 2,
+          "controlling C_DC_NA_1 cause 6": 2
+        }
+      }
+    },
+    {
+      "path": "wireshark-issues/unknown_unknown_energisa-polls-m-sp-ta-1.pcapng",
+      "source": "wireshark-issue-16428",
+      "original_name": "monitor_energisa_1_2020_03_05.pcapng",
+      "url": "https://gitlab.com/-/project/7898047/uploads/566eb4ef867fc002ecbf96cdcb6b077b/monitor_energisa_1_2020_03_05.pcapng",
+      "size": 303892,
+      "sha256": "31b4b7fab1b7e84ea3cf68a838d52adae2f1e58d32ac874264e3941973e46eef",
+      "format": "pcapng, Ethernet, IPv4, TCP to serial port servers (2101, 2102, 50001)",
+      "recorded": "2020-03-05 18:00:12Z .. 2020-03-05 18:01:23Z",
+      "evidence": "B",
+      "evidence_basis": "Recorded on the network of the distribution utility Energisa (file name, reporter): a controlling station on a Supermicro server (MAC 00:25:90) polls three serial lines through serial port servers of Digi International (00:40:9D) and Siemens Canada / RuggedCom (50:00:84). Physical serial lines; the controlled stations behind them are not identified.",
+      "systems": [
+        "controlling station 192.150.52.11 (software not stated)",
+        "controlled stations at link addresses 7 and 12 behind Digi port server 192.150.52.4 (TCP 2102, 2101)",
+        "controlled station at link address 15 behind RuggedCom device 192.150.52.101 (TCP 50001)"
+      ],
+      "operations": "class 1 and class 2 polls only from the controlling station; the stations answer with M_SP_TA_1 (CP24Time2a), M_ME_NC_1 periodic and spontaneous, C_CS_NA_1 with cause spontaneous and C_TS_NA_1 with cause activation; about 70 s",
+      "privacy": "private-range addresses of a utility network (192.150.52.0/24)",
+      "missing_for_verification": "make, model and firmware of the controlled stations and of the controlling station",
+      "params": {
+        "link_address_octets": 1,
+        "cause_octets": 1,
+        "common_address_octets": 1,
+        "ioa_octets": 2
+      },
+      "counts": {
+        "lines": 3,
+        "frames": 1555,
+        "single_characters": 0,
+        "fixed_frames": 1419,
+        "variable_frames": 136,
+        "undecodable_stretches": 0,
+        "asdu_errors": 0,
+        "reencoded_exactly": 1555,
+        "exchanges": 777,
+        "responses_before_first_request": 0,
+        "responses_overheard": 0,
+        "repetitions": 0,
+        "fcb_toggles_checked": 775,
+        "balanced": false,
+        "primary_functions": [
+          10,
+          11
+        ],
+        "secondary_functions": [
+          8,
+          9
+        ],
+        "type_identifications": [
+          2,
+          13,
+          103,
+          104
+        ],
+        "causes": [
+          1,
+          3,
+          6
+        ],
+        "asdus": {
+          "controlled C_CS_NA_1 cause 3": 1,
+          "controlled C_TS_NA_1 cause 6": 8,
+          "controlled M_ME_NC_1 cause 1": 113,
+          "controlled M_ME_NC_1 cause 3": 13,
+          "controlled M_SP_TA_1 cause 3": 1
+        }
+      }
+    },
+    {
+      "path": "wireshark-issues/unknown_unknown_energisa-polls-m-sp-tb-1.pcapng",
+      "source": "wireshark-issue-16428",
+      "original_name": "monitor_energisa_2.pcapng",
+      "url": "https://gitlab.com/-/project/7898047/uploads/0ad5557336accface09acfa939989815/monitor_energisa_2.pcapng",
+      "size": 4661684,
+      "sha256": "c714ea326b998824bf95f17e68b0a224eb3fadf6dbb416ae5000c681dce0a395",
+      "format": "pcapng, Ethernet, IPv4, TCP to serial port servers (2101, 2102, 50001)",
+      "recorded": "2020-03-01 11:20:45Z .. 2020-03-01 11:38:42Z",
+      "evidence": "B",
+      "evidence_basis": "The same network and stations as monitor_energisa_1, about 18 minutes.",
+      "systems": [
+        "controlling station 192.150.52.11",
+        "controlled stations at link addresses 7 and 12 behind Digi port server 192.150.52.4",
+        "controlled station at link address 15 behind RuggedCom device 192.150.52.101"
+      ],
+      "operations": "class 1 and class 2 polls answered with M_DP_TA_1 (CP24Time2a), M_DP_TB_1, M_SP_TB_1, M_ME_NC_1 and C_TS_NA_1 with cause activation; about 18 minutes",
+      "privacy": "private-range addresses of a utility network",
+      "missing_for_verification": "make, model and firmware of the stations",
+      "params": {
+        "link_address_octets": 1,
+        "cause_octets": 1,
+        "common_address_octets": 1,
+        "ioa_octets": 2
+      },
+      "counts": {
+        "lines": 3,
+        "frames": 23591,
+        "single_characters": 0,
+        "fixed_frames": 21461,
+        "variable_frames": 2130,
+        "undecodable_stretches": 0,
+        "asdu_errors": 0,
+        "reencoded_exactly": 23591,
+        "exchanges": 11794,
+        "responses_before_first_request": 2,
+        "responses_overheard": 0,
+        "repetitions": 0,
+        "fcb_toggles_checked": 11792,
+        "balanced": false,
+        "primary_functions": [
+          10,
+          11
+        ],
+        "secondary_functions": [
+          8,
+          9
+        ],
+        "type_identifications": [
+          4,
+          13,
+          30,
+          31,
+          104
+        ],
+        "causes": [
+          1,
+          3,
+          6
+        ],
+        "asdus": {
+          "controlled C_TS_NA_1 cause 6": 144,
+          "controlled M_DP_TA_1 cause 3": 12,
+          "controlled M_DP_TB_1 cause 3": 6,
+          "controlled M_ME_NC_1 cause 1": 1745,
+          "controlled M_ME_NC_1 cause 3": 215,
+          "controlled M_SP_TB_1 cause 3": 8
+        }
+      }
+    },
+    {
+      "path": "wireshark-issues/unknown_unknown_m-me-nb-1-link-address-2.pcapng",
+      "source": "wireshark-issue-17775",
+      "original_name": "issue-17775.pcapng",
+      "url": "https://gitlab.com/-/project/7898047/uploads/64b2250b29a7ea42841126f6d5399b82/issue-17775.pcapng",
+      "size": 196,
+      "sha256": "001f74239b0094714a60ff1327ed351defce61d18c3e1bb856560fba4ec327eb",
+      "format": "pcapng, Ethernet, IPv4, TCP 950",
+      "recorded": "2021-12-09 07:08:13Z .. 2021-12-09 07:08:13Z",
+      "evidence": "E",
+      "evidence_basis": "One frame a Wireshark developer rebuilt from the reporter's screenshot, not a recording.",
+      "systems": [
+        "controlled station at link address 3 (from the screenshot)"
+      ],
+      "operations": "M_ME_NB_1 with eight objects, 2-octet link address, 2-octet common address, 3-octet IOA",
+      "privacy": "private addresses only",
+      "missing_for_verification": "the recording itself",
+      "params": {
+        "link_address_octets": 2,
+        "cause_octets": 1,
+        "common_address_octets": 2,
+        "ioa_octets": 3
+      },
+      "counts": {
+        "lines": 1,
+        "frames": 1,
+        "single_characters": 0,
+        "fixed_frames": 0,
+        "variable_frames": 1,
+        "undecodable_stretches": 0,
+        "asdu_errors": 0,
+        "reencoded_exactly": 1,
+        "exchanges": 0,
+        "responses_before_first_request": 1,
+        "responses_overheard": 0,
+        "repetitions": 0,
+        "fcb_toggles_checked": 0,
+        "balanced": false,
+        "primary_functions": null,
+        "secondary_functions": [
+          8
+        ],
+        "type_identifications": [
+          11
+        ],
+        "causes": [
+          3
+        ],
+        "asdus": {
+          "controlled M_ME_NB_1 cause 3": 1
+        }
+      }
+    }
+  ]
+}

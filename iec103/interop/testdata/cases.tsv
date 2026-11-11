@@ -1,0 +1,37 @@
+# Copied from otfabric/iec60870-5-interop tests/iec103/cases.tsv at v0.2.1 (contract 2.1).
+# Refresh it with the harness version pinned in harness.go.
+# Self-test cases of IEC 60870-5-103 for scripts/interop.sh, against the
+# baseline fixture (fixtures/iec103/baseline), unbalanced, every client with
+# every server. The outcome line leaves out the identification (checked by
+# values.identification in scripts/interop-iec103.sh) and the cyclic
+# measurands (cause 2), whose number in a result is not fixed.
+#
+# Columns, separated by tabs, as tests/iec101/cases.tsv:
+#   1  id      stable dotted scenario id of results.json (prefixed with
+#              iec103.unbalanced.); never change it
+#   2  state   "ro" (servers are shared) or "rw" (a freshly started server)
+#   3  exit    expected exit code of the client
+#   4  summary expected outcome: ok, error code, confirmations (cause, "n" when
+#              negative), termination, and type/cause of every received ASDU
+#   5  needs   "-", or "server:<feature>" and "client:<feature>", separated by commas
+#   6  operation and its flags, as passed to "client"
+#
+# The general interrogation answers with the eight indications of the fixture
+# that take part in it (160/16..19, 23, 24, 27, 36; not 160/68), cause 9.
+#
+# The commands use pairs of table 17 that are typical for the device's function
+# type (160: INF 16..19), with the values of its COM column (INF 19: ON only),
+# so that a client that follows the table sends every one. 160/18 is a valid
+# pair the fixture does not take: the station refuses it with cause 21, as it
+# refuses DCO 3. A positive command is acknowledged with cause 20 and its
+# change of state follows with cause 12 (clause 7.4.4, figure 7); the client
+# collects for 500 ms after the acknowledgement to receive it.
+case.connect	ro	0	ok=true error=- conf= term=false asdus=	-	connect
+case.interrogate	ro	0	ok=true error=- conf= term=true asdus=time-tagged-message/9,time-tagged-message/9,time-tagged-message/9,time-tagged-message/9,time-tagged-message/9,time-tagged-message/9,time-tagged-message/9,time-tagged-message/9,general-interrogation-termination/10	-	interrogate
+case.interrogate-scn-200	ro	0	ok=true error=- conf= term=true asdus=time-tagged-message/9,time-tagged-message/9,time-tagged-message/9,time-tagged-message/9,time-tagged-message/9,time-tagged-message/9,time-tagged-message/9,time-tagged-message/9,general-interrogation-termination/10	-	interrogate --scn 200
+case.clock-sync	ro	0	ok=true error=- conf=8 term=false asdus=time-synchronization/8	-	clock-sync --time 2026-10-09T15:35:12.345Z
+case.monitor	ro	0	ok=true error=- conf= term=false asdus=	-	monitor --duration-ms 500
+case.command-160-18-not-taken	ro	1	ok=false error=negative-confirmation conf=21n term=false asdus=time-tagged-message/21	server:generalCommand,client:generalCommand	command --fun 160 --inf 18 --dco on --rii 4 --collect-ms 500
+case.command-160-16-dco-3	ro	1	ok=false error=negative-confirmation conf=21n term=false asdus=time-tagged-message/21	server:generalCommand,client:generalCommand	command --fun 160 --inf 16 --dco 3 --rii 6 --collect-ms 500
+case.command-160-16-off	rw	0	ok=true error=- conf=20 term=false asdus=time-tagged-message/20,time-tagged-message/12	server:generalCommand,client:generalCommand	command --fun 160 --inf 16 --dco off --rii 42 --collect-ms 500
+case.command-160-19-on	rw	0	ok=true error=- conf=20 term=false asdus=time-tagged-message/20,time-tagged-message/12	server:generalCommand,client:generalCommand	command --fun 160 --inf 19 --dco on --rii 77 --collect-ms 500

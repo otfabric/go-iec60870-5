@@ -47,7 +47,9 @@ f, err = d.Next()
 ## Package `link`
 
 `Config` holds the FT 1.2 parameters, `Timeout`, `Retries`,
-`SingleCharAck` and the `OnFrame`/`OnDiscard` hooks.
+`SingleCharAck`, `SenderAddr` (balanced responses with the own address
+instead of the receiver's, IEC 60870-5-101:2003 6.2.1.2) and the
+`OnFrame`/`OnDiscard` hooks.
 
 | Type | Role | Methods |
 |---|---|---|
@@ -59,6 +61,20 @@ f, err = d.Next()
 `SecondaryControl`, `PRM`, `FCB`, `FCV`, `ACD`, `DFC`, `DIR`, `Func`).
 `Status` reports a secondary's ACD and DFC. The function codes are the
 `Func*` constants.
+
+Optional handler interfaces: `FCBResetHandler` (serves function 7, the
+IEC 60870-5-103 extension; without it function 7 is answered 15),
+`FlowControlHandler` (`Busy`: DFC in every response and user data refused,
+for a `SecondaryHandler` or a `BalancedHandler`), `FunctionFilter`.
+
+Link states of IEC 60870-5-101:2003 figures 5, 6, 8 and 9: a secondary
+answers only request status of link and reset of remote link until it is
+reset; `Init` repeats request status of link while DFC is set and fails
+with `ErrDataFlow` when it stays set; a balanced `Send` waits the same way
+after a response with DFC set. A response whose function code cannot
+answer the request is discarded (`ErrUnexpected` only when nothing else
+came). `SendConfirm`, `SendNoReply` and `Send` refuse empty data with
+`ErrNoData`.
 
 ## Package `telecontrol`
 
@@ -72,8 +88,11 @@ and `Confirmation` are the matching rules.
 
 ## Packages `iec101`, `iec101/client`, `iec101/server`
 
-`iec101.Params` (`Mode`, `Link`, `ASDU`; `DefaultParams`, `Normalize`),
-`iec101.State` (`StateDown`, `StateUp`, `StateClosed`).
+`iec101.Params` (`Mode`, `Link`, `ASDU`, `Strict`; `DefaultParams`,
+`Normalize`), `iec101.State` (`StateDown`, `StateUp`, `StateClosed`).
+`iec101.Validate` checks an ASDU against the IEC 60870-5-101 profile
+(`Defined101`, `ErrProfile`, `*ProfileError` with the "unknown ..." cause to
+mirror it with); `Params.Strict` applies it in the client and the server.
 
 ```go
 c, err := client.New(port, client.Config{Params: p, LinkAddr: 3, Handler: h})

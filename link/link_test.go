@@ -103,19 +103,22 @@ func TestUnbalanced(t *testing.T) {
 		if d, _, err = pr.RequestData(ctx, 7, Class2); err != nil || d != nil {
 			t.Fatalf("no data: % x %v", d, err)
 		}
-		if _, err := pr.ResetFCB(ctx, 7); err != nil {
-			t.Fatal(err)
+		// Function 7 is no function of IEC 60870-5-101 (table 3): a
+		// handler without FCBResetHandler answers 15.
+		if _, err := pr.ResetFCB(ctx, 7); !errors.Is(err, ErrNotImplemented) {
+			t.Fatalf("reset FCB: %v", err)
 		}
-		if _, err := pr.SendConfirm(ctx, 7, nil); err != nil {
-			t.Fatal(err)
+		// Without an ASDU there is no variable frame (6.1).
+		if _, err := pr.SendConfirm(ctx, 7, nil); !errors.Is(err, ErrNoData) {
+			t.Fatalf("empty send/confirm: %v", err)
 		}
 		if err := pr.SendNoReply(cfg.Broadcast(), []byte{9}); err != nil {
 			t.Fatal(err)
 		}
-		if err := pr.SendNoReply(7, nil); err != nil {
-			t.Fatal(err)
+		if err := pr.SendNoReply(7, []byte{}); !errors.Is(err, ErrNoData) {
+			t.Fatalf("empty send/no reply: %v", err)
 		}
-		waitFor(t, func() bool { return h.received() == 4 })
+		waitFor(t, func() bool { return h.received() == 2 })
 		if h.bcast != 1 || len(h.resets) != 2 || h.resets[0] || !h.resets[1] {
 			t.Errorf("bcast %d resets %v", h.bcast, h.resets)
 		}
@@ -148,6 +151,9 @@ func TestWrongAddressTimesOut(t *testing.T) {
 func TestNackAndDFC(t *testing.T) {
 	h := &station{refuse: true}
 	pr, _ := pair(t, fast, 3, h)
+	if _, err := pr.Init(context.Background(), 3); err != nil {
+		t.Fatal(err)
+	}
 	st, err := pr.SendConfirm(context.Background(), 3, []byte{1})
 	if !errors.Is(err, ErrNack) || !st.DFC {
 		t.Fatalf("%+v %v", st, err)
@@ -222,7 +228,7 @@ func TestCloseAndCancel(t *testing.T) {
 	if pr.Err() == nil {
 		t.Error("transport error not reported")
 	}
-	if err := pr.SendNoReply(1, nil); !errors.Is(err, ErrClosed) {
+	if err := pr.SendNoReply(1, []byte{1}); !errors.Is(err, ErrClosed) {
 		t.Fatalf("after close: %v", err)
 	}
 }

@@ -261,6 +261,14 @@ func (c *Client) receive(data []byte) {
 		c.log.Warn("undecodable ASDU dropped", "err", err)
 		return
 	}
+	if c.cfg.Strict {
+		if err := iec101.Validate(a, c.cfg.ASDU); err != nil {
+			// IEC 60870-5-101:2003 7.2.3: the controlling station may log
+			// such ASDUs; they do not affect the following messages.
+			c.log.Warn("ASDU dropped by the IEC 60870-5-101 profile", "asdu", a.String(), "err", err)
+			return
+		}
+	}
 	if c.req.Dispatch(a) {
 		return
 	}
@@ -289,6 +297,11 @@ func (c *Client) deliver() {
 func (c *Client) send(ctx context.Context, a *asdu.ASDU) error {
 	if c.State() != iec101.StateUp {
 		return iec101.ErrLinkDown
+	}
+	if c.cfg.Strict {
+		if err := iec101.Validate(a, c.cfg.ASDU); err != nil {
+			return err
+		}
 	}
 	raw, err := a.Encode(c.cfg.ASDU)
 	if err != nil {
@@ -451,6 +464,10 @@ func (u balancedUser) UserData(data []byte) bool {
 }
 
 func (u balancedUser) Reset(bool) {}
+
+// Busy sets DFC, and refuses user data, while the handler queue is more
+// than half full (IEC 60870-5-101:2003 figure 9, "secondary link busy").
+func (u balancedUser) Busy() bool { return len(u.c.handled) > cap(u.c.handled)/2 }
 
 // Interrogate runs an interrogation (C_IC_NA_1) with qualifier qoi
 // ([asdu.QOIStation] or [asdu.QOIGroup]) and returns the data the station

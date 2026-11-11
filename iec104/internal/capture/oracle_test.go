@@ -287,6 +287,7 @@ const (
 	classSecurity  = "IEC 62351-5 ASDUs (type identifications 81..87): the asdu package carries them as raw payload for package sec; Wireshark decodes the ASDU some of them wrap"
 	classRaw       = "a type identification go-iec60870-5 has no object model for (reserved types, S_IT_TC_1 = 41 of IEC 60870-5-7): carried as raw payload (asdu.ASDU.Raw); Wireshark decodes or guesses its objects"
 	classWeekday   = "a day of week that does not match the date (the synthetic capture sets it freely): go-iec60870-5 keeps whether the field is used (Timestamp.NoWeekday) and derives the day from the date"
+	classYear      = "a CP56Time2a whose year is beyond 99 (years since 1900): go-iec60870-5 reads the impossible time as invalid and has no time fields; Wireshark shows the fields"
 	classOther     = "unclassified"
 )
 
@@ -358,6 +359,11 @@ func classify(d oracleDiff, ds []Decoded) string {
 			return classRaw
 		}
 	}
+	for _, x := range ds {
+		if strings.HasPrefix(d.Field, "iec60870_asdu.cp56time.") && impossibleTime(x) {
+			return classYear
+		}
+	}
 	if d.Field == "iec60870_asdu.cp56time.dow" && d.Tshark != "0" {
 		return classWeekday
 	}
@@ -390,6 +396,42 @@ var oracleExpected = map[string]struct {
 	"uowm/qtester104_iec-testserver_c-ci-na-1.pcap":              {16726, 75654, nil},
 	"wireshark/synthetic_synthetic_iec104-coverage.pcap.gz": {262, 4220, map[string]int{
 		classInvalidU: 2, classMalformed: 9, classRaw: 47, classRawType: 394, classSecurity: 20, classWeekday: 137}},
+	"emreekin/unknown_unknown_baselines.pcap":                          {59, 819, nil},
+	"emreekin/unknown_unknown_c-bo-ta-1.pcap":                          {31, 686, nil},
+	"emreekin/unknown_unknown_c-dc-na-1.pcap":                          {20, 268, nil},
+	"emreekin/unknown_unknown_c-rc-ta-1.pcap":                          {19, 386, nil},
+	"emreekin/unknown_unknown_c-sc-ta-1-c-dc-ta-1.pcap":                {48, 729, nil},
+	"emreekin/unknown_unknown_c-se-nc-1.pcap":                          {22, 374, nil},
+	"emreekin/unknown_unknown_c-se-ta-1.pcap":                          {26, 626, nil},
+	"emreekin/unknown_unknown_c-se-tb-1.pcap":                          {38, 896, nil},
+	"emreekin/unknown_unknown_c-se-tc-1-2.pcap":                        {24, 540, nil},
+	"emreekin/unknown_unknown_c-se-tc-1.pcap":                          {24, 540, nil},
+	"emreekin/unknown_unknown_deneme-2.pcap":                           {53, 507, nil},
+	"emreekin/unknown_unknown_deneme.pcap":                             {161, 1686, map[string]int{classRawType: 24, classWeekday: 3}},
+	"emreekin/unknown_unknown_local-value-loopback.pcap":               {21, 115, nil},
+	"emreekin/unknown_unknown_m-bo-tb-1.pcap":                          {5, 67, nil},
+	"emreekin/unknown_unknown_p-me-nc-1-ip-value.pcap":                 {51, 449, nil},
+	"emreekin/unknown_unknown_vinci-loopback.pcap":                     {33, 430, nil},
+	"eset/industroyer2_unknown_commands-sample-1.pcap":                 {303, 2735, nil},
+	"eset/industroyer2_unknown_commands-sample-2.pcap":                 {527, 4618, nil},
+	"iti/unknown_unknown_javarmi-and-iec-misc.pcap":                    {215, 2254, nil},
+	"ndpi/unknown_unknown_m-me-tf-1.pcap":                              {7, 455, nil},
+	"wireshark-issues/synthetic_synthetic_cp56time-utc.pcap":           {1, 22, nil},
+	"wireshark-issues/synthetic_synthetic_normalized-values.pcapng":    {5, 175, nil},
+	"wireshark-issues/synthetic_synthetic_step-positions.pcapng":       {127, 1536, nil},
+	"wireshark-issues/simulator_mio8_spontaneous-not-soe.pcapng":       {19, 326, nil},
+	"wireshark-issues/simulator_mio8_spontaneous-soe.pcapng":           {30, 471, nil},
+	"wireshark-issues/unknown_unknown_bad-timestamps.pcap":             {112, 1161, nil},
+	"wireshark-issues/unknown_unknown_bitstring-32.pcapng":             {10, 210, nil},
+	"wireshark-issues/unknown_unknown_counters.pcapng":                 {3, 100, nil},
+	"wireshark-issues/unknown_unknown_dissector-test-with-errors.pcap": {61, 372, map[string]int{classInvalidU: 6, classMalformed: 20}},
+	"wireshark-issues/unknown_unknown_diverse-signals-loopback.pcap":   {86, 1155, map[string]int{classYear: 90}},
+	"wireshark-issues/unknown_unknown_general-interrogation.pcapng":    {16, 390, nil},
+	"wireshark-issues/unknown_unknown_interrogation-sample.pcap":       {4, 99, nil},
+	"wireshark-issues/unknown_unknown_m-sp-na-1-index-error.pcap":      {1, 3, map[string]int{classMalformed: 10}},
+	"wireshark-issues/unknown_unknown_m-sp-tb-1-time-tag.pcap":         {1, 22, nil},
+	"wireshark-issues/unknown_unknown_step-position.pcap":              {1, 12, nil},
+	"wireshark-wiki/unknown_unknown_m-sp-na-1-sequence.pcapng":         {1, 172, nil},
 }
 
 func TestOracleTshark(t *testing.T) {

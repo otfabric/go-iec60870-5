@@ -84,8 +84,14 @@ var (
 	// ErrInvalidConfig reports a Config a station cannot be built with.
 	ErrInvalidConfig = errors.New("link: invalid configuration")
 	// ErrDataFlow reports a secondary with DFC set: it cannot accept
-	// further user data now.
+	// further user data now, and did not clear DFC while the primary
+	// requested the status of link (IEC 60870-5-101:2003 6.2.1, figures 5
+	// and 8).
 	ErrDataFlow = errors.New("link: data flow control (DFC) set")
+	// ErrNoData reports user data without octets: a frame without an ASDU
+	// is a fixed-length frame (IEC 60870-5-101:2003 6.1), so send/confirm
+	// and send/no reply of user data need at least one octet.
+	ErrNoData = errors.New("link: empty user data")
 )
 ```
 
@@ -99,6 +105,7 @@ Errors. They are wrapped with detail; test with errors.Is.
 type Balanced struct {
 
 	// last FCB sent
+	// the peer's last response had DFC set
 
 	// secondary state
 
@@ -106,6 +113,8 @@ type Balanced struct {
 ```
 
 Balanced is a combined station of balanced transmission: it is primary for the messages it initiates and secondary for its peer's. Both directions run at the same time over a full-duplex line.
+
+Its secondary answers only request status of link and reset of remote link until the peer reset the link (IEC 60870-5-101:2003 figure 9). Its primary waits for the peer to clear DFC before it sends user data again (figure 8).
 
 #### func NewBalanced
 
@@ -145,7 +154,7 @@ Err returns the transport error that stopped the station, if any.
 func (b *Balanced) Init(ctx context.Context) error
 ```
 
-Init brings up this station's direction of the link: request status of link, then reset of remote link.
+Init brings up this station's direction of the link: request status of link until the peer answers with DFC = 0, then reset of remote link (IEC 60870-5-101:2003 figure 8). See [Primary.Init](#func-primary-init) for the repetition.
 
 #### func (Balanced) RequestStatus
 
@@ -169,7 +178,7 @@ ResetLink sends reset of remote link; the next FCV message carries FCB = 1.
 func (b *Balanced) Send(ctx context.Context, data []byte) error
 ```
 
-Send sends user data with confirmation.
+Send sends user data with confirmation. When the peer's last response had DFC set it first requests status of link until DFC is clear ("secondary link busy", IEC 60870-5-101:2003 figure 8) and fails with ErrDataFlow when it stays set. Empty data fails with ErrNoData.
 
 #### func (Balanced) Test
 
@@ -255,6 +264,15 @@ type Config struct {
 	// "no data" NACK when neither ACD nor DFC is set (IEC 60870-5-2 5.1).
 	// Primaries always accept E5h.
 	SingleCharAck bool
+
+	// SenderAddr makes a balanced station's responses (secondary
+	// messages) carry its own link address instead of the peer's. By
+	// default they carry the address of the receiver, the peer:
+	// IEC 60870-5-101:2003 6.2.1.2 asks for the receiver's address "in
+	// primary and secondary messages". lib60870-C v2.4.1 answers with its
+	// own address and accepts either. Responses with either address are
+	// accepted whatever this says. Unbalanced stations ignore it.
+	SenderAddr bool
 
 	// OnFrame, when set, is called for every frame sent (tx true) and
 	// received. It runs on the station's goroutines and must not block.
@@ -372,7 +390,7 @@ type FCBResetHandler interface {
 }
 ```
 
-FCBResetHandler is implemented by a [SecondaryHandler](#type-secondaryhandler) that wants to know about function 7 "reset of frame count bit", the IEC 60870-5-103 extension (6.3): ResetFCB is called after the station reset its expected FCB and before it answers.
+FCBResetHandler is implemented by a [SecondaryHandler](#type-secondaryhandler) that serves function 7 "reset of frame count bit", the IEC 60870-5-103 extension (6.3): ResetFCB is called after the station reset its expected FCB and before it answers ACK. Function 7 is not a function of IEC 60870-5-101 (table 3): a secondary whose handler does not implement this interface answers it with function 15 "link service not implemented".
 
 ### type FlowControlHandler
 
@@ -382,7 +400,7 @@ type FlowControlHandler interface {
 }
 ```
 
-FlowControlHandler is implemented by a [SecondaryHandler](#type-secondaryhandler) that reports data flow control: while Busy returns true every response carries DFC = 1 (IEC 60870-5-2 5.1; IEC 60870-5-103 6.3), not only the NACK to refused user data.
+FlowControlHandler is implemented by a [SecondaryHandler](#type-secondaryhandler) or a [BalancedHandler](#type-balancedhandler) that reports data flow control: while Busy returns true every response carries DFC = 1 (IEC 60870-5-2 5.1; IEC 60870-5-103 6.3), and user data with confirmation (function 3) is answered NACK with DFC = 1 without being delivered ("secondary link busy", IEC 60870-5-101:2003 figures 6 and 9).
 
 ### type FunctionFilter
 
@@ -444,7 +462,7 @@ Err returns the transport error that stopped the station, if any.
 func (pr *Primary) Init(ctx context.Context, addr uint16) (Status, error)
 ```
 
-Init brings up the link to a secondary: request status of link until it answers, then reset of remote link (IEC 60870-5-2 5.1, link initialization).
+Init brings up the link to a secondary: request status of link until it answers with DFC = 0, then reset of remote link (IEC 60870-5-2 5.1, link initialization; IEC 60870-5-101:2003 6.2.1.1, figure 5). While the secondary answers with DFC = 1 the request is repeated every Config.Timeout, at most Config.Retries times, then Init fails with ErrDataFlow.
 
 #### func (Primary) RequestData
 
@@ -492,7 +510,7 @@ ResetUser sends "reset of user process" (function 1).
 func (pr *Primary) SendConfirm(ctx context.Context, addr uint16, data []byte) (Status, error)
 ```
 
-SendConfirm sends user data with confirmation (function 3). It returns ErrNack when the secondary did not accept it.
+SendConfirm sends user data with confirmation (function 3). It returns ErrNack when the secondary did not accept it, and ErrNoData for empty data, which has no variable-length frame (IEC 60870-5-101:2003 6.1).
 
 #### func (Primary) SendNoReply
 
@@ -500,20 +518,19 @@ SendConfirm sends user data with confirmation (function 3). It returns ErrNack w
 func (pr *Primary) SendNoReply(addr uint16, data []byte) error
 ```
 
-SendNoReply sends user data without reply (function 4), typically to the broadcast address. Nothing is awaited.
+SendNoReply sends user data without reply (function 4), typically to the broadcast address. Nothing is awaited. Empty data fails with ErrNoData.
 
 ### type Secondary
 
 ```go
 type Secondary struct {
 
-	// an FCV message was accepted since start or reset
-	// FCB the next new FCV message carries
+	// the primary reset the link since the station started
 
 }
 ```
 
-Secondary is the secondary station of unbalanced transmission: it answers the messages addressed to it and ignores the others.
+Secondary is the secondary station of unbalanced transmission: it answers the messages addressed to it and ignores the others. Until the primary resets the link (function 0) it answers only request status of link and reset of remote link and ignores every other message (IEC 60870-5-101:2003 6.2.1.1, figure 6).
 
 #### func NewSecondary
 

@@ -75,6 +75,14 @@ type Params struct {
 	// ASDU holds the ASDU field sizes. A zero MaxSize is set to the largest
 	// ASDU one frame carries.
 	ASDU asdu.Params
+	// Strict applies [Validate], the IEC 60870-5-101 profile checks, to
+	// every ASDU sent and received. A refused ASDU is not sent (the call
+	// fails with [ErrProfile]); a received one is dropped and logged by the
+	// client, and by the server mirrored negatively with the "unknown ..."
+	// cause of [ProfileError] (IEC 60870-5-101:2003 7.2.3) or dropped when
+	// none fits. Off by default: the codec alone accepts what
+	// IEC 60870-5-104 allows.
+	Strict bool
 }
 
 // DefaultParams returns a common profile: unbalanced, 1-octet link
@@ -95,6 +103,9 @@ func (p Params) Normalize() (Params, error) {
 	}
 	if p.Mode == ModeUnbalanced && p.Link.FT12.AddrSize == 0 {
 		return p, fmt.Errorf("%w: unbalanced transmission needs a link address", ErrInvalidConfig)
+	}
+	if p.Link.Timeout == 0 {
+		p.Link.Timeout = link.DefaultTimeout
 	}
 	if p.ASDU.MaxSize == 0 {
 		p.ASDU.MaxSize = p.Link.FT12.MaxData()

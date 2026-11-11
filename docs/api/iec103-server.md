@@ -20,6 +20,9 @@ The application answers general interrogations, general commands and generic ser
 const (
 	DefaultQueueSize   = 1024
 	DefaultSyncTimeout = 23 * time.Hour // clause 7.4.2
+	// DefaultBitRate is the lower of the two standard rates of clause
+	// 6.2.4 (9.6 and 19.2 kbit/s).
+	DefaultBitRate = 9600
 )
 ```
 
@@ -65,7 +68,9 @@ type Config struct {
 	// (clause 7.2.4).
 	CommonAddr uint8
 	// Fun is the main function type of the equipment, which the
-	// identification messages carry (table 8, note 2).
+	// identification messages and the list of recorded disturbances carry
+	// (table 8, note 2; clause 7.3.1.11). It is required: zero is refused
+	// with [iec103.ErrInvalidConfig].
 	Fun iec103.FunctionType
 	// Identification is the body of the identification (ASDU 5).
 	Identification iec103.Identification
@@ -90,9 +95,20 @@ type Config struct {
 	// synchronization. Zero means [DefaultSyncTimeout].
 	SyncTimeout time.Duration
 	// SyncDelay is added to a received synchronization time: the
-	// transmission time of the ASDU 6, length times bit time (clause
-	// 7.4.2), which the line speed determines.
+	// transmission time of the ASDU 6, its length in bits times the bit
+	// time (clause 7.4.2). Zero means the length of the FT 1.2 frame (21
+	// characters of 11 bits) at BitRate; negative means no correction, for
+	// a transport that is not a serial line.
 	SyncDelay time.Duration
+	// BitRate is the line speed in bit/s from which the default SyncDelay
+	// is computed. Zero means [DefaultBitRate].
+	BitRate int
+	// AnswerBroadcastSync makes the server answer a broadcast time
+	// synchronization (send/no reply to address 255) with the
+	// monitor-direction ASDU 6 too. Off by default: figure 5 of clause
+	// 7.4.2 has broadcast messages need no answer; an addressed
+	// synchronization is always answered.
+	AnswerBroadcastSync bool
 	// OnTimeSync is called with each received synchronization time.
 	OnTimeSync func(t time.Time, broadcast bool)
 
@@ -184,7 +200,7 @@ AckCommand acknowledges the general command req (clause 7.4.4): ASDU 1 with the 
 func (s *Server) AnswerGI(req *iec103.ASDU, data ...*iec103.ASDU) error
 ```
 
-AnswerGI answers the general interrogation req (ASDU 7, clause 7.4.3): it queues data with cause 9, the scan number as SIN of time-tagged messages, then the termination (ASDU 8) with the scan number. With a [DisturbanceSource](#type-disturbancesource) the list of recorded disturbances follows (ASDU 23, cause 31, clause 7.4.7).
+AnswerGI answers the general interrogation req (ASDU 7, clause 7.4.3): it queues data with cause 9, the scan number as SIN of time-tagged messages, then the termination (ASDU 8) with the scan number. With a [DisturbanceSource](#type-disturbancesource) the list of recorded disturbances follows (ASDU 23, cause 31, with the function type of the equipment, clauses 7.3.1.11 and 7.4.7). A new ASDU 7 that arrives before the cycle was polled drops what is left of it, termination included (clause 7.4.3).
 
 #### func (Server) AnswerGenericGI
 
@@ -192,7 +208,7 @@ AnswerGI answers the general interrogation req (ASDU 7, clause 7.4.3): it queues
 func (s *Server) AnswerGenericGI(req *iec103.ASDU, sets ...iec103.DataSet) error
 ```
 
-AnswerGenericGI answers the general interrogation of generic data req (ASDU 21, INF 245, clause 7.4.8.7): ASDU 10 with INF 244 and cause 9 carrying the data sets, then the end (INF 245, cause 10, NGD 0).
+AnswerGenericGI answers the general interrogation of generic data req (ASDU 21, INF 245, clause 7.4.8.7): ASDU 10 with INF 244 and cause 9 carrying the data sets, then the end (INF 245, cause 10, NGD 0). A new general interrogation of generic data that arrives before the cycle was polled drops what is left of it, end included (clause 7.4.8.7).
 
 #### func (Server) Close
 

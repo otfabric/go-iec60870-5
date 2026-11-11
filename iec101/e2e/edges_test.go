@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"log"
 	"net"
 	"sync"
@@ -252,6 +253,91 @@ func TestDoneOnTransportLoss(t *testing.T) {
 		<-r.c.Done()
 		if r.c.Err() != nil {
 			t.Errorf("%v: client closed by the application reports %v", mode, r.c.Err())
+		}
+	}
+}
+
+// busySecondary is a raw unbalanced secondary whose station is busy: every
+// response carries DFC (IEC 60870-5-101:2003 figures 6 and 9).
+type busySecondary struct{}
+
+func (busySecondary) UserData([]byte, bool) bool { return false }
+func (busySecondary) Class1() []byte             { return nil }
+func (busySecondary) Class2() []byte             { return nil }
+func (busySecondary) HasClass1() bool            { return false }
+func (busySecondary) Reset(bool)                 {}
+func (busySecondary) Busy() bool                 { return true }
+
+// While the station reports DFC the client holds user data back and gives
+// it up with link.ErrDataFlow instead of sending it (figures 5 and 8).
+func TestClientHoldsBackWhileDFC(t *testing.T) {
+	a, b := net.Pipe()
+	p := params(iec101.ModeUnbalanced)
+	sec, err := link.NewSecondary(b, p.Link, 3, busySecondary{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sec.Close() }()
+	// Init waits for DFC = 0 and gives up: the link never comes up, and a
+	// request is refused at once.
+	c, _ := client.New(a, client.Config{Params: p, LinkAddr: 3, RetryInterval: 20 * time.Millisecond, PollInterval: 5 * time.Millisecond})
+	defer func() { _ = c.Close() }()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := c.Send(ctx, asdu.New(asdu.CauseActivation, ca, asdu.ResetProcess{Qualifier: 1})); !errors.Is(err, iec101.ErrLinkDown) {
+		t.Fatalf("send while the link cannot start: %v", err)
+	}
+	if c.State() == iec101.StateUp {
+		t.Fatal("link up although the station reports DFC")
+	}
+}
+
+// A send on a line that stopped answering fails with the link's error and
+// takes the link down; the client initializes it again once the line is
+// back (both the poll-wait and the send-first path of the poller).
+func TestClientSendOnDeadLine(t *testing.T) {
+	var line *flaky
+	r := start(t, params(iec101.ModeUnbalanced), func(c io.ReadWriteCloser) io.ReadWriteCloser { line = &flaky{ReadWriteCloser: c}; return line })
+	ctx := context.Background()
+	line.off.Store(true)
+	for range 3 {
+		sctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		err := r.c.Send(sctx, asdu.New(asdu.CauseActivation, ca, asdu.ResetProcess{Qualifier: 1}))
+		cancel()
+		if err == nil {
+			t.Fatal("send succeeded on a dead line")
+		}
+		if r.c.State() != iec101.StateUp {
+			break
+		}
+	}
+	line.off.Store(false)
+	wctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := r.c.WaitUp(wctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Send refuses what it cannot or must not transmit before it reaches the
+// link: an ASDU that does not encode under the parameters, and under the
+// strict profile one IEC 60870-5-101:2003 does not define (7.2.1.1).
+func TestClientSendRefusals(t *testing.T) {
+	for _, mode := range []iec101.Mode{iec101.ModeUnbalanced, iec101.ModeBalanced} {
+		p := params(mode)
+		p.Strict = true
+		r := start(t, p, nil)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := r.c.Send(ctx, asdu.New(asdu.CauseActivation, 300, asdu.ResetProcess{Qualifier: 1})); !errors.Is(err, asdu.ErrInvalidValue) && !errors.Is(err, iec101.ErrProfile) {
+			t.Errorf("%v: common address 300 with a 1-octet field: %v", mode, err)
+		}
+		if err := r.c.Send(ctx, asdu.New(asdu.CauseActivation, ca, asdu.SingleCommand{IOA: 500, Value: true, Time: asdu.Now()})); !errors.Is(err, iec101.ErrProfile) {
+			t.Errorf("%v: C_SC_TA_1 (reserved in IEC 101): %v", mode, err)
+		}
+		cancel()
+		_ = r.c.Close()
+		if err := r.c.Send(context.Background(), asdu.New(asdu.CauseActivation, ca, asdu.ResetProcess{Qualifier: 1})); err == nil {
+			t.Errorf("%v: send after close succeeded", mode)
 		}
 	}
 }

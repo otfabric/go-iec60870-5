@@ -173,6 +173,15 @@ var annexB = []struct {
 		{GIN{2, 0x11}, KODNone, mustStructure(Reply(GRCErrorDescription), ASCII("Setting to invalid position"))},
 	}}), cat([]byte{10, 0x81, 41, 1, 254, 250, 5, 2, 2, 1, 0, 22, 1, 1, 0, 2, 0x11, 0}, gdd(DataStructure, 34, 1),
 		gdd(DataGRC, 1, 1), []byte{11}, gdd(DataASCII, 27, 1), ascii("Setting to invalid position"))},
+	// The control-direction examples B.3.1, B.5.1 and B.6.1 (B.6.1 labels
+	// KOD <2> "actual value"; code 2 is the default value the example text
+	// asks for).
+	{"B.3.1 read group values", New(CauseGenericRead, 1, FunGeneric, InfReadGroup, GenericCommand{RII: 5, Items: []Item{{GIN{1, 0}, KODActualValue}}}),
+		[]byte{21, 0x81, 42, 1, 254, 241, 5, 1, 1, 0, 1}},
+	{"B.5.1 read entry value", New(CauseGenericRead, 1, FunGeneric, InfReadEntry, GenericCommand{RII: 5, Items: []Item{{GIN{3, 1}, KODActualValue}}}),
+		[]byte{21, 0x81, 42, 1, 254, 244, 5, 1, 3, 1, 1}},
+	{"B.6.1 read entry default value", New(CauseGenericRead, 1, FunGeneric, InfReadEntry, GenericCommand{RII: 5, Items: []Item{{GIN{3, 1}, KODDefaultValue}}}),
+		[]byte{21, 0x81, 42, 1, 254, 244, 5, 1, 3, 1, 2}},
 }
 
 func mustStructure(f ...Value) Value {
@@ -313,9 +322,9 @@ func TestDecodeErrors(t *testing.T) {
 		{[]byte{1, 0x81, 1, 3, 128}, ErrShort},
 		{[]byte{1, 0x81, 1, 3, 128, 16, 2, 0, 0, 0}, ErrShort},
 		{[]byte{1, 0x81, 1, 3, 128, 16, 2, 0, 0, 0, 0, 0, 9}, ErrTrailing},
-		{[]byte{3, 0x05, 2, 3, 128, 144, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, ErrInvalid},
+		{[]byte{3, 0x05, 2, 3, 128, 144, 0, 0, 0, 0, 0, 0, 0, 0, 0}, ErrShort},
 		{[]byte{3, 0x00, 2, 3, 128, 144}, ErrInvalid},
-		{[]byte{9, 0x0A, 2, 3, 128, 148}, ErrInvalid},
+		{[]byte{9, 0x0A, 2, 3, 128, 148}, ErrShort},
 		{append([]byte{23, 0x09, 31, 3, 128, 0}, make([]byte, 90)...), ErrInvalid},
 		{[]byte{29, 0x81, 31, 3, 128, 0, 0, 0, 26, 0, 0}, ErrInvalid},
 		{[]byte{30, 0x81, 31, 3, 128, 0, 0, 1, 0, 0, 1, 26, 0, 0}, ErrInvalid},
@@ -333,7 +342,7 @@ func TestDecodeErrors(t *testing.T) {
 }
 
 func TestEncodeErrors(t *testing.T) {
-	big := make([]MEA, 10)
+	big := make([]MEA, MaxMeasurandsWire+1)
 	sets := make([]DataSet, 64)
 	for i := range sets {
 		sets[i].Value = Reply(GRCAck)
@@ -341,7 +350,6 @@ func TestEncodeErrors(t *testing.T) {
 	cases := []*ASDU{
 		{Cause: 1},
 		New(2, 1, 128, 144, Measurands{}),
-		New(2, 1, 128, 144, Measurands{Values: big[:5]}),
 		New(2, 1, 128, 148, Measurands{Set2: true, Values: big}),
 		New(42, 1, 254, 244, GenericData{Sets: sets}),
 		New(42, 1, 254, 244, GenericData{Sets: []DataSet{{Value: Value{GDD: GDD{Type: DataUint, Size: 2, Number: 1}}}}}),
@@ -494,4 +502,19 @@ func FuzzDecode(f *testing.F) {
 	f.Fuzz(func(t *testing.T, b []byte) {
 		roundTrip(t, b)
 	})
+}
+
+// TestMeasurandsBeyondStandard: equipment sends ASDU 9 with more than the
+// nine measurands of clause 7.3.1.8 (recorded: 14 and 16); the codec
+// carries up to MaxMeasurandsWire both ways.
+func TestMeasurandsBeyondStandard(t *testing.T) {
+	a := New(CauseCyclic, 1, FunDistance, 148, Measurands{Set2: true, Values: make([]MEA, 16)})
+	b, err := a.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := Decode(b)
+	if err != nil || len(back.Body.(Measurands).Values) != 16 {
+		t.Fatalf("%v %v", back, err)
+	}
 }

@@ -35,7 +35,7 @@ interoperability results.
 | IEC 60870-5-4 | Application information elements | `cp` time tags; elements in `asdu` | no | 103 cl. 7.2 (CP32Time2a, CP56Time2a definitions); go-iec104 for the rest |
 | IEC 60870-5-5 | Basic application functions | station initialization, interrogation, read, clock sync, commands, counters, test, file transfer (104) | no | 104 cl. 9 (held, ed. 1); 103 cl. 7.4 |
 | IEC 60870-5-101 (2003 + Amd. 1 2015) | Telecontrol, serial | implemented (`iec101`) | **2003 yes**, Amd. 1 no | checked against the 2003 text; open deviations in LIMITATIONS.md |
-| IEC 60870-5-102 (1996) | Integrated totals | not implemented | **no** | open implementations implement the Spanish REE profile only (iec60870-5-interop docs/REFERENCE_STACKS.md) |
+| IEC 60870-5-102 (1996) | Integrated totals | implemented (`iec102`, `iec102/client`, `iec102/server`; REE profile opt-in in `iec102/ree`) | **no** | Beckhoff TS650x manual (vendor documentation), recorded Actaris SL762B traffic, gisce/iec870ree vectors; classification in docs/iec102/INTEROPERABILITY.md |
 | IEC 60870-5-103 (1997) | Protection equipment | implemented (`iec103`); see docs/iec103/INTEROPERABILITY.md for interpretations | **yes** | clause references cite the GOST R translation's numbering, which follows the IEC text |
 | IEC 60870-5-104 (2006 + Amd. 1 2016) | Telecontrol over TCP/IP | implemented (`iec104`) | ed. 1 (2000) only | docs/iec104/INTEROPERABILITY.md; interop against five independent stacks |
 | IEC 60870-5-6 | Conformance testing guidelines | not used | no | - |

@@ -4,7 +4,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help all build examples fmt fmt-check lint lint-ci vet vuln test e2e coverage coverage-check coverage-pkg-check coverpkg-check cover bench fuzz chaos cross check clean interop interop-iec101 test-interop docs-check captures-verify captures-fetch captures-extended captures-oracle captures-manifest
+.PHONY: help all build examples fmt fmt-check lint lint-ci vet vuln test e2e coverage coverage-check coverage-pkg-check coverpkg-check cover bench fuzz chaos cross check clean interop interop-iec101 interop-iec103 test-interop docs-check captures-verify captures-fetch captures-extended captures-oracle captures-manifest
 help: ## This help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -49,13 +49,13 @@ all: build ## Default target: build the examples
 build: ## Build the example client and server into ./bin
 	@echo "Building examples"
 	@mkdir -p $(BIN_DIR)
-	@for dir in iec104/examples/*/ iec101/examples/*/ iec103/examples/*/; do \
+	@for dir in iec104/examples/*/ iec101/examples/*/ iec103/examples/*/ iec102/examples/*/; do \
 		name="$$(basename "$$dir")"; \
 		go build -o "$(BIN_DIR)/example-$$name" "./$$dir"; \
 	done
 
 # The self-contained examples: each starts both sides and exits by itself.
-RUN_EXAMPLES := iec104/examples/quickstart iec104/examples/commands iec104/examples/files iec104/examples/events iec104/examples/redundancy iec104/examples/tls iec104/examples/secure iec104/examples/observability iec101/examples/quickstart iec103/examples/quickstart
+RUN_EXAMPLES := iec104/examples/quickstart iec104/examples/commands iec104/examples/files iec104/examples/events iec104/examples/redundancy iec104/examples/tls iec104/examples/secure iec104/examples/observability iec101/examples/quickstart iec103/examples/quickstart iec102/examples/quickstart
 
 examples: ## Run the self-contained examples (each must exit successfully)
 	@for e in $(RUN_EXAMPLES); do \
@@ -169,27 +169,38 @@ interop-iec101: ## IEC 101 against the lib60870-C and cB-Sigma images of iec6087
 	@echo "Running IEC 101 interop tests"
 	@IEC101_REQUIRE_INTEROP=$${IEC101_REQUIRE_INTEROP:-1} go test -tags=$(INTEROP_TAGS) -count=1 -timeout=40m ./iec101/interop/...
 
+interop-iec103: ## IEC 103 against the vitusdong, ARIEC103, Open103 and go-iecp5 images of iec60870-5-interop (needs Docker; images: iec103/interop/harness.go; V=1 for -v)
+	@echo "Running IEC 103 interop tests"
+	@IEC103_REQUIRE_INTEROP=$${IEC103_REQUIRE_INTEROP:-1} go test -tags=$(INTEROP_TAGS) -count=1 -timeout=40m $(if $(V),-v,) ./iec103/interop/...
+
 test-cbsigma: ## Run the IEC 62351-5 differential tests against cB-Sigma/iec60870 (a module of its own, needs Go 1.26)
 	@echo "Running the application-layer security tests against cB-Sigma/iec60870"
 	@cd iec104/interop/cbsigma && go test -count=1 -race ./...
 
-# Recorded traffic (testdata/captures/README.md). The committed captures run
-# in `make test`; these targets check them, fetch the full recordings that are
-# not committed, and regenerate what is derived from them.
-captures-verify: ## Check the committed captures against testdata/captures/SHA256SUMS
-	@cd iec104/testdata/captures && if command -v sha256sum >/dev/null; then sha256sum -c --quiet SHA256SUMS; else shasum -a 256 -c --quiet SHA256SUMS; fi && echo "captures: SHA256SUMS ok"
+# Recorded traffic (<standard>/testdata/captures/README.md). The committed
+# captures run in `make test`; these targets check them, fetch the full
+# recordings that are not committed, and regenerate what is derived from them.
+CAPTURE_DIRS := iec104/testdata/captures iec101/testdata/captures iec103/testdata/captures iec102/testdata/captures
+CAPTURE_PKGS := ./iec101/internal/capture/ ./iec103/internal/capture/ ./iec102/internal/capture/
+captures-verify: ## Check the committed captures against the SHA256SUMS of every testdata/captures directory
+	@for d in $(CAPTURE_DIRS); do \
+		(cd $$d && if command -v sha256sum >/dev/null; then sha256sum -c --quiet SHA256SUMS; else shasum -a 256 -c --quiet SHA256SUMS; fi) || exit 1; \
+		echo "$$d: SHA256SUMS ok"; \
+	done
 
-captures-fetch: ## Download the captures listed in testdata/captures/CACHED into the git-ignored cache and verify their SHA256
+captures-fetch: ## Download the captures listed in iec104/testdata/captures/CACHED into the git-ignored cache and verify their SHA256
 	@./scripts/fetch-captures.sh
 
-captures-extended: captures-fetch ## Run the capture suites over the committed and the cached captures
-	@IEC104_CAPTURE_EXTENDED=1 go test -count=1 -timeout 30m -run '^TestCapture' ./client/ ./server/
+captures-extended: captures-fetch ## Run the IEC 104 replay suites over the committed and the cached captures
+	@IEC104_CAPTURE_EXTENDED=1 go test -count=1 -timeout 30m -run '^TestCapture' ./iec104/client/ ./iec104/server/
 
 captures-oracle: ## Regenerate the tshark oracle files next to the committed captures (needs tshark)
 	@IEC104_CAPTURE_ORACLE=1 go test -count=1 -run '^TestGenerateOracle$$' ./iec104/internal/capture/
+	@CAPTURE_ORACLE=1 go test -count=1 -run '^TestGenerateOracle$$' $(CAPTURE_PKGS)
 
-captures-manifest: ## Regenerate testdata/captures/manifest.json and the fuzz seeds taken from the captures
+captures-manifest: ## Regenerate the manifests, SHA256SUMS of the serial standards, and the fuzz seeds taken from the captures
 	@IEC104_CAPTURE_GENERATE=1 go test -count=1 -run '^(TestManifest|TestGenerateFuzzSeeds)$$' ./iec104/internal/capture/
+	@CAPTURE_GENERATE=1 go test -count=1 -run '^(TestManifest|TestGenerateFuzzSeeds)$$' $(CAPTURE_PKGS)
 
 # The documents against the code (DOC-008): docsync, as docs-check.yml runs it.
 docs-check: ## Check that the documents agree with the code (docsync)

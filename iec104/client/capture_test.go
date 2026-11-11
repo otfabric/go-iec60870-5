@@ -580,6 +580,7 @@ const (
 	varCallNOS   = "the call of the whole file carries section number 0, the value lib60870-C v2.4.1 puts in its call of a file (file_server.c, sendCallFile); the recorded controlling station sent 1"
 	varLastNOS   = "the last section of the file (F_LS_NA_1, LSQ 1) carries the number after the last section, as lib60870-C v2.4.1 numbers it (file_server.c, sendLastSection); the recorded controlling station sent the last section's number"
 	varSegments  = "segments of up to 236 octets (the most an ASDU of 249 octets holds); the recorded controlling station cut them at 233: the section content is compared instead"
+	varHeader    = "the originator address or the test bit differs from the conversation's first request: the recording varies them (the Wireshark issue 2840 capture was edited to test the dissector); the client sends its one configured originator and no test bit"
 	varUnchecked = "unclassified"
 )
 
@@ -609,6 +610,14 @@ func (v *requestVariations) same(want, got []byte) string {
 	}
 	if bytes.Equal(want, got) {
 		return ""
+	}
+	if err1 == nil && err2 == nil && w.Type == g.Type && (w.Originator != g.Originator || w.Test != g.Test) {
+		h := *w
+		h.Originator, h.Test = g.Originator, g.Test
+		if b, err := h.Encode(asdu.IEC104); err == nil && bytes.Equal(b, got) {
+			v.counts[varHeader]++
+			return ""
+		}
 	}
 	if err1 == nil && err2 == nil && w.Type == g.Type {
 		switch wo := w.First().(type) {
@@ -694,7 +703,16 @@ func replayProcedures(t *testing.T, a *capture.Analysis, procs []procedure, vars
 	defer func() { _ = ln.Close() }()
 	params := apci.Params{K: max(12, a.Seq[capture.Controlling].MaxUnacked), W: 8,
 		T0: 5 * time.Second, T1: 15 * time.Second, T2: 100 * time.Millisecond}
-	c, err := New(ln.Addr().String(), WithParams(params), WithAutoStart(false), WithRequestTimeout(5*time.Second))
+	// The originator address is the controlling station's configuration:
+	// the client sends the one the recorded station sent.
+	var oa uint8
+	for _, d := range a.Decoded {
+		if d.FromClient && d.ASDU != nil {
+			oa = d.ASDU.Originator
+			break
+		}
+	}
+	c, err := New(ln.Addr().String(), WithParams(params), WithAutoStart(false), WithRequestTimeout(5*time.Second), WithOriginator(oa))
 	if err != nil {
 		t.Fatal(err)
 	}

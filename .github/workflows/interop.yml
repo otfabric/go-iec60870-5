@@ -117,6 +117,26 @@ jobs:
       - name: Run the IEC 101 interop suite
         run: make interop-iec101
 
+  # IEC 60870-5-103: the clients of vitusdong/iec103-dotnet, ARIEC103,
+  # Open103 and go-iecp5 against the server, and the client against the
+  # vitusdong server, of otfabric/iec60870-5-interop v0.2.1 (contract 2.1),
+  # pinned by digest in iec103/interop/harness.go.
+  iec103:
+    name: IEC 103 against vitusdong + ARIEC103 + Open103 + go-iecp5, both directions
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+
+      - name: Run the IEC 103 interop suite
+        run: make interop-iec103
+
   # The application-layer security (IEC 62351-5) against cB-Sigma/iec60870,
   # in process: interop/cbsigma is a module of its own, so that go-iec60870-5
   # keeps no dependencies, and cB-Sigma needs Go 1.26.

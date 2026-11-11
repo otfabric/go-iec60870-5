@@ -5,6 +5,7 @@ package telecontrol
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -192,5 +193,77 @@ func TestFailures(t *testing.T) {
 	hold.FailAll(lost)
 	if err := <-done; !errors.Is(err, lost) {
 		t.Fatalf("read fail: %v", err)
+	}
+}
+
+// TestTerminationAfterConfirmation: the activation termination of a
+// command that arrives right after its confirmation, before the waiting
+// Command has unregistered, is not consumed by the finished exchange: it
+// reaches the application. The IEC 101 replay of the recorded SEL RTAC
+// select-before-operate (iec101/client/capture_test.go) lost it whenever
+// the poll fetched it before Command returned.
+func TestTerminationAfterConfirmation(t *testing.T) {
+	var consumed []bool
+	r := &Requester{Params: p, Timeout: time.Second}
+	r.Send = func(_ context.Context, req *asdu.ASDU) error {
+		// Both answers are dispatched before Send returns, so before the
+		// request reads the first.
+		consumed = append(consumed, r.Dispatch(req.Reply(asdu.CauseActivationCon, false)))
+		consumed = append(consumed, r.Dispatch(req.Reply(asdu.CauseActivationTerm, false)))
+		return nil
+	}
+	if err := r.Command(context.Background(), 1, asdu.DoubleCommand{IOA: 22003, Value: asdu.DoubleOn}, false); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(consumed, []bool{true, false}) {
+		t.Errorf("consumed %v, want the confirmation only", consumed)
+	}
+	// An interrogation ends at its termination, which it consumes; what
+	// comes after is the application's only.
+	r.Send = func(_ context.Context, req *asdu.ASDU) error {
+		consumed = consumed[:0]
+		for _, a := range []*asdu.ASDU{
+			req.Reply(asdu.CauseActivationTerm, false), // an earlier one's
+			req.Reply(asdu.CauseActivationCon, false),
+			asdu.New(asdu.CauseInterrogatedStation, 1, asdu.SinglePoint{IOA: 1}),
+			req.Reply(asdu.CauseActivationTerm, false),
+			req.Reply(asdu.CauseActivationTerm, false), // a duplicate
+		} {
+			consumed = append(consumed, r.Dispatch(a))
+		}
+		return nil
+	}
+	data, err := r.Interrogate(context.Background(), 1, asdu.QOIStation)
+	if err != nil || len(data) != 1 {
+		t.Fatalf("%v %v", data, err)
+	}
+	if want := []bool{true, true, false, true, false}; !slices.Equal(consumed, want) {
+		t.Errorf("interrogation: consumed %v, want %v", consumed, want)
+	}
+	// A rejected interrogation ends at the rejection.
+	r.Send = func(_ context.Context, req *asdu.ASDU) error {
+		consumed = consumed[:0]
+		consumed = append(consumed, r.Dispatch(req.Reply(asdu.CauseActivationCon, true)))
+		consumed = append(consumed, r.Dispatch(req.Reply(asdu.CauseActivationTerm, false)))
+		return nil
+	}
+	if _, err := r.Interrogate(context.Background(), 1, asdu.QOIStation); err == nil {
+		t.Error("negative confirmation accepted")
+	}
+	if !slices.Equal(consumed, []bool{true, false}) {
+		t.Errorf("rejected interrogation: consumed %v", consumed)
+	}
+	// A read ends at its data.
+	r.Send = func(_ context.Context, req *asdu.ASDU) error {
+		consumed = consumed[:0]
+		consumed = append(consumed, r.Dispatch(asdu.New(asdu.CauseRequest, 1, asdu.SinglePoint{IOA: 9})))
+		consumed = append(consumed, r.Dispatch(req.Reply(asdu.CauseUnknownIOA, true)))
+		return nil
+	}
+	if _, err := r.Read(context.Background(), 1, 9); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(consumed, []bool{false, false}) {
+		t.Errorf("read: consumed %v", consumed)
 	}
 }

@@ -282,9 +282,12 @@ func (p *Peer) expect(want apci.Frame) (apci.Frame, error) {
 			}
 			continue
 		}
-		if f.Format != want.Format && f.Format != apci.FormatS && want.Format != apci.FormatS {
-			// An I frame and a U frame that crossed: the order the
-			// recording has them in is timing, not protocol.
+		if f.Format != want.Format && f.Format != apci.FormatS && want.Format != apci.FormatS ||
+			f.Format == apci.FormatU && want.Format == apci.FormatU {
+			// An I frame and a U frame that crossed, or two U frames (a
+			// TESTFR con of the implementation and its own TESTFR act):
+			// the order the recording has them in is timing, not
+			// protocol.
 			p.pending = append(p.pending, f)
 			continue
 		}

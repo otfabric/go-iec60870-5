@@ -99,6 +99,7 @@ type Client struct {
 	pri *link.Primary
 
 	sends   chan sendReq
+	bcasts  chan sendReq // broadcasts: sent whatever DFC says (clause 6.3)
 	handled chan *iec103.ASDU
 
 	mu      sync.Mutex
@@ -119,7 +120,11 @@ type Client struct {
 
 type sendReq struct {
 	data []byte
-	done chan error
+	// stamp, when set, encodes the ASDU right before it is transmitted:
+	// the time synchronization carries the time of transmission (clause
+	// 7.4.2).
+	stamp func() []byte
+	done  chan error
 }
 
 // New starts a controlling system on rw. Close stops it and closes rw when
@@ -148,6 +153,7 @@ func New(rw io.ReadWriter, cfg Config) (*Client, error) {
 		log:     logx.New(cfg.Logger, "iec103-client", "link", cfg.LinkAddr),
 		pri:     pri,
 		sends:   make(chan sendReq),
+		bcasts:  make(chan sendReq),
 		handled: make(chan *iec103.ASDU, 256),
 		upCh:    make(chan struct{}),
 		downCh:  make(chan struct{}),
@@ -312,23 +318,44 @@ func (c *Client) Send(ctx context.Context, a *iec103.ASDU) error {
 }
 
 // Broadcast transmits a control-direction ASDU with send/no reply to link
-// address 255 (clause 6.2.3). Nothing is confirmed.
+// address 255 (clause 6.2.3), between two exchanges of the link, also
+// while the equipment sets DFC (clause 6.3). Nothing is confirmed.
 func (c *Client) Broadcast(a *iec103.ASDU) error {
 	raw, err := a.AppendIn(nil, c.cfg.Location)
 	if err != nil {
 		return err
 	}
+	return c.broadcast(sendReq{data: raw})
+}
+
+func (c *Client) broadcast(r sendReq) error {
 	if c.State() != iec103.StateUp {
 		return iec103.ErrLinkDown
 	}
-	return c.pri.SendNoReply(BroadcastAddr, raw)
+	r.done = make(chan error, 1)
+	select {
+	case c.bcasts <- r:
+	case <-c.ctx.Done():
+		return iec103.ErrClosed
+	}
+	select {
+	case err := <-r.done:
+		return err
+	case <-c.ctx.Done():
+		return iec103.ErrClosed
+	}
 }
 
 func (c *Client) send(ctx context.Context, raw []byte) error {
+	return c.submit(ctx, sendReq{data: raw})
+}
+
+// submit hands r to the link loop and waits for the confirmation.
+func (c *Client) submit(ctx context.Context, r sendReq) error {
 	if c.State() != iec103.StateUp {
 		return iec103.ErrLinkDown
 	}
-	r := sendReq{data: raw, done: make(chan error, 1)}
+	r.done = make(chan error, 1)
 	select {
 	case c.sends <- r:
 	case <-ctx.Done():
@@ -342,6 +369,23 @@ func (c *Client) send(ctx context.Context, raw []byte) error {
 	case <-c.ctx.Done():
 		return iec103.ErrClosed
 	}
+}
+
+// transmit sends r with send/confirm, or with send/no reply to the
+// broadcast address when broadcast is set, encoding a stamped ASDU just
+// before.
+func (c *Client) transmit(r sendReq, broadcast bool) (link.Status, error) {
+	if r.stamp != nil {
+		r.data = r.stamp()
+	}
+	if broadcast {
+		err := c.pri.SendNoReply(BroadcastAddr, r.data)
+		r.done <- err
+		return link.Status{}, err
+	}
+	st, err := c.pri.SendConfirm(c.ctx, uint16(c.cfg.LinkAddr), r.data)
+	r.done <- err
+	return st, err
 }
 
 func (c *Client) linkFailed(err error) {
@@ -397,13 +441,19 @@ func (c *Client) run() {
 			c.wg.Add(1)
 			go c.afterInit()
 		}
+		// Broadcasts go out whatever DFC says (clause 6.3).
+		select {
+		case r := <-c.bcasts:
+			_, _ = c.transmit(r, true)
+			continue
+		default:
+		}
 		// User data first, unless the equipment holds it back with DFC
 		// (clause 6.3): it stays queued until DFC clears.
 		if !dfc {
 			select {
 			case r := <-c.sends:
-				st, err := c.pri.SendConfirm(c.ctx, addr, r.data)
-				r.done <- err
+				st, err := c.transmit(r, false)
 				if err != nil {
 					c.linkFailed(err)
 					continue
@@ -436,10 +486,12 @@ func (c *Client) run() {
 		}
 		t := time.NewTimer(c.cfg.PollInterval)
 		select {
+		case r := <-c.bcasts:
+			t.Stop()
+			_, _ = c.transmit(r, true)
 		case r := <-sends:
 			t.Stop()
-			st, err := c.pri.SendConfirm(c.ctx, addr, r.data)
-			r.done <- err
+			st, err := c.transmit(r, false)
 			if err != nil {
 				c.linkFailed(err)
 				continue
@@ -605,21 +657,38 @@ func (c *Client) Interrogate(ctx context.Context) ([]*iec103.ASDU, error) {
 	}
 }
 
+// syncReq returns the request of a time synchronization to common address
+// ca for clock t: the ASDU 6 is encoded when it is transmitted, with t
+// advanced by the time it waited for the link, so that it carries the
+// time of its transmission (clause 7.4.2).
+func (c *Client) syncReq(ca uint8, t time.Time) sendReq {
+	offset := time.Until(t)
+	return sendReq{stamp: func() []byte {
+		a := iec103.New(iec103.CauseTimeSync, ca, iec103.FunGlobal, iec103.InfTimeSync, iec103.TimeSync{Time: cp.At(time.Now().Add(offset))})
+		raw, _ := a.AppendIn(nil, c.cfg.Location) // a TimeSync always encodes
+		return raw
+	}}
+}
+
 // ClockSync synchronizes the clock of the protection equipment with an
 // addressed ASDU 6 (send/confirm, clause 7.4.2) and returns the time of
 // the ASDU 6 it answers with: the time of the command, corrected by the
-// equipment for transmission and processing.
+// equipment for transmission and processing. The command carries t
+// advanced by the time it waited for the link, the time of its
+// transmission.
 func (c *Client) ClockSync(ctx context.Context, t time.Time) (cp.Timestamp, error) {
 	ctx, cancel := c.bound(ctx)
 	defer cancel()
-	w, err := c.request(ctx, iec103.New(iec103.CauseTimeSync, c.ca, iec103.FunGlobal, iec103.InfTimeSync, iec103.TimeSync{Time: cp.At(t)}),
-		func(a *iec103.ASDU) bool {
-			return a.CommonAddr == c.ca && a.Type == iec103.TypeTimeSync && a.Cause == iec103.CauseTimeSync
-		})
+	w, err := c.watch(func(a *iec103.ASDU) bool {
+		return a.CommonAddr == c.ca && a.Type == iec103.TypeTimeSync && a.Cause == iec103.CauseTimeSync
+	})
 	if err != nil {
 		return cp.Timestamp{}, err
 	}
 	defer c.unwatch(w)
+	if err := c.submit(ctx, c.syncReq(c.ca, t)); err != nil {
+		return cp.Timestamp{}, err
+	}
 	a, err := c.wait(ctx, w)
 	if err != nil {
 		return cp.Timestamp{}, fmt.Errorf("iec103: time synchronization: %w", err)
@@ -628,10 +697,11 @@ func (c *Client) ClockSync(ctx context.Context, t time.Time) (cp.Timestamp, erro
 }
 
 // BroadcastClockSync sends ASDU 6 with the global common address to link
-// address 255 (send/no reply, clause 7.4.2). The ASDU 6 each item of
-// equipment then sends reaches the Handler.
+// address 255 (send/no reply, clause 7.4.2), with t advanced by the time
+// it waited for the link like [Client.ClockSync]. Equipment that answers a
+// broadcast synchronization with ASDU 6 delivers it to the Handler.
 func (c *Client) BroadcastClockSync(t time.Time) error {
-	return c.Broadcast(iec103.New(iec103.CauseTimeSync, iec103.CommonAddrGlobal, iec103.FunGlobal, iec103.InfTimeSync, iec103.TimeSync{Time: cp.At(t)}))
+	return c.broadcast(c.syncReq(iec103.CommonAddrGlobal, t))
 }
 
 // Command sends a general command (ASDU 20, clause 7.4.4) and waits for its
@@ -640,8 +710,13 @@ func (c *Client) BroadcastClockSync(t time.Time) error {
 // wrapping [iec103.ErrNegative]. The change of state the command causes
 // follows with cause 12 and reaches the Handler. Clause 7.4.4 allows one
 // command procedure at a time: a second concurrent call returns
-// [iec103.ErrBusy].
+// [iec103.ErrBusy]. A command that [iec103.CommandAllowed] refuses (DCO 0
+// or 3, OFF where table 17 defines only ON, or an INF outside table 17
+// with a compatible function type) returns [iec103.ErrInvalid].
 func (c *Client) Command(ctx context.Context, fun iec103.FunctionType, inf iec103.InfoNumber, dco iec103.DPI) error {
+	if !iec103.CommandAllowed(fun, inf, dco) {
+		return fmt.Errorf("%w: DCO %d for FUN %d INF %d (clause 7.2.6.4, table 17)", iec103.ErrInvalid, dco, fun, inf)
+	}
 	if err := lock(&c.cmdMu); err != nil {
 		return err
 	}

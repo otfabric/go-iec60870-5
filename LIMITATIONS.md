@@ -5,7 +5,6 @@ own list: [docs/iec104/LIMITATIONS.md](docs/iec104/LIMITATIONS.md).
 
 ## Scope
 
-- **IEC 60870-5-102 is not implemented.** See [docs/ROADMAP.md](docs/ROADMAP.md).
 - Nothing is certified or conformance tested. Interoperability runs are not
   conformance tests.
 
@@ -30,44 +29,53 @@ own list: [docs/iec104/LIMITATIONS.md](docs/iec104/LIMITATIONS.md).
   class 1 when class 2 is empty.
 - **Balanced test function** is sent every `TestInterval` regardless of
   other traffic.
-- **Open deviations from IEC 60870-5-101:2003** (found by the 2026-11-11
-  check against the text; fixed then: delay acquisition, counter freeze):
-  - Balanced address field (6.2.1.2): the text says it carries the
-    address "of the receiver" in primary and secondary messages; secondary
-    frames here carry the station's own address, as lib60870 does. The
-    wording is ambiguous in the translation we hold; not changed. Distinct
-    balanced addresses have not been run against a reference.
-  - Link states (figures 5, 6, 8, 9): a secondary answers before the first
-    reset of remote link instead of answering only function 9 and 0; while
-    the server's input queue is busy DFC is set on the NACK only, not on
-    every response; a primary initializes without waiting for DFC = 0.
-  - Function codes (table 3): access demand (8) is answered with 15
-    instead of status (11); reset of FCB (7, an IEC 60870-5-103 extension)
-    is acknowledged on 101 links too.
+- **Open deviations from IEC 60870-5-101:2003:**
+  - While busy, reset of remote link (0) is still acknowledged, where
+    figures 6 and 9 show NACK with DFC = 1.
   - The default link time-out (1 s) is short for slow lines: 101 6.2.2
     gives the formula (e.g. 2.25 s at 1200 bit/s with 240-octet frames).
     Set `link.Config.Timeout` from the line speed.
-  - The codec accepts the 104-only types under 101 parameters and does not
-    enforce the 101 rules on SQ, single objects of system types, cause 0,
-    common address 0 and broadcast use; the client passes unknown types,
-    causes and addresses to the handler instead of ignoring them; empty
-    user data goes out in a variable frame.
+  - The 101 profile checks are opt-in (`iec101.Params.Strict`).
   - No automatic interrogation after end of initialization or link
     recovery (7.4.5): the application issues it. The server does not apply
     the transmission delay to clock synchronization (7.4.6, 7.4.12).
+  - The balanced receiver address (6.2.1.2) is backed by the text and a
+    manual run against lib60870-C only.
+
+## IEC 60870-5-102
+
+- **We do not hold the standard's text.** All layouts and procedures are
+  interpretations of vendor documentation (Beckhoff TS650x), recorded
+  traffic of one meter and other implementations; see
+  [docs/iec102/INTEROPERABILITY.md](docs/iec102/INTEROPERABILITY.md).
+- **No independent interoperability evidence**: no open controlled station
+  (meter) exists; the open masters implement the Spanish REE profile.
+- The layout of M_EI_NA_2 (70) is unknown (carried raw); signatures are not
+  checked; the server has no class 1 or spontaneous data and does not
+  enforce a session; one station per client.
 
 ## IEC 60870-5-103
 
-- **No independent interoperability evidence yet.**
+- Independent evidence is mostly for the server: the clients of
+  vitusdong/iec103-dotnet, ARIEC103, Open103 and riclolsen/go-iecp5 replay
+  the harness cases against it (53 pass, 0 fail, 6 known client
+  differences). The client has only vitusdong's server to run against,
+  which deviates from the standard in its GI answers, command
+  acknowledgements and identification: link start-up, clock
+  synchronization and the GI termination pass, the rest is unverified
+  against an independent server. Generic services, disturbance data and
+  broadcast synchronization are exercised by no reference; the cause 12
+  report after a command only towards the reference clients. The images are not yet published
+  (`make interop-iec103` uses local builds until the harness v0.2.0
+  release); see docs/iec103/INTEROPERABILITY.md.
 - One controlling system polls one protection device per client (no shared
   line with several devices).
-- Test mode and monitor-direction blocking are not server features; the
-  application can send those causes itself.
+- Test mode and monitor-direction blocking are left to the application.
+- The 23 h rule for the IV bit is tested with a shortened timeout only.
+- The time correction covers the frame time, not internal delays.
+- The client cannot abort a disturbance transfer.
 - A generic data element is never split over several ASDUs (the GDD CONT
   bit); long answers are split by element.
-- The controlling side does not send abort orders during a disturbance
-  transfer.
 - The 15 s limit on DFC (cl. 6.3) is not enforced.
 - Interpretations of the text are listed in
   [docs/iec103/INTEROPERABILITY.md](docs/iec103/INTEROPERABILITY.md).
-

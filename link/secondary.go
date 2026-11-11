@@ -3,6 +3,7 @@
 package link
 
 import (
+	"bytes"
 	"io"
 	"sync"
 
@@ -31,18 +32,22 @@ type SecondaryHandler interface {
 	Reset(user bool)
 }
 
-// FCBResetHandler is implemented by a [SecondaryHandler] that wants to
-// know about function 7 "reset of frame count bit", the IEC 60870-5-103
-// extension (6.3): ResetFCB is called after the station reset its expected
-// FCB and before it answers.
+// FCBResetHandler is implemented by a [SecondaryHandler] that serves
+// function 7 "reset of frame count bit", the IEC 60870-5-103 extension
+// (6.3): ResetFCB is called after the station reset its expected FCB and
+// before it answers ACK. Function 7 is not a function of IEC 60870-5-101
+// (table 3): a secondary whose handler does not implement this interface
+// answers it with function 15 "link service not implemented".
 type FCBResetHandler interface {
 	ResetFCB()
 }
 
-// FlowControlHandler is implemented by a [SecondaryHandler] that reports
-// data flow control: while Busy returns true every response carries DFC = 1
-// (IEC 60870-5-2 5.1; IEC 60870-5-103 6.3), not only the NACK to refused
-// user data.
+// FlowControlHandler is implemented by a [SecondaryHandler] or a
+// [BalancedHandler] that reports data flow control: while Busy returns
+// true every response carries DFC = 1 (IEC 60870-5-2 5.1; IEC 60870-5-103
+// 6.3), and user data with confirmation (function 3) is answered NACK with
+// DFC = 1 without being delivered ("secondary link busy",
+// IEC 60870-5-101:2003 figures 6 and 9).
 type FlowControlHandler interface {
 	Busy() bool
 }
@@ -58,16 +63,34 @@ type FunctionFilter interface {
 }
 
 // Secondary is the secondary station of unbalanced transmission: it
-// answers the messages addressed to it and ignores the others.
+// answers the messages addressed to it and ignores the others. Until the
+// primary resets the link (function 0) it answers only request status of
+// link and reset of remote link and ignores every other message
+// (IEC 60870-5-101:2003 6.2.1.1, figure 6).
 type Secondary struct {
 	p    *port
 	addr uint16
 	h    SecondaryHandler
 
-	mu       sync.Mutex
-	known    bool // an FCV message was accepted since start or reset
-	expected bool // FCB the next new FCV message carries
-	last     *ft12.Frame
+	mu    sync.Mutex
+	reset bool // the primary reset the link since the station started
+	fcb   fcbState
+}
+
+// beforeReset reports whether a secondary that has not been reset yet
+// answers function fn: request status of link and reset of remote link
+// (IEC 60870-5-101:2003 figures 6 and 9), and reset of frame count bit for
+// a handler that implements the IEC 60870-5-103 extension, which resets
+// the link like function 0 (IEC 60870-5-103 6.3).
+func beforeReset(fn byte, h any) bool {
+	switch fn {
+	case FuncRequestStatus, FuncResetLink:
+		return true
+	case FuncResetFCB:
+		_, ok := h.(FCBResetHandler)
+		return ok
+	}
+	return false
 }
 
 // NewSecondary starts a secondary station with link address addr on rw.
@@ -108,6 +131,14 @@ func (s *Secondary) receive(f ft12.Frame) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !s.reset && !beforeReset(c.Func(), s.h) && s.implemented(c.Func()) {
+		// "Secondary link not reset": only request status of link and
+		// reset of remote link are answered (IEC 60870-5-101:2003
+		// 6.2.1.1, figure 6). A function a FunctionFilter refuses is
+		// answered with 15 in any state, as the companion standard of
+		// the filter asks (IEC 60870-5-103 6.3).
+		return
+	}
 	if broadcast {
 		// Only send/no reply is allowed to the broadcast address.
 		if c.Func() == FuncUserDataNoRepl {
@@ -115,20 +146,64 @@ func (s *Secondary) receive(f ft12.Frame) {
 		}
 		return
 	}
-	if c.FCV() && fcvRequired(c.Func()) {
-		if s.known && c.FCB() != s.expected && s.last != nil {
-			// Repetition: the primary did not get our response.
-			_ = s.p.write(*s.last)
-			return
-		}
-		s.known, s.expected = true, !c.FCB()
+	if r := s.fcb.repeated(c, f); r != nil {
+		// Repetition: the primary did not get our response.
+		_ = s.p.write(*r)
+		return
 	}
 	r := s.respond(c, f)
 	if r == nil {
 		return
 	}
-	s.last = r
+	s.fcb.remember(c, f, r)
 	_ = s.p.write(*r)
+}
+
+// fcbState is the frame count bit bookkeeping of a secondary link
+// (IEC 60870-5-101:2003 figures 6 and 9: "FCB not changed" resends the
+// previous response).
+type fcbState struct {
+	known    bool // an FCV message was accepted since start or reset
+	expected bool // FCB the next new FCV message carries
+	last     *ft12.Frame
+	lastFn   byte
+	lastData []byte
+}
+
+// repeated returns the previous response when c and f repeat the previous
+// message: FCV set, the FCB not toggled, and the same function code and
+// user data. A message with the old FCB but another function or other data
+// is new: several masters do not toggle the FCB as IEC 60870-5-2 asks
+// (start with FCB 0 after reset, reuse it after a time-out or a NACK, never
+// toggle it, toggle it with function 9), and replaying the stored response
+// would answer, say, a class 2 poll with an ACK. Otherwise repeated returns
+// nil and, for an FCV message, records the FCB the next one carries.
+func (st *fcbState) repeated(c Control, f ft12.Frame) *ft12.Frame {
+	if !c.FCV() || !fcvRequired(c.Func()) {
+		return nil
+	}
+	if st.known && c.FCB() != st.expected && st.last != nil &&
+		c.Func() == st.lastFn && bytes.Equal(f.Data, st.lastData) {
+		return st.last
+	}
+	st.known, st.expected = true, !c.FCB()
+	return nil
+}
+
+// remember stores the response r to the message c, f.
+func (st *fcbState) remember(c Control, f ft12.Frame, r *ft12.Frame) {
+	st.last, st.lastFn, st.lastData = r, c.Func(), f.Data
+}
+
+// resetFCB is the effect of reset of remote link and reset of FCB: the
+// next FCV message carries FCB = 1.
+func (st *fcbState) resetFCB() { st.known, st.expected = true, true }
+
+// implemented reports false for a function the handler's FunctionFilter
+// refuses.
+func (s *Secondary) implemented(fn byte) bool {
+	ff, ok := s.h.(FunctionFilter)
+	return !ok || ff.Implemented(fn)
 }
 
 func (s *Secondary) busy() bool {
@@ -154,23 +229,36 @@ func (s *Secondary) respond(c Control, f ft12.Frame) *ft12.Frame {
 	}
 	switch c.Func() {
 	case FuncResetLink:
-		s.known, s.expected = true, true
+		s.fcb.resetFCB()
+		s.reset = true
 		s.h.Reset(false)
 		return s.reply(FuncAck, false)
 	case FuncResetFCB:
-		s.known, s.expected = true, true
-		if r, ok := s.h.(FCBResetHandler); ok {
-			r.ResetFCB()
+		// Not a function of IEC 60870-5-101 (table 3): only a handler
+		// that implements the IEC 60870-5-103 extension opts in.
+		r, ok := s.h.(FCBResetHandler)
+		if !ok {
+			return s.reply(FuncNotImplemented, false)
 		}
+		s.fcb.resetFCB()
+		s.reset = true
+		r.ResetFCB()
 		return s.reply(FuncAck, false)
 	case FuncResetUser:
 		s.h.Reset(true)
 		return s.reply(FuncAck, false)
-	case FuncRequestStatus:
+	case FuncRequestStatus, FuncAccessDemand:
+		// Both are answered with status of link (IEC 60870-5-101:2003
+		// table 3).
 		return s.reply(FuncStatus, false)
 	case FuncUserDataConf:
 		if f.Kind != ft12.KindVariable {
 			return s.reply(FuncNotImplemented, false)
+		}
+		if s.busy() {
+			// "Secondary link busy": user data is not accepted
+			// (IEC 60870-5-101:2003 figure 6, Rx[FC3]/Tx (FC1, DFC = 1)).
+			return s.reply(FuncNack, true)
 		}
 		if !s.h.UserData(f.Data, false) {
 			return s.reply(FuncNack, true)

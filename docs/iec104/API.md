@@ -353,7 +353,7 @@ var ErrServerClosed error
 | `WithAccept(func(net.Addr) bool)` | all | Filter connections before any exchange |
 | `WithStateHandler(func(*Session, iec104.State, error))` | none | Session accepted / started / stopped / ended |
 | `WithTLS(*tls.Config)` | none | TLS in `ListenAndServe` |
-| `WithSecurity(func(group string, aim uint16) (*sec.Endpoint, error))` | none | IEC 62351-5 application-layer security: one endpoint, role `sec.Controlled`, per controlling station (AIM) and redundancy group, made when that station is first heard; an error refuses the AIM. A connection is bound by its first security message. Unprotected ASDUs are discarded; requests the endpoint's `Roles` do not permit are refused with `asdu.CauseNotAuthorized` before the handler |
+| `WithSecurity(func(group string, aim uint16) (*sec.Endpoint, error))` | none | IEC 62351-5 application-layer security: one endpoint, role `sec.Controlled`, per controlling station (AIM) and redundancy group, made when that station is first heard; an error refuses the AIM. A connection is bound by its first security message. Unprotected ASDUs are discarded; requests the endpoint's `Roles` do not permit are refused with `asdu.CauseNotAuthorized` before the handler; without MONITOR DATA no monitor-direction data goes to the association (`Session.Send` fails with `sec.ErrNotPermitted`, `Broadcast` skips it, `Enqueue` drops the event); statistic reports of `sec.Config.Reports` go out with the endpoint's output |
 | `WithLogger(iec60870.Logger)` | silent | Logging |
 | `WithMetrics(iec104.Metrics)` | none | Metrics callbacks |
 
@@ -719,16 +719,18 @@ type Config struct {
 	Identity             *Identity     // certificate and private key; nil: a kept association only
 	Trust                Trust         // which remote stations may associate
 	IgnoreValidity       bool          // accept certificates outside their validity period
-	MAC                  uint8         // MAL a controlling station selects; default HMACSHA256.Code
+	Serial               bool          // serial link (IEC 101): 8-octet MACs; default TCP/IP, 16-octet (TS 9.3, 9.5)
+	MAC                  uint8         // MAL a controlling station selects; default HMACSHA256.Code (Serial: HMACSHA256Serial.Code)
 	DataProtection       uint8         // DPA a controlling station selects: a MAC code or AES256GCM; default MAC
-	AcceptMAC            []uint8       // what a controlled station accepts; empty: everything implemented
-	AcceptDataProtection []uint8
+	AcceptMAC            []uint8       // what a controlled station accepts; empty: the MACs of the link (4, 8 or 3, 7)
+	AcceptDataProtection []uint8       // empty: the MACs of the link and AES256GCM
 	Settings             Settings      // timers and key limits
 	Store                KeyStore      // nil: a MemoryStore
 	Params               asdu.Params   // zero: asdu.IEC104
 	CommonAddr           asdu.CommonAddr // DUI of the key management messages
 	Originator           uint8
 	Roles                []AccessRole  // controlled: roles of the controlling station; nil: no access control
+	Reports              map[Stat]StatisticReport // controlled: statistics reported in M_IT_TB_1 (TS 5.4.2.3, 9.7)
 	OnEvent              func(Event)   // security events; must not block
 	Rand                 io.Reader     // nil: crypto/rand
 }
@@ -737,9 +739,11 @@ type Settings struct {
 	ReplyTimeout     time.Duration // controlling: wait per answer, default 2s
 	MaxReplyTimeouts int           // controlling: attempts before a procedure fails, default 3
 	RequestTimeout   time.Duration // controlled: wait for the next request, default 6s
-	KeyLifetime      time.Duration // default 15 min controlling, 30 min controlled
-	KeyUses          uint32        // default 1000 controlling, 2000 controlled
+	KeyLifetime      time.Duration // default 24 h controlling, 48 h controlled (TS Table 9)
+	KeyUses          uint32        // default 65535 controlling, 131070 controlled
 }
+
+const DefaultReplyTimeout, DefaultMaxReplyTimeouts, DefaultRequestTimeout, DefaultKeyLifetime, DefaultKeyUses // the controlling station's
 
 func New(cfg Config) (*Endpoint, error)            // loads cfg.Store
 
@@ -752,6 +756,7 @@ func (e *Endpoint) Changed() <-chan struct{}       // closed at the next change 
 func (e *Endpoint) Reassociate() error             // controlling: Station Association at the next Tick
 func (e *Endpoint) Renew() error                   // controlling: Session Key Change at the next Tick
 func (e *Endpoint) Permits(t asdu.TypeID) bool     // the roles allow a request of type t
+func (e *Endpoint) PermitsASDU(a *asdu.ASDU) bool  // ... of request a (file deletion needs FILEMNGT)
 func (e *Endpoint) Refused(t asdu.TypeID)          // count a refusal
 
 // Driving it, for callers other than client and server. Each returns the
@@ -762,7 +767,7 @@ func (e *Endpoint) Attach(owner any, now time.Time) [][]byte // Up for one conne
 func (e *Endpoint) Detach(owner any)
 func (e *Endpoint) Owns(owner any) bool
 func (e *Endpoint) Receive(now time.Time, raw []byte) (data []byte, out [][]byte, err error)
-func (e *Endpoint) Protect(now time.Time, data []byte) ([][]byte, error) // ErrNotReady: wait for Changed
+func (e *Endpoint) Protect(now time.Time, data []byte) ([][]byte, error) // ErrNotReady: wait for Changed; ErrNotPermitted: no MONITOR DATA
 func (e *Endpoint) Deadline() time.Time            // when to call Tick; zero: no timer
 func (e *Endpoint) Tick(now time.Time) [][]byte
 ```
@@ -822,11 +827,19 @@ type AccessRole struct{ ID int; Name string; Perms Permission }
 var RoleViewer, RoleOperator, RoleEngineer, RoleInstaller, RoleSecAdmin, RoleSecAudit, RoleRBACMaint AccessRole
 var Roles []AccessRole
 func RequiredPermission(t asdu.TypeID) Permission
+func RequiredPermissionOf(a *asdu.ASDU) Permission     // F_SC_NA_1 delete file: PermFileManagement
 func Authorized(roles []AccessRole, t asdu.TypeID) bool
+func AuthorizedASDU(roles []AccessRole, a *asdu.ASDU) bool
+func IsMonitorData(t asdu.TypeID) bool                 // types 1..44: need MONITOR DATA to be received
 
 type Stat uint8                    // StatSuccessfulAssociations … StatDiscardedMessages, NumStats
 func (s Stat) Event() (mnemonic string, sev Severity, ok bool)
-type Statistics [NumStats]uint32
+func (s Stat) DefaultThreshold() uint32 // TS Table 10
+type Statistics [NumStats]uint32   // 0 .. StatMax (2^31-1), then 0
+type StatisticReport struct {
+	IOA       asdu.IOA // where the integrated total is reported
+	Threshold uint32   // growth since the last report; 0: DefaultThreshold
+}
 type Event struct {
 	Stat     Stat      // NumStats for a failure to save the association ("KEY_STORE_ERR")
 	Mnemonic string    // e.g. "KEY_AUTN_ERR"

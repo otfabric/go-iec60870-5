@@ -24,6 +24,7 @@ companion standards add their own layers, described in
 - [Detection patterns](#detection-patterns)
 - [Serial companion standards](#serial-companion-standards)
 - [IEC 60870-5-103](#iec-60870-5-103)
+- [IEC 60870-5-102](#iec-60870-5-102)
 
 ## Quick reference
 
@@ -141,6 +142,7 @@ Package `sec` (IEC 62351-5) has its own sentinels. They are usually wrapped with
 | `sec.ErrAlgorithm` | The remote station selected an algorithm this station does not support or accept |
 | `sec.ErrProcedure` | A Station Association or Session Key Change failed: the remote station repeatedly did not answer within the expected reply time |
 | `sec.ErrConfig` | A `Config` an `Endpoint` cannot run with |
+| `sec.ErrNotPermitted` | `Endpoint.Protect` at a controlled station refused monitor-direction data (types 1 to 44) because the roles of the controlling station lack MONITOR DATA (IEC TS 60870-5-7:2025 8.2). `Session.Send` returns it; `Server.Broadcast` skips the session, `Server.Enqueue` drops the event for it |
 
 ## File transfer errors
 
@@ -262,10 +264,11 @@ frame.
 |---|---|---|
 | `link.ErrTimeout` | no response after `Config.Retries` repetitions | the caller re-initializes it |
 | `link.ErrNack` | the secondary answered NACK (function 1): message not accepted | stays up |
-| `link.ErrDataFlow` | DFC is set: the secondary cannot take more user data now | stays up |
+| `link.ErrDataFlow` | DFC is set: the secondary cannot take more user data now, and kept it set while `Init` or a balanced `Send` requested the status of link `Config.Retries` + 1 times | stays up |
 | `link.ErrNotFunctioning` | function 14: link service not functioning | stays up |
 | `link.ErrNotImplemented` | function 15: link service not implemented | stays up |
-| `link.ErrUnexpected` | a response that does not answer the request | stays up |
+| `link.ErrUnexpected` | a response that does not answer the request (its function code cannot answer the function sent), and no fitting one came before the last time-out | stays up |
+| `link.ErrNoData` | `SendConfirm`, `SendNoReply` or a balanced `Send` with empty user data: without an ASDU a frame is fixed-length (IEC 60870-5-101:2003 6.1) | stays up |
 | `link.ErrClosed` | the station was closed, or the transport failed (wrapped with the transport error) | gone |
 | `link.ErrInvalidConfig` | a `Config` a station cannot be built with | - |
 
@@ -277,6 +280,7 @@ frame.
 | `iec101.ErrClosed` | an operation on a closed client or server |
 | `iec101.ErrInvalidConfig` | invalid parameters (wraps the `ft12`, `asdu` or `link` error) |
 | `server.ErrQueueFull` | a class 1 or class 2 queue (or the balanced send queue) is full |
+| `iec101.ErrProfile` | with `Params.Strict`: an ASDU the IEC 60870-5-101 profile does not allow (`*iec101.ProfileError` says why); it was not sent |
 
 Requests of `iec101/client` return `*telecontrol.NegativeError` for a
 negative confirmation or an "unknown ..." cause, `telecontrol.ErrBusy` for a
@@ -292,7 +296,7 @@ and wrap `context.DeadlineExceeded` when no answer arrives within
 |---|---|
 | `iec103.ErrShort` | the ASDU ends before its last field, or a GID is shorter than its GDD announces |
 | `iec103.ErrTrailing` | octets after the information object of a compatible type identification |
-| `iec103.ErrInvalid` | a field out of range: more elements than the ASDU may carry (ASDU 3: 4, ASDU 9: 9, ASDU 23: 8, ASDU 29 and 30: 25, NGD/NDE: 63), GID length different from its GDD, NUMBER above 127, an accessor of `iec103.Value` used on the wrong data type; also a client request with an information number that is not a generic read or write |
+| `iec103.ErrInvalid` | a field out of range: more elements than the ASDU may carry (ASDU 3: 4, ASDU 9: 9, ASDU 23: 8, ASDU 29 and 30: 25, NGD/NDE: 63), GID length different from its GDD, a GDD with DATASIZE 0 or NUMBER outside 1..127 (7.2.6.32), an ASDU 11 with NDE 0 (7.2.6.35), a VSQ other than 81H for a single information object or with SQ = 1 for ASDUs 3, 9 and 23 (7.2.2), an accessor of `iec103.Value` used on the wrong data type; also a client request with an information number that is not a generic read or write, or a general command with a DCO that `iec103.CommandAllowed` refuses |
 | `iec103.ErrTooLong` | an ASDU longer than 253 octets (one FT 1.2 frame with a one-octet link address), or a data set or description element too large for one ASDU |
 
 A type identification outside tables 3 and 4, or a private cause of
@@ -303,11 +307,11 @@ transmission, is not an error: it decodes as `iec103.Raw`.
 | Sentinel | Meaning |
 |---|---|
 | `iec103.ErrLinkDown` | a request while the link is not initialized; a pending request fails with it when the link is lost |
-| `iec103.ErrClosed` | an operation on a closed client or server |
-| `iec103.ErrInvalidConfig` | invalid configuration: link address 255, a start cause other than 5 or 6, an invalid `link.Config` |
+| `iec103.ErrClosed` | an operation on a closed client or server, or on a `client.StagedWrite` that was already executed or aborted |
+| `iec103.ErrInvalidConfig` | invalid configuration: link address 255, a server without function type (`Config.Fun` 0), a negative `Config.BitRate`, a start cause other than 5 or 6, an invalid `link.Config` |
 | `iec103.ErrBusy` | a request while another of the same kind is pending (command, GI, generic read, generic write, generic GI, disturbance transfer) |
-| `iec103.ErrNegative` | negative acknowledgement of a command (cause 21), of a generic write (cause 41; the result is returned too), or a disturbance transfer with a channel acknowledged negatively (the record is returned too) |
-| `iec103.ErrAborted` | the protection equipment ended a disturbance transfer with TOO 34, 37 or 40 |
+| `iec103.ErrNegative` | negative acknowledgement of a command (cause 21), of a generic write (cause 41; the result is returned too), or a disturbance transfer the client acknowledged negatively: tags or a channel aborted by the equipment (TOO 40, 37), incomplete, initial tag states not at position 0, fewer channels than NOC (the record is returned too) |
+| `iec103.ErrAborted` | the protection equipment ended a disturbance transfer with TOO 34 (acknowledged with TOO 65 first) |
 | `server.ErrQueueFull` (`iec103/server`) | a class 1 or class 2 queue is full |
 
 Requests wrap `context.DeadlineExceeded` when no answer arrives within the
@@ -316,3 +320,34 @@ cause 43 is not an error: `GenericResult.Cause` reports it and the data sets
 carry the generic reply codes. Link errors (`link.ErrNack` while the
 equipment holds back commands with DFC, `link.ErrTimeout`) are returned
 wrapped.
+
+## IEC 60870-5-102
+
+### Codec (`iec102`, `iec102/ree`)
+
+| Sentinel | Meaning |
+|---|---|
+| `iec102.ErrShort` | the ASDU ends before its last field, or a time a / time b has fewer than 5 / 7 octets |
+| `iec102.ErrTrailing` | octets after the information objects of a type the codec interprets |
+| `iec102.ErrInvalid` | a field out of range: a common address size other than 1 or 2, a length that fits no layout of the type (integrated totals with or without signature, REE tariff records of 63 octets), more than 127 objects, a counter reading wider than its type, a body whose type it cannot encode; also a client helper answered by an ASDU of an unexpected type |
+| `iec102.ErrTooLong` | an ASDU longer than 253 octets, or longer than the server's link carries |
+
+A type identification without a known layout (outside the standard range
+without a profile, M_EI_NA_2, a list with SQ set) is not an error: it
+decodes as `iec102.Raw`. Neither is a refusal whose objects do not fit its
+type.
+
+### Stations (`iec102/client`, `iec102/server`)
+
+| Sentinel | Meaning |
+|---|---|
+| `iec102.ErrLinkDown` | the link could not be initialized, or the station stopped answering during a request (wraps `link.ErrTimeout` or `link.ErrClosed`) |
+| `iec102.ErrClosed` | an operation on a closed client or server, or a request in progress when the client was closed |
+| `iec102.ErrInvalidConfig` | invalid configuration: a link address size other than 1, 2 or `iec102.NoLinkAddr`, a link address that does not fit it, invalid codec parameters or `link.Config` |
+| `iec102.ErrNegative` | the station refused the request: it mirrored it with the P/N bit or a cause 13..18; the error is an `*iec102.RefusedError` with the refusal ASDU and its cause |
+| `server.ErrQueueFull` (`iec102/server`) | the class 2 queue is full |
+
+Requests wrap `context.DeadlineExceeded` when the answer is not complete
+within the context's deadline or `Config.RequestTimeout`. A NACK of the
+request (the station's input is full) is not returned: the client tries
+again after `PollInterval` until the deadline.
