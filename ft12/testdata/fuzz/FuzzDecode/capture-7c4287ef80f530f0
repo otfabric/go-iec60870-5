@@ -1,0 +1,3 @@
+go test fuzz v1
+[]byte("h\t\th(@d\x01\a@\x00\x00\x14(\x16")
+int(1)

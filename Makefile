@@ -173,23 +173,30 @@ test-cbsigma: ## Run the IEC 62351-5 differential tests against cB-Sigma/iec6087
 	@echo "Running the application-layer security tests against cB-Sigma/iec60870"
 	@cd iec104/interop/cbsigma && go test -count=1 -race ./...
 
-# Recorded traffic (testdata/captures/README.md). The committed captures run
-# in `make test`; these targets check them, fetch the full recordings that are
-# not committed, and regenerate what is derived from them.
-captures-verify: ## Check the committed captures against testdata/captures/SHA256SUMS
-	@cd iec104/testdata/captures && if command -v sha256sum >/dev/null; then sha256sum -c --quiet SHA256SUMS; else shasum -a 256 -c --quiet SHA256SUMS; fi && echo "captures: SHA256SUMS ok"
+# Recorded traffic (<standard>/testdata/captures/README.md). The committed
+# captures run in `make test`; these targets check them, fetch the full
+# recordings that are not committed, and regenerate what is derived from them.
+CAPTURE_DIRS := iec104/testdata/captures iec101/testdata/captures
+CAPTURE_PKGS := ./iec101/internal/capture/
+captures-verify: ## Check the committed captures against the SHA256SUMS of every testdata/captures directory
+	@for d in $(CAPTURE_DIRS); do \
+		(cd $$d && if command -v sha256sum >/dev/null; then sha256sum -c --quiet SHA256SUMS; else shasum -a 256 -c --quiet SHA256SUMS; fi) || exit 1; \
+		echo "$$d: SHA256SUMS ok"; \
+	done
 
-captures-fetch: ## Download the captures listed in testdata/captures/CACHED into the git-ignored cache and verify their SHA256
+captures-fetch: ## Download the captures listed in iec104/testdata/captures/CACHED into the git-ignored cache and verify their SHA256
 	@./scripts/fetch-captures.sh
 
-captures-extended: captures-fetch ## Run the capture suites over the committed and the cached captures
-	@IEC104_CAPTURE_EXTENDED=1 go test -count=1 -timeout 30m -run '^TestCapture' ./client/ ./server/
+captures-extended: captures-fetch ## Run the IEC 104 replay suites over the committed and the cached captures
+	@IEC104_CAPTURE_EXTENDED=1 go test -count=1 -timeout 30m -run '^TestCapture' ./iec104/client/ ./iec104/server/
 
 captures-oracle: ## Regenerate the tshark oracle files next to the committed captures (needs tshark)
 	@IEC104_CAPTURE_ORACLE=1 go test -count=1 -run '^TestGenerateOracle$$' ./iec104/internal/capture/
+	@CAPTURE_ORACLE=1 go test -count=1 -run '^TestGenerateOracle$$' $(CAPTURE_PKGS)
 
-captures-manifest: ## Regenerate testdata/captures/manifest.json and the fuzz seeds taken from the captures
+captures-manifest: ## Regenerate the manifests, SHA256SUMS of the serial standards, and the fuzz seeds taken from the captures
 	@IEC104_CAPTURE_GENERATE=1 go test -count=1 -run '^(TestManifest|TestGenerateFuzzSeeds)$$' ./iec104/internal/capture/
+	@CAPTURE_GENERATE=1 go test -count=1 -run '^(TestManifest|TestGenerateFuzzSeeds)$$' $(CAPTURE_PKGS)
 
 # The documents against the code (DOC-008): docsync, as docs-check.yml runs it.
 docs-check: ## Check that the documents agree with the code (docsync)

@@ -26,4 +26,4 @@ coverage.out
 /examples/tls/tls
 
 # Captures fetched by make captures-fetch (testdata/captures/CACHED)
-/testdata/captures/cache/
+/iec104/testdata/captures/cache/
