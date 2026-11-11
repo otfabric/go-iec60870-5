@@ -4,7 +4,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help all build examples fmt fmt-check lint lint-ci vet vuln test e2e coverage coverage-check coverage-pkg-check coverpkg-check cover bench fuzz chaos cross check clean interop interop-iec101 interop-iec102 interop-iec103 test-interop docs-check captures-verify captures-fetch captures-extended captures-oracle captures-manifest
+.PHONY: help all build examples fmt fmt-check lint lint-ci vet vuln test e2e coverage coverage-check coverage-pkg-check coverpkg-check cover bench fuzz chaos cross check clean interop interop-iec101 interop-iec102 interop-iec103 test-interop docs-check captures-verify captures-fetch captures-extended captures-oracle captures-manifest test-cbsigma
 help: ## This help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -52,8 +52,8 @@ build: ## Build the example client and server into ./bin
 	@echo "Building examples"
 	@mkdir -p $(BIN_DIR)
 	@for dir in iec104/examples/*/ iec101/examples/*/ iec103/examples/*/ iec102/examples/*/; do \
-		name="$$(basename "$$dir")"; \
-		go build -o "$(BIN_DIR)/example-$$name" "./$$dir"; \
+		std="$$(echo "$$dir" | cut -d/ -f1)"; name="$$(basename "$$dir")"; \
+		go build -o "$(BIN_DIR)/example-$$std-$$name" "./$$dir"; \
 	done
 
 # The self-contained examples: each starts both sides and exits by itself.
@@ -80,7 +80,7 @@ fmt-check: ## Fail if the go.mod-version gofmt or the local gofmt would change a
 		exit 1; \
 	fi
 
-lint: ## Run staticcheck (includes -tags=interop for ./interop)
+lint: ## Run staticcheck (includes -tags=interop for the interop suites)
 	@echo "Running staticcheck"
 	@staticcheck -tags=$(INTEROP_TAGS) ./...
 
@@ -100,9 +100,9 @@ test: ## Run the library tests with the race detector
 	@echo "Running tests"
 	@go test -count=1 -race $(TEST_PKGS)
 
-e2e: ## Run the end-to-end suite: go-iec60870-5 client against go-iec60870-5 server on loopback
+e2e: ## Run the end-to-end suites of every companion standard (client against server, in memory and on loopback)
 	@echo "Running end-to-end tests"
-	@go test -count=1 -race ./iec104/e2e/...
+	@go test -count=1 -race ./iec101/e2e/... ./iec102/e2e/... ./iec103/e2e/... ./iec104/e2e/...
 
 coverage: ## Run tests with coverage on the library packages (writes coverage.out)
 	@echo "Running coverage"
@@ -132,7 +132,7 @@ cover: coverage ## Open coverage report in browser
 
 bench: ## Run the codec benchmarks
 	@echo "Running benchmarks"
-	@go test -count=1 -run='^$$' -bench=. -benchmem ./apci ./asdu
+	@go test -count=1 -run='^$$' -bench=. -benchmem ./iec104/apci ./asdu ./ft12 ./cp
 
 # Duration each fuzz target runs. Override with FUZZTIME=... (e.g. FUZZTIME=5m).
 FUZZTIME ?= 30s

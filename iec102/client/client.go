@@ -141,7 +141,7 @@ func New(rw io.ReadWriter, cfg Config) (*Client, error) {
 	}
 	c := &Client{
 		cfg:     cfg,
-		log:     logx.New(cfg.Logger, "iec102-client", "link", cfg.LinkAddr),
+		log:     logx.New(cfg.Logger, "iec102.client", "link", cfg.LinkAddr),
 		pri:     pri,
 		sem:     make(chan struct{}, 1),
 		handled: make(chan *iec102.ASDU, 64),
@@ -186,7 +186,7 @@ func (c *Client) setState(s iec102.State, err error) {
 	}
 	c.state = s
 	c.mu.Unlock()
-	c.log.Info("link state", "state", s.String(), "err", err)
+	c.log.Info("link state", "state", s.String(), "error", err)
 	if c.cfg.OnState != nil {
 		c.cfg.OnState(s, err)
 	}
@@ -324,7 +324,7 @@ func (c *Client) Request(ctx context.Context, a *iec102.ASDU, until Until) ([]*i
 		}
 		r, err := iec102.Decode(data, c.cfg.Params)
 		if err != nil {
-			c.log.Warn("undecodable ASDU dropped", "err", err)
+			c.log.Warn("undecodable ASDU dropped", "error", err)
 			continue
 		}
 		if r.CommonAddr != a.CommonAddr {

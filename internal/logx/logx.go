@@ -25,14 +25,15 @@ type Logger struct {
 	debug  func() bool
 }
 
-// New returns a logger for a component ("client", "server"). kv are fields
-// every entry of the component carries. A nil base returns nil.
+// New returns a logger for a component, named "<standard>.<role>" (for
+// example "iec104.client", "iec101.server"). kv are fields every entry of
+// the component carries. A nil base returns nil.
 func New(base iec60870.Logger, component string, kv ...any) *Logger {
 	if base == nil {
 		return nil
 	}
-	l := &Logger{base: base, prefix: "iec104 " + component}
-	l.static = append([]any{"component", "iec104." + component}, kv...)
+	l := &Logger{base: base, prefix: strings.ReplaceAll(component, ".", " ")}
+	l.static = append([]any{"component", component}, kv...)
 	if fl, ok := base.(iec60870.FieldLogger); ok {
 		l.fields = fl.With(l.static...)
 	}

@@ -221,23 +221,23 @@ through `Config.Logger`; nil is silent. They have no metrics interface.
 
 | Level | Message | Fields |
 |-------|---------|--------|
-| Info | `link state` | `state`, `err` |
-| Debug | `link init failed` (IEC 101 and 103 clients, IEC 101 server) | `err` |
-| Warn | `undecodable ASDU dropped` | `err` |
-| Warn | `ASDU dropped by the IEC 60870-5-101 profile` (client), `ASDU refused by the IEC 60870-5-101 profile` (server); only with `Params.Strict` | `err` |
+| Info | `link state` | `state`, `error` |
+| Debug | `link init failed` (IEC 101 and 103 clients, IEC 101 server) | `error` |
+| Warn | `undecodable ASDU dropped` | `error` |
+| Warn | `ASDU dropped by the IEC 60870-5-101 profile` (client), `ASDU refused by the IEC 60870-5-101 profile` (server); only with `Params.Strict` | `error` |
 | Debug | `controlling station busy, sending again` (IEC 101 balanced server) | - |
-| Warn | `send failed` (IEC 101 server) | `err` |
+| Warn | `send failed` (IEC 101 server) | `error` |
 | Warn | `handler queue full, ASDU dropped` (IEC 102 client), `answer not queued` (IEC 102 server) | - |
 | Warn | `identification not queued`, `disturbance data not queued` (IEC 103 server) | - |
 | Debug | `interrogation cycle aborted`, `ASDU for another common address dropped` (IEC 103 server) | - |
 | Debug | `unexpected ASDU in disturbance data transfer` (IEC 103 client) | - |
-| Warn | `time synchronization after initialization failed`, `general interrogation after initialization failed` (IEC 103 client) | `err` |
+| Warn | `time synchronization after initialization failed`, `general interrogation after initialization failed` (IEC 103 client) | `error` |
 
 Every entry carries `component` and `link` (the link address). The
-component value is the station (`iec101-client`, `iec101-server`,
-`iec102-client`, `iec102-server`, `iec103-client`, `iec103-server`) with
-the prefix `iec104.` the shared logger adds. The serial stations name the
-error field `err`, the IEC 104 packages `error`.
+component is `<standard>.<role>`: `iec101.client`, `iec101.server`,
+`iec102.client`, `iec102.server`, `iec103.client`, `iec103.server` (and
+`iec104.client`, `iec104.server` for IEC 104). The error field is `error`
+in every package.
 
 State without logs:
 

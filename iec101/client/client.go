@@ -135,7 +135,7 @@ func New(rw io.ReadWriter, cfg Config) (*Client, error) {
 	}
 	c := &Client{
 		cfg:     cfg,
-		log:     logx.New(cfg.Logger, "iec101-client", "link", cfg.LinkAddr),
+		log:     logx.New(cfg.Logger, "iec101.client", "link", cfg.LinkAddr),
 		sends:   make(chan sendReq),
 		handled: make(chan *asdu.ASDU, 256),
 		upCh:    make(chan struct{}),
@@ -259,7 +259,7 @@ func (c *Client) setState(s iec101.State, err error) {
 	if s == iec101.StateDown {
 		c.req.FailAll(fmt.Errorf("%w: %w", iec101.ErrLinkDown, err))
 	}
-	c.log.Info("link state", "state", s.String(), "err", err)
+	c.log.Info("link state", "state", s.String(), "error", err)
 	if c.cfg.OnState != nil {
 		c.cfg.OnState(s, err)
 	}
@@ -279,14 +279,14 @@ func (c *Client) setState(s iec101.State, err error) {
 func (c *Client) receive(data []byte) {
 	a, err := asdu.Decode(data, c.cfg.ASDU)
 	if err != nil {
-		c.log.Warn("undecodable ASDU dropped", "err", err)
+		c.log.Warn("undecodable ASDU dropped", "error", err)
 		return
 	}
 	if c.cfg.Strict {
 		if err := iec101.Validate(a, c.cfg.ASDU); err != nil {
 			// IEC 60870-5-101:2003 7.2.3: the controlling station may log
 			// such ASDUs; they do not affect the following messages.
-			c.log.Warn("ASDU dropped by the IEC 60870-5-101 profile", "asdu", a.String(), "err", err)
+			c.log.Warn("ASDU dropped by the IEC 60870-5-101 profile", "asdu", a.String(), "error", err)
 			return
 		}
 	}
@@ -393,7 +393,7 @@ func (c *Client) runUnbalanced() {
 		if c.State() != iec101.StateUp {
 			st, err := c.pri.Init(c.ctx, addr)
 			if err != nil {
-				c.log.Debug("link init failed", "err", err)
+				c.log.Debug("link init failed", "error", err)
 				if !c.sleep(c.cfg.RetryInterval) {
 					return
 				}
@@ -469,7 +469,7 @@ func (c *Client) runBalanced() {
 	for c.ctx.Err() == nil {
 		if c.State() != iec101.StateUp {
 			if err := c.bal.Init(c.ctx); err != nil {
-				c.log.Debug("link init failed", "err", err)
+				c.log.Debug("link init failed", "error", err)
 				if !c.sleep(c.cfg.RetryInterval) {
 					return
 				}

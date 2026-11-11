@@ -162,7 +162,7 @@ func New(rw io.ReadWriter, cfg Config) (*Client, error) {
 	c := &Client{
 		cfg:     cfg,
 		ca:      cfg.CommonAddr,
-		log:     logx.New(cfg.Logger, "iec103-client", "link", cfg.LinkAddr),
+		log:     logx.New(cfg.Logger, "iec103.client", "link", cfg.LinkAddr),
 		pri:     pri,
 		sends:   make(chan sendReq),
 		bcasts:  make(chan sendReq),
@@ -266,7 +266,7 @@ func (c *Client) setState(s iec103.State, err error) {
 		}
 	}
 	c.mu.Unlock()
-	c.log.Info("link state", "state", s.String(), "err", err)
+	c.log.Info("link state", "state", s.String(), "error", err)
 	if c.cfg.OnState != nil {
 		c.cfg.OnState(s, err)
 	}
@@ -293,7 +293,7 @@ func (c *Client) next() uint8 {
 func (c *Client) receive(data []byte) {
 	a, err := iec103.DecodeIn(data, c.cfg.Location)
 	if err != nil {
-		c.log.Warn("undecodable ASDU dropped", "err", err)
+		c.log.Warn("undecodable ASDU dropped", "error", err)
 		return
 	}
 	c.mu.Lock()
@@ -486,7 +486,7 @@ func (c *Client) run() {
 		if c.State() != iec103.StateUp {
 			st, err := c.initLink()
 			if err != nil {
-				c.log.Debug("link init failed", "err", err)
+				c.log.Debug("link init failed", "error", err)
 				if !c.sleep(c.cfg.RetryInterval) {
 					return
 				}
@@ -573,12 +573,12 @@ func (c *Client) afterInit() {
 	defer c.wg.Done()
 	if !c.cfg.NoInitTimeSync {
 		if _, err := c.ClockSync(c.ctx, time.Now()); err != nil {
-			c.log.Warn("time synchronization after initialization failed", "err", err)
+			c.log.Warn("time synchronization after initialization failed", "error", err)
 		}
 	}
 	if !c.cfg.NoInitGI {
 		if _, err := c.Interrogate(c.ctx); err != nil {
-			c.log.Warn("general interrogation after initialization failed", "err", err)
+			c.log.Warn("general interrogation after initialization failed", "error", err)
 		}
 	}
 }

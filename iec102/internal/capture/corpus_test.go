@@ -165,7 +165,7 @@ func TestFrames(t *testing.T) {
 
 func TestManifest(t *testing.T) {
 	m := corpus.Manifest{
-		Description: "IEC 60870-5-102 frames kept for the coming IEC 102 work (testdata/captures/README.md). Files are byte-identical to their sources.",
+		Description: "Recorded IEC 60870-5-102 frames that iec102 is tested against (testdata/captures/README.md). Files are byte-identical to their sources.",
 		Levels:      corpus.Levels, Sources: sources,
 	}
 	var listed []string

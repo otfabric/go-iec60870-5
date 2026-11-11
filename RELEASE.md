@@ -88,6 +88,13 @@ images. Several behaviours change; see "Behaviour changes".
   evidence, the serial stations in OBSERVABILITY.md and API.md, the
   security gaps and texts not held in LIMITATIONS.md.
 
+- Logs: the serial stations log with component `iec101.client`,
+  `iec101.server`, `iec102.*`, `iec103.*` (they carried an `iec104.`
+  prefix) and name the error field `error` (was `err`), as IEC 104 does.
+  The Makefile builds every example under its own name, `make e2e` runs
+  the end-to-end suites of all four standards, `make bench` the codec
+  benchmarks.
+
 ### Behaviour changes
 
 The frame gap in `link`, `ErrUnexpected` wrapping `ErrTimeout`, requests

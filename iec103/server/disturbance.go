@@ -48,7 +48,7 @@ func (s *Server) sendList(cy cycle) error {
 
 func (s *Server) distSend(fun iec103.FunctionType, b iec103.Body) {
 	if err := s.Send(iec103.New(iec103.CauseDisturbanceData, s.ca, fun, 0, b), Class1); err != nil {
-		s.log.Warn("disturbance data not queued", "err", err)
+		s.log.Warn("disturbance data not queued", "error", err)
 	}
 }
 

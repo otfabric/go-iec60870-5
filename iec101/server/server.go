@@ -133,7 +133,7 @@ func New(rw io.ReadWriter, cfg Config) (*Server, error) {
 	}
 	s := &Server{
 		cfg: cfg,
-		log: logx.New(cfg.Logger, "iec101-server", "link", cfg.LinkAddr),
+		log: logx.New(cfg.Logger, "iec101.server", "link", cfg.LinkAddr),
 		in:  make(chan *asdu.ASDU, 64),
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
@@ -204,7 +204,7 @@ func (s *Server) setState(st iec101.State, err error) {
 	}
 	s.state = st
 	s.mu.Unlock()
-	s.log.Info("link state", "state", st.String(), "err", err)
+	s.log.Info("link state", "state", st.String(), "error", err)
 	if s.cfg.OnState != nil {
 		s.cfg.OnState(st, err)
 	}
@@ -301,7 +301,7 @@ func (s *Server) Reject(req *asdu.ASDU, cause asdu.Cause) error {
 func (s *Server) receive(data []byte) bool {
 	a, err := asdu.Decode(data, s.cfg.ASDU)
 	if err != nil {
-		s.log.Warn("undecodable ASDU dropped", "err", err)
+		s.log.Warn("undecodable ASDU dropped", "error", err)
 		return true // the link layer accepted the frame
 	}
 	select {
@@ -339,7 +339,7 @@ func (s *Server) admit(a *asdu.ASDU) bool {
 	if err == nil {
 		return true
 	}
-	s.log.Warn("ASDU refused by the IEC 60870-5-101 profile", "asdu", a.String(), "err", err)
+	s.log.Warn("ASDU refused by the IEC 60870-5-101 profile", "asdu", a.String(), "error", err)
 	var pe *iec101.ProfileError
 	if errors.As(err, &pe) && pe.Cause != 0 && a.Type.InControlDirection() {
 		// The mirror itself would fail the checks (reserved type, cause 0,
@@ -417,7 +417,7 @@ func (s *Server) sendBalanced(raw []byte) error {
 		if !errors.Is(err, link.ErrNack) && !errors.Is(err, link.ErrDataFlow) {
 			return err
 		}
-		s.log.Debug("controlling station busy, sending again", "err", err)
+		s.log.Debug("controlling station busy, sending again", "error", err)
 		t := time.NewTimer(s.cfg.Link.Timeout)
 		select {
 		case <-t.C:
@@ -450,7 +450,7 @@ func (s *Server) runBalanced() {
 	defer s.wg.Done()
 	for s.ctx.Err() == nil {
 		if err := s.bal.Init(s.ctx); err != nil {
-			s.log.Debug("link init failed", "err", err)
+			s.log.Debug("link init failed", "error", err)
 			t := time.NewTimer(s.cfg.RetryInterval)
 			select {
 			case <-t.C:
@@ -476,7 +476,7 @@ func (s *Server) runBalanced() {
 				return
 			}
 			if err := s.sendBalanced(raw); err != nil {
-				s.log.Warn("send failed", "err", err)
+				s.log.Warn("send failed", "error", err)
 				if errors.Is(err, link.ErrTimeout) {
 					s.setState(iec101.StateDown, err)
 					break

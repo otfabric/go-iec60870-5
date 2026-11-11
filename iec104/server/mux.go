@@ -16,7 +16,9 @@ import (
 //   - a cause of transmission that is not valid for the type in control
 //     direction is mirrored with cause "unknown cause of transmission"
 //     (deactivation is valid only for the commands, interrogation,
-//     counter interrogation and parameter activation)
+//     counter interrogation and parameter activation; C_CS_NA_1,
+//     C_RP_NA_1, C_TS_TA_1 and P_ME_NA_1..P_ME_NC_1 are activated only,
+//     IEC 60870-5-104 7.1, 7.6, 7.9, 7.10, 8.8)
 //
 // Handlers therefore only see requests they are expected to act on. A
 // handler that does not know the addressed object answers with
