@@ -2,7 +2,7 @@
 
 ## v0.3.0
 
-**Date:** not released (prepared)
+**Date:** 2026-11-11
 **Previous release:** v0.2.0
 
 Hardening: SAST to zero, chaos, hostile-peer and fuzz suites for the serial
