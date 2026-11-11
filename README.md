@@ -98,8 +98,7 @@ make interop  # IEC 104 against the pinned reference images (Docker)
 
 Independent reference implementations live in
 [otfabric/iec60870-5-interop](https://github.com/otfabric/iec60870-5-interop)
-(IEC 101/102/103/104) and, for IEC 104 today,
-[otfabric/iec104-interop](https://github.com/otfabric/iec104-interop).
+(IEC 101/102/103/104; the IEC 104 suite runs against its v0.2.1 images).
 
 ## Relation to go-iec104
 

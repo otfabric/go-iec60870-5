@@ -240,7 +240,7 @@ StopDT stops data transfer (STOPDT act) and waits for the confirmation. The conn
 func (c *Client) TestCommand(ctx context.Context, ca asdu.CommonAddr) error
 ```
 
-TestCommand sends a test command with time tag (C\_TS\_TA\_1) and waits for the confirmation. Unlike [Client.TestLink](#func-client-testlink) it exercises the application layer of the station end to end.
+TestCommand sends a test command with time tag (C\_TS\_TA\_1) and waits for the confirmation. Unlike [Client.TestLink](#func-client-testlink) it exercises the application layer of the station end to end. The test sequence counter (TSC) of the first test command of a Client is 0 and counts up by one per command (IEC 60870-5-104 ed. 1, 8.8).
 
 #### func (Client) TestLink
 

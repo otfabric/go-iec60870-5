@@ -16,7 +16,7 @@ import (
 
 // Fixture describes a simulated station: its points, the commands that act
 // on them and the files it offers. The format is the one of
-// otfabric/iec104-interop.
+// otfabric/iec60870-5-interop (fixtures/iec104), formerly iec104-interop.
 type Fixture struct {
 	Name    string `json:"name"`
 	Station struct {

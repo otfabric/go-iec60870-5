@@ -37,7 +37,9 @@ var (
 	ErrInvalidStart = errors.New("apci: invalid start byte")
 
 	// ErrInvalidLength reports a length octet outside 4..253, a buffer that
-	// does not match its length octet, or an S/U frame carrying a payload.
+	// does not match its length octet, an S/U frame carrying a payload, or
+	// an I frame without one (IEC 60870-5-104 clause 5: an I-format APDU
+	// always contains an ASDU).
 	ErrInvalidLength = errors.New("apci: invalid APDU length")
 
 	// ErrInvalidControl reports a control field that is not a valid I, S or
@@ -116,6 +118,9 @@ func (f Frame) Len() int {
 func (f Frame) AppendBinary(b []byte) ([]byte, error) {
 	switch f.Format {
 	case FormatI:
+		if len(f.ASDU) == 0 {
+			return b, fmt.Errorf("%w: I frame without ASDU", ErrInvalidLength)
+		}
 		if len(f.ASDU) > MaxASDULength {
 			return b, fmt.Errorf("%w: %d octets", ErrASDUTooLong, len(f.ASDU))
 		}
@@ -186,6 +191,11 @@ func parseBody(b []byte) (Frame, error) {
 	case c[0]&0x01 == 0:
 		if c[2]&0x01 != 0 {
 			return Frame{}, fmt.Errorf("%w: I frame with odd third octet", ErrInvalidControl)
+		}
+		if len(b) == ControlLength {
+			// IEC 60870-5-104 clause 5: an I-format APDU always contains
+			// an ASDU.
+			return Frame{}, fmt.Errorf("%w: I frame without ASDU", ErrInvalidLength)
 		}
 		return Frame{
 			Format:  FormatI,

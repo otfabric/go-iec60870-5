@@ -18,7 +18,11 @@ modified and not imported.
 4. "go-iec104" renamed to "go-iec60870-5" in comments, test messages and
    the capture manifest description.
 
-No protocol code was rewritten.
+No protocol code was rewritten in the copy. Afterwards (2026-11-11) the
+packages were checked clause by clause against IEC 60870-5-104 edition 1,
+and five deviations were fixed (see Capabilities and
+[iec104/INTEROPERABILITY.md](iec104/INTEROPERABILITY.md#checked-against-iec-60870-5-104-edition-1));
+go-iec104 v0.3.0 still has them.
 
 ## Package map
 
@@ -39,9 +43,9 @@ No protocol code was rewritten.
 
 | Capability (go-iec104 v0.3.0) | go-iec60870-5 | Difference |
 |---|---|---|
-| APCI: I/S/U frames, 15-bit sequence numbers, k/w, t0..t3 | same code | none |
-| Client: STARTDT/STOPDT, interrogation, counter interrogation, read, clock sync, commands with SBO, test, reset process, retries, reconnect | same code | none |
-| Server: sessions, Mux routing and rejection, spontaneous data, broadcast | same code | none |
+| APCI: I/S/U frames, 15-bit sequence numbers, k/w, t0..t3 | same code, two fixes | an I frame without ASDU is refused (ed. 1 clause 5); `w` may exceed `k` (1..32767 each, ed. 1 5.5) |
+| Client: STARTDT/STOPDT, interrogation, counter interrogation, read, clock sync, commands with SBO, test, reset process, retries, reconnect | same code, one fix | the TSC of C_TS_TA_1 starts at 0 (ed. 1 8.8) |
+| Server: sessions, Mux routing and rejection, spontaneous data, broadcast | same code, one fix | `Mux` refuses a deactivation of C_CS, C_RP, C_TS and P_ME with cause 45 (ed. 1 7.1, 7.6, 7.9, 7.10, 8.8) |
 | Redundancy groups and event queue | same code | none |
 | File transfer (GetFile, PutFile, ListFiles, FileServer) | same code | none |
 | ASDU codec, 67 type identifications plus C_TS_NA_1/C_CD_NA_1, configurable sizes | same code; time tags in `cp` | `asdu.Timestamp` is now an alias (assignable both ways; no API break for users of `asdu`) |
@@ -54,10 +58,11 @@ No protocol code was rewritten.
 | | go-iec104 v0.3.0 | go-iec60870-5 (iec104 subtree) |
 |---|---|---|
 | Test, fuzz, benchmark and example functions, whole module | 333 | 371 (all 333 carried over; 38 new for cp, ft12, link, telecontrol, iec101) |
-| Interop functions (build tag `interop`) | 37 | 37, pinned to the same iec104-interop v0.5.0 digests |
+| Interop functions (build tag `interop`) | 37 | 37, pinned to the IEC 104 images of iec60870-5-interop v0.2.1 (five references, part5 added) |
 | Committed captures | as listed in SHA256SUMS | identical files and SHA256SUMS |
 | `make check` (lint, vet, race, coverage floors, examples, docs) | green | green (2026-11-11, local) |
-| `make interop` against iec104-interop v0.5.0 images (lib60870, openmuc, wendy512, cbsigma, same digests) | green in go-iec104 CI | green, local 2026-11-11 (Docker linux/arm64): 31 top-level tests, 482 subtests passed, 0 failed; 22 subtests skipped where an image does not declare the feature (openmuc: read; wendy512: time-tagged commands, upload, redundancy, TLS server); run with `IEC104_REQUIRE_INTEROP=1`, 381 s |
+| `make interop` against iec104-interop v0.5.0 images (lib60870, openmuc, wendy512, cbsigma, same digests) | green in go-iec104 CI | green, local 2026-11-11 (Docker linux/arm64): 31 top-level tests, 482 subtests passed, 0 failed; 22 subtests skipped where an image does not declare the feature (openmuc: read; wendy512: time-tagged commands, upload, redundancy, TLS server); run with `IEC104_REQUIRE_INTEROP=1`, 381 s. Superseded by the next row |
+| `make interop` against the IEC 104 images of iec60870-5-interop v0.2.1 (lib60870, openmuc, wendy512, cbsigma, part5) | not run (go-iec104 pins iec104-interop) | green, local 2026-11-11 (Docker linux/arm64), after the ed. 1 fixes: 31 top-level tests, 519 subtests passed, 0 failed, 35 skipped where an image does not declare the feature (openmuc: read, the known j60870 bug; wendy512: time-tagged commands, file download, upload, redundancy, TLS; part5: file transfer, TLS, redundancy). Passed per reference: lib60870 112, openmuc 107, wendy512 88, cbsigma 132, part5 68. `IEC104_REQUIRE_INTEROP=1`, 444 s |
 | `make test-cbsigma` | green | green (local, 2026-11-11) |
 
 ## Known limitations
@@ -67,7 +72,7 @@ Those of go-iec104 v0.3.0, unchanged: [iec104/LIMITATIONS.md](iec104/LIMITATIONS
 ## Open items before parity can be called demonstrated
 
 - Run the same suite in CI (it ran locally only).
-- Move the interop suite onto otfabric/iec60870-5-interop images once that
-  harness publishes IEC 104 adapters with the same coverage.
+- ~~Move the interop suite onto otfabric/iec60870-5-interop images~~: done
+  2026-11-11, v0.2.1, with part5 as a fifth reference.
 - Decide whether `iec104/client` adopts `telecontrol.Requester` (shared with
   IEC 101) — only with the full IEC 104 suite green before and after.

@@ -1166,8 +1166,8 @@ func TestConnectInTwoSteps(t *testing.T) {
 	}
 
 	// Options that cannot work are refused before anything is dialled.
-	if _, err := client.New(l.st.Loopback(), client.WithParams(apci.Params{K: 4, W: 9})); !errors.Is(err, apci.ErrInvalidParams) {
-		t.Errorf("w > k: %v", err)
+	if _, err := client.New(l.st.Loopback(), client.WithParams(apci.Params{K: 4, W: 0x8000})); !errors.Is(err, apci.ErrInvalidParams) {
+		t.Errorf("w > 32767: %v", err)
 	}
 	if _, err := server.New(nil, server.WithParams(apci.Params{T1: time.Second, T2: 2 * time.Second})); !errors.Is(err, apci.ErrInvalidParams) {
 		t.Errorf("t2 > t1: %v", err)

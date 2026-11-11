@@ -79,6 +79,9 @@ func TestParseErrors(t *testing.T) {
 		{"S malformed", []byte{0x68, 0x04, 0x01, 0x01, 0x00, 0x00}, ErrInvalidControl},
 		{"S odd N(R)", []byte{0x68, 0x04, 0x01, 0x00, 0x01, 0x00}, ErrInvalidControl},
 		{"I odd N(R)", []byte{0x68, 0x04, 0x00, 0x00, 0x01, 0x00}, ErrInvalidControl},
+		// IEC 60870-5-104 ed. 1, clause 5: an I-format APDU always
+		// contains an ASDU.
+		{"I without ASDU", []byte{0x68, 0x04, 0x00, 0x00, 0x00, 0x00}, ErrInvalidLength},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -131,7 +134,7 @@ func TestMarshalErrors(t *testing.T) {
 	}
 	for _, f := range []Frame{
 		{Format: FormatU, Function: 0x0F},
-		{Format: FormatI, SendSeq: SeqModulus},
+		{Format: FormatI, SendSeq: SeqModulus, ASDU: []byte{1}},
 		{Format: FormatS, RecvSeq: SeqModulus},
 		{Format: 9},
 	} {
@@ -204,7 +207,7 @@ func TestParams(t *testing.T) {
 		func(p *Params) { p.K = 0 },
 		func(p *Params) { p.K = SeqModulus },
 		func(p *Params) { p.W = 0 },
-		func(p *Params) { p.W = p.K + 1 },
+		func(p *Params) { p.W = SeqModulus },
 		func(p *Params) { p.T0 = 0 },
 		func(p *Params) { p.T1 = -1 },
 		func(p *Params) { p.T2 = p.T1 },
@@ -217,6 +220,31 @@ func TestParams(t *testing.T) {
 		if err := p.Validate(); !errors.Is(err, ErrInvalidParams) {
 			t.Errorf("case %d: error = %v, want ErrInvalidParams", i, err)
 		}
+	}
+}
+
+// IEC 60870-5-104 ed. 1, 5.5 and the k/w table of clause 9: k and w each
+// range over 1..32767; w <= 2k/3 is a recommendation, not a limit.
+func TestParamsWIndependentOfK(t *testing.T) {
+	for _, p := range []Params{
+		{K: 1, W: 2, T0: time.Second, T1: 2 * time.Second, T2: time.Second},
+		{K: 4, W: 9, T0: time.Second, T1: 2 * time.Second, T2: time.Second},
+		{K: 1, W: SeqMask, T0: time.Second, T1: 2 * time.Second, T2: time.Second},
+	} {
+		if err := p.Validate(); err != nil {
+			t.Errorf("k=%d w=%d: %v", p.K, p.W, err)
+		}
+	}
+}
+
+// IEC 60870-5-104 ed. 1, clause 5: an I-format APDU always contains an
+// ASDU, so none is written without one.
+func TestMarshalIWithoutASDU(t *testing.T) {
+	if _, err := NewI(0, 0, nil).MarshalBinary(); !errors.Is(err, ErrInvalidLength) {
+		t.Errorf("I frame without ASDU: %v, want ErrInvalidLength", err)
+	}
+	if _, err := ReadFrame(bytes.NewReader([]byte{0x68, 0x04, 0x02, 0x00, 0x00, 0x00})); !errors.Is(err, ErrInvalidLength) {
+		t.Errorf("ReadFrame of an I frame without ASDU: %v, want ErrInvalidLength", err)
 	}
 }
 

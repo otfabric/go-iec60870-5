@@ -33,16 +33,18 @@ COVER_PKGS := $(shell go list ./... | grep -v -e '/examples' -e '/internal/testu
 # Build tag of the interop package (excluded from default ./... builds).
 INTEROP_TAGS := interop
 
-# Reference implementations for 'make interop': otfabric/iec104-interop v0.5.0
-# (lib60870-C v2.4.1, OpenMUC j60870 1.8.0, wendy512/iec104 v1.0.4 on
-# go-iecp5 v1.2.6, cB-Sigma/iec60870 v0.3.0 with IEC 62351-5), pinned by
-# multi-arch index digest.
-# Keep in step with interop/harness.go. Override to test other builds, e.g.
-#   make interop IEC104_INTEROP_OPENMUC_IMAGE=ghcr.io/otfabric/iec104-interop-openmuc:dev
-IEC104_INTEROP_LIB60870_IMAGE ?= ghcr.io/otfabric/iec104-interop-lib60870@sha256:c1f0cc95e39316df8c182b887b933e0488c92845fedade00605aedc816a0af9a
-IEC104_INTEROP_OPENMUC_IMAGE  ?= ghcr.io/otfabric/iec104-interop-openmuc@sha256:319061ebfddd5bd87893dc87d065ab091c8ac9f2a2f3ce57838b5b7c9663766f
-IEC104_INTEROP_WENDY512_IMAGE ?= ghcr.io/otfabric/iec104-interop-wendy512@sha256:8b8c9314ceef122d29ff1bd56b98a971c3dc0585522d8b81586d99119297c397
-IEC104_INTEROP_CBSIGMA_IMAGE  ?= ghcr.io/otfabric/iec104-interop-cbsigma@sha256:43e8e0db63fe3ab49ccca659e1ade8bcced43b916ba2fca161b03cc35aa779a8
+# Reference implementations for 'make interop': the IEC 104 images of
+# otfabric/iec60870-5-interop v0.2.1 (contract 2.1; lib60870-C v2.4.1,
+# OpenMUC j60870 1.8.0, wendy512/iec104 v1.0.4 on go-iecp5 v1.2.6,
+# cB-Sigma/iec60870 v0.3.0 with IEC 62351-5, pascaldekloe/part5 v0.3.0),
+# pinned by multi-arch index digest (manifest.json of the release).
+# Keep in step with iec104/interop/harness.go. Override to test other builds, e.g.
+#   make interop IEC104_INTEROP_OPENMUC_IMAGE=ghcr.io/otfabric/iec60870-5-interop-iec104-openmuc:dev
+IEC104_INTEROP_LIB60870_IMAGE ?= ghcr.io/otfabric/iec60870-5-interop-iec104-lib60870@sha256:ab197fc2d1d395b7a8acc002ccd77be8bdef77ad5f53b63bb5123b4e62ac2fe1
+IEC104_INTEROP_OPENMUC_IMAGE  ?= ghcr.io/otfabric/iec60870-5-interop-iec104-openmuc@sha256:62fc29e6b48ae42bbfdb0c77944c46dee13e70c132801bac2558cbd207fe1b7b
+IEC104_INTEROP_WENDY512_IMAGE ?= ghcr.io/otfabric/iec60870-5-interop-iec104-wendy512@sha256:6ba78301e4467ad2e53e82cbef1e4227f7d1b8fe8d32438f749dad09937b451f
+IEC104_INTEROP_CBSIGMA_IMAGE  ?= ghcr.io/otfabric/iec60870-5-interop-iec104-cbsigma@sha256:36ec51fcb7d51f8bc773f037bf407ed23e19036d5b33ba5eadfca4adbf565ab6
+IEC104_INTEROP_PART5_IMAGE    ?= ghcr.io/otfabric/iec60870-5-interop-iec104-part5@sha256:38d6c613af07f60e18c57d3ff5d97ef3d3f83223ba551f9d909969755469a53e
 
 all: build ## Default target: build the examples
 
@@ -155,13 +157,14 @@ cross: ## Cross-compile without cgo (build only, the tests do not run there)
 		CGO_ENABLED=0 GOOS=$${p%/*} GOARCH=$${p#*/} go build ./... || exit 1; \
 	done
 
-test-interop: ## Run the interop suite against the lib60870, OpenMUC, wendy512 and cB-Sigma reference images (needs Docker)
-	@echo "Running interop tests against $(IEC104_INTEROP_LIB60870_IMAGE), $(IEC104_INTEROP_OPENMUC_IMAGE), $(IEC104_INTEROP_WENDY512_IMAGE) and $(IEC104_INTEROP_CBSIGMA_IMAGE)"
+test-interop: ## IEC 104 against the lib60870, OpenMUC, wendy512, cB-Sigma and part5 images of iec60870-5-interop (needs Docker; V=1 for -v)
+	@echo "Running interop tests against $(IEC104_INTEROP_LIB60870_IMAGE), $(IEC104_INTEROP_OPENMUC_IMAGE), $(IEC104_INTEROP_WENDY512_IMAGE), $(IEC104_INTEROP_CBSIGMA_IMAGE) and $(IEC104_INTEROP_PART5_IMAGE)"
 	@IEC104_INTEROP_LIB60870_IMAGE="$(IEC104_INTEROP_LIB60870_IMAGE)" \
 		IEC104_INTEROP_OPENMUC_IMAGE="$(IEC104_INTEROP_OPENMUC_IMAGE)" \
 		IEC104_INTEROP_WENDY512_IMAGE="$(IEC104_INTEROP_WENDY512_IMAGE)" \
 		IEC104_INTEROP_CBSIGMA_IMAGE="$(IEC104_INTEROP_CBSIGMA_IMAGE)" \
-		go test -tags=$(INTEROP_TAGS) -count=1 -timeout=20m ./iec104/interop/...
+		IEC104_INTEROP_PART5_IMAGE="$(IEC104_INTEROP_PART5_IMAGE)" \
+		go test -tags=$(INTEROP_TAGS) -count=1 -timeout=30m $(if $(V),-v,) ./iec104/interop/...
 
 interop: test-interop ## Alias for test-interop
 

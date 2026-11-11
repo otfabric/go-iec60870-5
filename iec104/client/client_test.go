@@ -496,7 +496,7 @@ func TestStartStop(t *testing.T) {
 
 func TestConnectErrors(t *testing.T) {
 	ctx := context.Background()
-	if _, err := client.New("127.0.0.1", client.WithParams(apci.Params{K: 1, W: 2})); !errors.Is(err, apci.ErrInvalidParams) {
+	if _, err := client.New("127.0.0.1", client.WithParams(apci.Params{K: 1, W: 0x8000})); !errors.Is(err, apci.ErrInvalidParams) {
 		t.Errorf("invalid params: %v", err)
 	}
 	if _, err := client.New("127.0.0.1", client.WithASDUParams(asdu.Params{})); !errors.Is(err, asdu.ErrInvalidParams) {
@@ -629,6 +629,34 @@ func TestUndecodableASDUIsDropped(t *testing.T) {
 	})
 	if col.find(func(*asdu.ASDU) bool { return true }) != nil {
 		t.Error("undecodable ASDU reached the handler")
+	}
+}
+
+// IEC 60870-5-104 ed. 1, 8.8: the test sequence counter (TSC) of
+// C_TS_TA_1 starts at 0 and counts the test commands.
+func TestTestCommandCounterStartsAtZero(t *testing.T) {
+	counters := make(chan uint16, 4)
+	srv, err := server.New(server.HandlerFunc(func(s *server.Session, req *asdu.ASDU) {
+		if tc, ok := req.First().(asdu.TestCommand); ok && req.Type == asdu.C_TS_TA_1 {
+			counters <- tc.Counter
+		}
+		_ = s.Confirm(req)
+	}), server.WithParams(testutil.Params()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = srv.ListenAndServe("127.0.0.1:0") }()
+	defer func() { _ = srv.Close() }()
+	testutil.Eventually(t, "listener", func() bool { return srv.Addr() != nil })
+
+	c := dial(t, srv.Addr().String())
+	for want := range uint16(3) {
+		if err := c.TestCommand(context.Background(), 1); err != nil {
+			t.Fatalf("TestCommand: %v", err)
+		}
+		if got := <-counters; got != want {
+			t.Errorf("TSC of test command %d = %d, want %d", want+1, got, want)
+		}
 	}
 }
 

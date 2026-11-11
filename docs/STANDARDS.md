@@ -17,7 +17,7 @@ apart throughout the documentation:
 | IEC 60870-5-103 | 1997 (ed. 1) | GOST R IEC 60870-5-103-2005, "IDT" (identical translation, Russian) | Clause 6 quotes the IEC 60870-5-1 FT 1.2 rules and the IEC 60870-5-2 unbalanced procedures that 103 uses; this is our only text for parts 1 and 2. |
 | IEC 60870-5-101 | 2003 (ed. 2) | GOST R IEC 60870-5-101-2006, "IDT" (identical translation, Russian) | Obtained 2026-11-11; `ft12`, `link`, `iec101`, `telecontrol` checked against it, open deviations in LIMITATIONS.md. Clause 6 profiles IEC 60870-5-1 and -2, including the balanced procedures (figures 7 to 9). Amendment 1:2015 not held. |
 | IEC TS 60870-5-7 | 2025 (ed. 2.0) | PD IEC TS 60870-5-7:2025 (English) | Obtained 2026-11-11; `sec` checked against it, gaps in SECURITY.md. IEC 62351-5:2023, to which it delegates algorithms and procedures, is not held. |
-| IEC 60870-5-104 | 2000 (ed. 1) | GOST R IEC 60870-5-104-2004, "full authentic text" of IEC 60870-5-104:2000 (Russian) | Ed. 2 (2006) and Amd. 1 (2016) are not held. The IEC 104 code was written against them by go-iec104 (see docs/iec104/INTEROPERABILITY.md); differences between ed. 1 and ed. 2 are not re-verified here. |
+| IEC 60870-5-104 | 2000 (ed. 1) | GOST R IEC 60870-5-104-2004, "full authentic text" of IEC 60870-5-104:2000 (Russian) | `iec104/apci`, `iec104/internal/link`, `iec104/client`, `iec104/server` and `asdu` as 104 uses it checked clause by clause against it on 2026-11-11 (docs/iec104/INTEROPERABILITY.md); five deviations fixed. Ed. 2 (2006) and Amd. 1 (2016) are not held: the code was written against ed. 2 by go-iec104, and what ed. 2 adds or changes (STOPDT con after acknowledgement, redundancy clause 10, type 127) is marked "ed. 2 behaviour, not verifiable from the held text". |
 
 Everything else below is **not held**. Behaviour that depends on it is
 marked "interpretation" and rests on the extracts quoted by the held texts,
@@ -33,11 +33,11 @@ interoperability results.
 | IEC 60870-5-2 | Link transmission procedures | unbalanced and balanced (`link`) | no (profiled by 101 cl. 6.2, both modes, and 103 cl. 6.2-6.3) | 101 cl. 6.2 and figures 5-9; 103 cl. 6.2, 6.3 |
 | IEC 60870-5-3 | General structure of application data | via the ASDU codecs | no | 101/104 ASDU layout as implemented by go-iec104; 103 cl. 7.1 |
 | IEC 60870-5-4 | Application information elements | `cp` time tags; elements in `asdu` | no | 103 cl. 7.2 (CP32Time2a, CP56Time2a definitions); go-iec104 for the rest |
-| IEC 60870-5-5 | Basic application functions | station initialization, interrogation, read, clock sync, commands, counters, test, file transfer (104) | no | 104 cl. 9 (held, ed. 1); 103 cl. 7.4 |
+| IEC 60870-5-5 | Basic application functions | station initialization, interrogation, read, clock sync, commands, counters, test, file transfer (104) | no | 104 cl. 7 and 9 (held, ed. 1); 103 cl. 7.4 |
 | IEC 60870-5-101 (2003 + Amd. 1 2015) | Telecontrol, serial | implemented (`iec101`) | **2003 yes**, Amd. 1 no | checked against the 2003 text; open deviations in LIMITATIONS.md |
 | IEC 60870-5-102 (1996) | Integrated totals | implemented (`iec102`, `iec102/client`, `iec102/server`; REE profile opt-in in `iec102/ree`) | **no** | Beckhoff TS650x manual (vendor documentation), recorded Actaris SL762B traffic, gisce/iec870ree vectors; classification in docs/iec102/INTEROPERABILITY.md |
 | IEC 60870-5-103 (1997) | Protection equipment | implemented (`iec103`); see docs/iec103/INTEROPERABILITY.md for interpretations | **yes** | clause references cite the GOST R translation's numbering, which follows the IEC text |
-| IEC 60870-5-104 (2006 + Amd. 1 2016) | Telecontrol over TCP/IP | implemented (`iec104`) | ed. 1 (2000) only | docs/iec104/INTEROPERABILITY.md; interop against five independent stacks |
+| IEC 60870-5-104 (2006 + Amd. 1 2016) | Telecontrol over TCP/IP | implemented (`iec104`) | ed. 1 (2000) only | **checked against ed. 1** clause by clause (docs/iec104/INTEROPERABILITY.md); ed. 2 differences marked, not verified; interop against five independent stacks (lib60870-C, j60870, wendy512/go-iecp5, cB-Sigma, part5) |
 | IEC 60870-5-6 | Conformance testing guidelines | not used | no | - |
 | IEC TS 60870-5-601 | Conformance test cases for 101 | not used | no | - |
 | IEC TS 60870-5-604 | Conformance test cases for 104 | not used | no | - |

@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -283,6 +284,7 @@ const (
 	classPortReuse = "Wireshark does not dissect a connection that reuses the ports of an earlier one when the recording left out the SYN (it takes the segments for retransmissions); go-iec60870-5 starts a new connection at the jump in sequence numbers"
 	classMalformed = "an ASDU whose length does not match its type identification: go-iec60870-5 refuses it whole (asdu.ErrMalformed); Wireshark shows its header"
 	classInvalidU  = "a U frame with more than one function bit: go-iec60870-5 refuses it (apci.ErrInvalidControl); Wireshark lists both functions"
+	classEmptyI    = "an I frame without ASDU: go-iec60870-5 refuses it (apci.ErrInvalidLength; IEC 60870-5-104 clause 5, an I-format APDU always contains an ASDU); Wireshark shows its control field"
 	classRawType   = "Wireshark 4.6.9 shows the information objects of this type identification as raw data; go-iec60870-5 decodes them"
 	classSecurity  = "IEC 62351-5 ASDUs (type identifications 81..87): the asdu package carries them as raw payload for package sec; Wireshark decodes the ASDU some of them wrap"
 	classRaw       = "a type identification go-iec60870-5 has no object model for (reserved types, S_IT_TC_1 = 41 of IEC 60870-5-7): carried as raw payload (asdu.ASDU.Raw); Wireshark decodes or guesses its objects"
@@ -349,6 +351,8 @@ func classify(d oracleDiff, ds []Decoded) string {
 	}
 	for _, x := range ds {
 		switch {
+		case errors.Is(x.APCIErr, apci.ErrInvalidLength) && strings.Contains(x.APCIErr.Error(), "I frame without ASDU"):
+			return classEmptyI
 		case x.APCIErr != nil:
 			return classInvalidU
 		case x.ASDUErr != nil:
@@ -424,7 +428,7 @@ var oracleExpected = map[string]struct {
 	"wireshark-issues/unknown_unknown_bad-timestamps.pcap":             {112, 1161, nil},
 	"wireshark-issues/unknown_unknown_bitstring-32.pcapng":             {10, 210, nil},
 	"wireshark-issues/unknown_unknown_counters.pcapng":                 {3, 100, nil},
-	"wireshark-issues/unknown_unknown_dissector-test-with-errors.pcap": {61, 372, map[string]int{classInvalidU: 6, classMalformed: 20}},
+	"wireshark-issues/unknown_unknown_dissector-test-with-errors.pcap": {61, 369, map[string]int{classInvalidU: 6, classEmptyI: 3, classMalformed: 20}},
 	"wireshark-issues/unknown_unknown_diverse-signals-loopback.pcap":   {86, 1155, map[string]int{classYear: 90}},
 	"wireshark-issues/unknown_unknown_general-interrogation.pcapng":    {16, 390, nil},
 	"wireshark-issues/unknown_unknown_interrogation-sample.pcap":       {4, 99, nil},

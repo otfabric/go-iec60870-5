@@ -4,8 +4,10 @@
 
 // Package interop runs black-box tests of go-iec60870-5 against independent
 // IEC 60870-5-104 implementations: MZ Automation lib60870-C, OpenMUC j60870,
-// wendy512/iec104 and, when its image is given, cB-Sigma/iec60870, packaged
-// as container images by otfabric/iec104-interop.
+// wendy512/iec104, cB-Sigma/iec60870 and pascaldekloe/part5, packaged as
+// container images by otfabric/iec60870-5-interop (its IEC 104 images,
+// container contract 2.1, which for IEC 104 is contract 1.3 of the earlier
+// iec104-interop under new names).
 //
 // Both directions are covered:
 //
@@ -21,10 +23,11 @@
 //
 // A test of contract 1.3 asks the image under test and skips a reference that
 // does not declare the feature, without failing under IEC104_REQUIRE_INTEROP:
-// an older image declares none of it, and wendy512 has no TLS station, no
-// upload station and no redundancy station.
+// an older image declares none of it, wendy512 has no TLS station, no
+// upload station and no redundancy station, and part5 has no TLS, no file
+// transfer and no redundancy at all.
 //
-// The images are the only thing shared with iec104-interop: their container
+// The images are the only thing shared with iec60870-5-interop: their container
 // contract (commands, JSON documents, exit codes) and the fixture baked into
 // them, which the tests read with "print-fixture". The scenarios, expected
 // values and assertions are owned here. The fixture-driven go-iec60870-5 station
