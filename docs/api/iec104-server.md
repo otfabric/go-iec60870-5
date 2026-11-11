@@ -250,7 +250,7 @@ type Mux struct {
 Mux is a [Handler](#type-handler) that routes ASDUs by type identification and answers what the application does not serve the way the standard prescribes:
 
   - a type without a registered handler is mirrored with cause "unknown type identification"
-  - a cause of transmission that is not valid for the type in control direction is mirrored with cause "unknown cause of transmission"
+  - a cause of transmission that is not valid for the type in control direction is mirrored with cause "unknown cause of transmission" (deactivation is valid only for the commands, interrogation, counter interrogation and parameter activation)
 
 Handlers therefore only see requests they are expected to act on. A handler that does not know the addressed object answers with [Session.Reject](#func-session-reject) and [asdu.CauseUnknownIOA](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#CauseUnknownIOA).
 

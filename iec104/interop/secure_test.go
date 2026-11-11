@@ -331,7 +331,7 @@ func TestSecureServer(t *testing.T) {
 
 // transport is the key material of the TLS tests, made when the test runs and
 // written to a directory the reference containers mount at /secrets: what
-// make_identities of iec104-interop makes, on secp256r1, the keys in PKCS #8.
+// make_identities of iec60870-5-interop makes, on secp256r1, the keys in PKCS #8.
 type transport struct {
 	dir                   string
 	authority, otherCA    *x509.CertPool

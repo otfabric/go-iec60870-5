@@ -510,12 +510,13 @@ errors, protocol violations) and is covered by the scripted-peer tests of
 
 ## Interop tests
 
-The `interop` package tests go-iec104 against four independent
+The `interop` package tests the IEC 104 packages against five independent
 implementations, [MZ Automation lib60870-C](https://github.com/mz-automation/lib60870),
 [OpenMUC j60870](https://www.openmuc.org/iec-60870-5-104/),
-[wendy512/iec104](https://github.com/wendy512/iec104) on its engine go-iecp5
-and [cB-Sigma/iec60870](https://github.com/cB-Sigma/iec60870),
-packaged as container images by [otfabric/iec104-interop](https://github.com/otfabric/iec104-interop).
+[wendy512/iec104](https://github.com/wendy512/iec104) on its engine go-iecp5,
+[cB-Sigma/iec60870](https://github.com/cB-Sigma/iec60870) and
+[pascaldekloe/part5](https://github.com/pascaldekloe/part5),
+packaged as container images by [otfabric/iec60870-5-interop](https://github.com/otfabric/iec60870-5-interop).
 
 ```sh
 make interop    # needs Docker; about four minutes
@@ -526,19 +527,22 @@ make interop    # needs Docker; about four minutes
 | go-iec104 client → reference servers | File download with the content the fixture defines. Interrogation, counter interrogation and read return the fixture value by value; every command type with and without time tag, select-before-operate and deactivation; refusals (unknown type, cause, common address, object); STARTDT/STOPDT cycles; `k = w = 1`; the idle test in both directions; reconnect after a station restart; concurrent sessions; a redundancy group across two stacks with failover and switchover |
 | reference clients → go-iec104 server | 34 scenarios per client, file download among them. Each must have the outcome the standard prescribes, and the client's complete result (every ASDU, in order, field by field) must equal what it gets from the reference server of its own stack; an event queue delivered and acknowledged |
 
-The images are the only thing shared with iec104-interop; nothing of it is
+The images are the only thing shared with iec60870-5-interop; nothing of it is
 cloned or built here. Scenarios, expected values and assertions live in this
 repository.
 
-This version is qualified against
-[iec104-interop v0.5.0](https://github.com/otfabric/iec104-interop/releases/tag/v0.5.0)
-(lib60870-C v2.4.1, j60870 1.8.0, wendy512/iec104 v1.0.4 on go-iecp5
-v1.2.6, cB-Sigma/iec60870 v0.3.0). The four images are pinned by digest in
-`interop/harness.go`, the Makefile and the Interop workflow, which runs on
-every push and pull request. To test against another build, set
+This version is qualified against the IEC 104 images of
+[iec60870-5-interop v0.2.1](https://github.com/otfabric/iec60870-5-interop/releases/tag/v0.2.1)
+(container contract 2.1, for IEC 104 contract 1.3 of the earlier
+iec104-interop under new names; lib60870-C v2.4.1, j60870 1.8.0,
+wendy512/iec104 v1.0.4 on go-iecp5 v1.2.6, cB-Sigma/iec60870 v0.3.0,
+pascaldekloe/part5 v0.3.0). The five images are pinned by digest in
+`iec104/interop/harness.go`, the Makefile and the Interop workflow, which
+runs on every push and pull request. To test against another build, set
 `IEC104_INTEROP_LIB60870_IMAGE`, `IEC104_INTEROP_OPENMUC_IMAGE`,
-`IEC104_INTEROP_WENDY512_IMAGE` or `IEC104_INTEROP_CBSIGMA_IMAGE`; to run
-one stack only, `IEC104_INTEROP_ADAPTERS=lib60870`.
+`IEC104_INTEROP_WENDY512_IMAGE`, `IEC104_INTEROP_CBSIGMA_IMAGE` or
+`IEC104_INTEROP_PART5_IMAGE`; to run one stack only,
+`IEC104_INTEROP_ADAPTERS=lib60870`.
 
 The Self-interop workflow, run by hand, runs a commit against the latest
 published go-iec104 (`iec104-interop-otfabric:latest`). It finds a change on the
@@ -583,13 +587,13 @@ image lacks:
   broadcast key, no IEC 62351-8 tokens, no secp256k1, X448 or brainpool.
   See [SECURITY.md](../../SECURITY.md)#application-layer-security-iec-62351-5).
 - **File transfer** covers download, upload and the directory, tested
-  against the pinned references of iec104-interop v0.5.0
+  against the pinned references of iec60870-5-interop v0.2.1
   ([details](INTEROPERABILITY.md)#verification-status)). File deletion and the
   query log have their types in the codec but no procedure.
 - **The event queue is in memory.** It survives a control centre that is
   away, not a restart of the station.
-- **Verified against four third-party stacks**, lib60870-C, j60870,
-  wendy512/iec104 and cB-Sigma/iec60870, the last also for IEC 62351-5 (see
+- **Verified against five third-party stacks**, lib60870-C, j60870,
+  wendy512/iec104, cB-Sigma/iec60870 and part5, cB-Sigma also for IEC 62351-5 (see
   [Interop tests](#interop-tests)), and replayed against recorded traffic of
   other software (QTester104, IEC TestServer, CERT.LV's test traces;
   [testdata/captures](../../iec104/testdata/captures/README.md)); not against certified

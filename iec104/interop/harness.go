@@ -21,36 +21,44 @@ import (
 )
 
 // adapter is one reference implementation, as a container image that follows
-// the iec104-interop container contract.
+// the container contract of iec60870-5-interop (2.1; for IEC 104 it is
+// contract 1.3 of iec104-interop under new names).
 type adapter struct {
 	name  string
 	image string
 }
 
 // The reference images this version of go-iec60870-5 is qualified against:
-// otfabric/iec104-interop v0.5.0 (lib60870-C v2.4.1, OpenMUC j60870 1.8.0,
-// wendy512/iec104 v1.0.4 on go-iecp5 v1.2.6, cB-Sigma/iec60870 v0.3.0 with
-// IEC 62351-5), pinned by digest so that a run is reproducible. Moving to
-// another release of iec104-interop means changing these constants, and the
-// Makefile and the interop workflow follow.
+// the IEC 104 images of otfabric/iec60870-5-interop v0.2.1 (lib60870-C
+// v2.4.1, OpenMUC j60870 1.8.0, wendy512/iec104 v1.0.4 on go-iecp5 v1.2.6,
+// cB-Sigma/iec60870 v0.3.0 with IEC 62351-5, pascaldekloe/part5 v0.3.0),
+// pinned by digest so that a run is reproducible (the digests are those of
+// the release's manifest.json). Moving to another release means changing
+// these constants, and the Makefile and the interop workflow follow.
 const (
-	interopRelease       = "v0.5.0"
-	defaultLib60870Image = "ghcr.io/otfabric/iec104-interop-lib60870@sha256:c1f0cc95e39316df8c182b887b933e0488c92845fedade00605aedc816a0af9a"
-	defaultOpenMUCImage  = "ghcr.io/otfabric/iec104-interop-openmuc@sha256:319061ebfddd5bd87893dc87d065ab091c8ac9f2a2f3ce57838b5b7c9663766f"
-	defaultWendy512Image = "ghcr.io/otfabric/iec104-interop-wendy512@sha256:8b8c9314ceef122d29ff1bd56b98a971c3dc0585522d8b81586d99119297c397"
-	defaultCBSigmaImage  = "ghcr.io/otfabric/iec104-interop-cbsigma@sha256:43e8e0db63fe3ab49ccca659e1ade8bcced43b916ba2fca161b03cc35aa779a8"
+	interopRelease       = "v0.2.1"
+	interopStandard      = "iec60870-5-104"
+	defaultLib60870Image = "ghcr.io/otfabric/iec60870-5-interop-iec104-lib60870@sha256:ab197fc2d1d395b7a8acc002ccd77be8bdef77ad5f53b63bb5123b4e62ac2fe1"
+	defaultOpenMUCImage  = "ghcr.io/otfabric/iec60870-5-interop-iec104-openmuc@sha256:62fc29e6b48ae42bbfdb0c77944c46dee13e70c132801bac2558cbd207fe1b7b"
+	defaultWendy512Image = "ghcr.io/otfabric/iec60870-5-interop-iec104-wendy512@sha256:6ba78301e4467ad2e53e82cbef1e4227f7d1b8fe8d32438f749dad09937b451f"
+	defaultCBSigmaImage  = "ghcr.io/otfabric/iec60870-5-interop-iec104-cbsigma@sha256:36ec51fcb7d51f8bc773f037bf407ed23e19036d5b33ba5eadfca4adbf565ab6"
+	defaultPart5Image    = "ghcr.io/otfabric/iec60870-5-interop-iec104-part5@sha256:38d6c613af07f60e18c57d3ff5d97ef3d3f83223ba551f9d909969755469a53e"
+
+	// readyFile is the readiness file of a server container (contract 2.0).
+	readyFile = "/run/iec60870-5-interop/ready"
 )
 
 // adapters returns the reference implementations to test against. The image
 // of each can be overridden, for example to try a local build or a candidate:
 //
 //	IEC104_INTEROP_LIB60870_IMAGE, IEC104_INTEROP_OPENMUC_IMAGE,
-//	IEC104_INTEROP_WENDY512_IMAGE, IEC104_INTEROP_CBSIGMA_IMAGE
+//	IEC104_INTEROP_WENDY512_IMAGE, IEC104_INTEROP_CBSIGMA_IMAGE,
+//	IEC104_INTEROP_PART5_IMAGE
 //
 // An adapter whose image is set to the empty string is left out.
 // IEC104_INTEROP_ADAPTERS restricts the run to a comma-separated subset.
 //
-// otfabric is go-iec60870-5 itself, as published by otfabric/iec104-interop. It is
+// otfabric is OT Fabric's own stack, as published by an interop harness. It is
 // not a reference: it runs only when IEC104_INTEROP_OTFABRIC_IMAGE names an
 // image, and what it shows is compatibility between releases of this library,
 // not independent verification.
@@ -64,6 +72,7 @@ func adapters(t testing.TB) []adapter {
 		{"openmuc", getenv("IEC104_INTEROP_OPENMUC_IMAGE", defaultOpenMUCImage)},
 		{"wendy512", getenv("IEC104_INTEROP_WENDY512_IMAGE", defaultWendy512Image)},
 		{"cbsigma", getenv("IEC104_INTEROP_CBSIGMA_IMAGE", defaultCBSigmaImage)},
+		{"part5", getenv("IEC104_INTEROP_PART5_IMAGE", defaultPart5Image)},
 		{"otfabric", os.Getenv("IEC104_INTEROP_OTFABRIC_IMAGE")},
 	}
 	only := os.Getenv("IEC104_INTEROP_ADAPTERS")
@@ -112,7 +121,10 @@ func getenv(key, def string) string {
 // capabilities is the document "print-capabilities" prints.
 type capabilities struct {
 	AdapterVersion string `json:"adapterVersion"`
-	Upstream       struct {
+	// Standard is "iec60870-5-104" for an IEC 104 image (contract 2.0);
+	// images of iec104-interop do not state it.
+	Standard string `json:"standard"`
+	Upstream struct {
 		Name    string `json:"name"`
 		Version string `json:"version"`
 	} `json:"upstream"`
@@ -166,7 +178,8 @@ const (
 // knownReadBug reports whether a is built on j60870 1.8.0, which cannot
 // decode a read command (C_RD_NA_1) and closes the connection when it
 // receives one: as a station on any read, as a controlling station when a
-// read is refused. iec104-interop lists the same bug in tests/known-bugs.tsv.
+// read is refused. iec60870-5-interop lists the same bug in
+// tests/iec104/known-bugs.tsv.
 func (a adapter) knownReadBug(t testing.TB) bool {
 	t.Helper()
 	caps := a.capabilities(t)
@@ -175,8 +188,8 @@ func (a adapter) knownReadBug(t testing.TB) bool {
 
 // has reports whether the image declares a feature. A feature an image does
 // not mention is one it does not have, except dataTransferEvents: the
-// images of iec104-interop v0.1.0, released before that feature was named,
-// all report those events.
+// images of iec104-interop v0.1.0 (the predecessor of iec60870-5-interop),
+// released before that feature was named, all report those events.
 func (a adapter) has(t testing.TB, feature string) bool {
 	t.Helper()
 	v, known := a.capabilities(t).Features[feature]
@@ -275,7 +288,7 @@ func (s *refServer) waitReady(t testing.TB) {
 	t.Helper()
 	deadline := time.Now().Add(60 * time.Second)
 	for {
-		if _, _, err := docker("exec", s.name, "test", "-f", "/run/iec104-interop/ready"); err == nil {
+		if _, _, err := docker("exec", s.name, "test", "-f", readyFile); err == nil {
 			return
 		}
 		if state, _, _ := docker("inspect", "--format", "{{.State.Status}}", s.name); strings.TrimSpace(state) != "running" {
@@ -340,7 +353,7 @@ func (s *refServer) waitEvent(t testing.TB, what string, match func(event) bool)
 }
 
 // result is the document a reference client prints: see the container
-// contract of iec104-interop.
+// contract of iec60870-5-interop.
 type result struct {
 	OK         bool   `json:"ok"`
 	Operation  string `json:"operation"`
@@ -580,10 +593,14 @@ func logReference(t testing.TB, a adapter) {
 	if !caps.Roles.Server || !caps.Roles.Client {
 		t.Fatalf("%s does not provide both roles", a.image)
 	}
-	t.Logf("%s: iec104-interop %s, %s %s (%s)", a.name, caps.AdapterVersion, caps.Upstream.Name, caps.Upstream.Version, a.image)
-	if a.image == defaultLib60870Image || a.image == defaultOpenMUCImage || a.image == defaultWendy512Image || a.image == defaultCBSigmaImage {
+	t.Logf("%s: iec60870-5-interop %s, %s %s (%s)", a.name, caps.AdapterVersion, caps.Upstream.Name, caps.Upstream.Version, a.image)
+	switch a.image {
+	case defaultLib60870Image, defaultOpenMUCImage, defaultWendy512Image, defaultCBSigmaImage, defaultPart5Image:
 		if caps.AdapterVersion != interopRelease {
-			t.Errorf("%s is pinned as iec104-interop %s but reports %s", a.name, interopRelease, caps.AdapterVersion)
+			t.Errorf("%s is pinned as iec60870-5-interop %s but reports %s", a.name, interopRelease, caps.AdapterVersion)
+		}
+		if caps.Standard != interopStandard {
+			t.Errorf("%s is pinned as an IEC 104 image but states the standard %q", a.name, caps.Standard)
 		}
 	}
 }
