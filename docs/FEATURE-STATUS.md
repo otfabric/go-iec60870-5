@@ -26,7 +26,7 @@ library against itself), **independent** (pinned reference images),
 | TLS (IEC 62351-3) | n/a | n/a | n/a | yes: independent |
 | IEC 62351-5 / TS 60870-5-7 | no | n/a | n/a | yes: independent (cB-Sigma); statistics reports, FILEMNGT and MONITOR DATA: unit and e2e |
 | Redundancy (104 cl. 10) | n/a | n/a | n/a | yes: independent |
-| Protection functions: GI, time sync, general commands, generic services, disturbance transfer | n/a | n/a | yes: e2e; independent for GI, time sync, general commands and class 2 measurands (server, 4 client stacks) | n/a |
+| Protection functions: GI, time sync, general commands, generic services, disturbance transfer | n/a | n/a | yes: e2e; independent for GI, time sync, general commands and class 2 measurands (server, 4 client stacks); disturbance transfer: independent for the server's procedure (clause 7.4.7, figure 10), ASDU 23 after the GI, ASDU 26 and 27 descriptions and the tags with their positions (Open103 client; its channel values are a known bug of Open103, `open103-asdu30-nfe`); generic services and the disturbance list: no conforming independent peer (vitusdong uses INF 0 for every generic ASDU and its own disturbance procedure; known bugs, iec60870-5-interop contract 2.3) | n/a |
 | Fuzzed decoders | ft12, asdu, cp | iec102 | iec103 | apci, asdu, sec, e2e |
 | Fuzzed protocol machines | link (secondary, balanced, primary), telecontrol dispatch, client and server receive paths | link, server, client answers | link, server dispatch, client receive | link, server stream |
 | Hostile peer and chaos (faulty line) | yes: e2e, unbalanced and balanced | yes: e2e | yes: e2e | yes: e2e |

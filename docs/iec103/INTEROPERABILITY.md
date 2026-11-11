@@ -13,24 +13,29 @@ IEC 60870-5-103-2005.
 | annex | the octet example of annex B, encoded and decoded |
 | e2e | `iec103/client` against `iec103/server` over `net.Pipe`, also over a line that drops frames, or one of the two against a bare `link.Primary`, a scripted handler or a hostile raw peer, and both over a faulty line (`iec103/e2e`) |
 | fuzz | `FuzzDecode` in `iec103`: decode, encode, decode, encode is stable; `server.FuzzDispatch` and `client.FuzzReceive` for the stations' receive paths |
-| independent | a passing run against an independent implementation: the reference images of otfabric/iec60870-5-interop (v0.3.0, contract 2.2), `make interop-iec103` ([below](#independent-implementations)) |
+| independent | a passing run against an independent implementation: the reference images of otfabric/iec60870-5-interop (contract 2.3, local `:dev` images of its branch feat/iec103-generic-disturbance until the release; v0.3.0 and contract 2.2 for the rest), `make interop-iec103` ([below](#independent-implementations)) |
 | recorded | frames of other implementations captured by others ([iec103/testdata/captures](../../iec103/testdata/captures/README.md)): three SEL RTAC serial-line excerpts (level B) decoded, re-encoded byte for byte and compared with Wireshark; not replayed against the client or server |
 
 ## Independent implementations
 
 `iec103/interop` (build tag `interop`, `make interop-iec103`) runs this
 module against the IEC 103 images of otfabric/iec60870-5-interop
-(v0.3.0, contract 2.2; images pinned by digest in
-`iec103/interop/harness.go`). Expected outcomes are the
+(contract 2.3: for now the `:dev` images built from its branch
+feat/iec103-generic-disturbance, to be pinned by digest in
+`iec103/interop/harness.go` after its release; the v0.3.0 digests of
+contract 2.2 are kept there in a comment). Expected outcomes are the
 harness's own: its case table (`testdata/cases.tsv`), its value and
 session checks (`scripts/interop-iec103.sh`) and the fixture the images
-print; known bugs of the references are skipped with their id, never
-counted as passes.
+print; known bugs of the references (`testdata/known-bugs.tsv` and
+`testdata/known-bugs-consumer.tsv`, the bugs no harness pairing shows) are
+skipped with their id, never counted as passes.
 
 | Direction | References | Result (2026-11-11, linux/arm64 images) |
 |---|---|---|
 | reference client against `iec103/server` | vitusdong/iec103-dotnet v0.1.0, masarray/ARIEC103 v1.2.31-3-gec08dd7, XVincentX/Open103 887ff5a5, riclolsen/go-iecp5 v0.4.7 | 9 cases × 4 clients and 6 value/session checks × 4: 53 pass, 0 fail, 7 skipped (6 known client differences, all ARIEC103: 5 `ariec103-command-no-rii`, 1 `ariec103-clock-sync-cp32`; 1 feature the client does not declare: vitusdong measurands). Per client: goiecp5 15/15, Open103 15/15, vitusdong 14 + 1 undeclared, ARIEC103 9 + 6 known |
 | `iec103/client` against a reference server | vitusdong/iec103-dotnet v0.1.0 (the only reference server) | 4 pass (link start-up, clock synchronization, GI termination with the scan number, an idle line of 3 s and a second synchronization), 4 skipped as known server bugs (identification, GI answers, command, refused command) |
+| contract 2.3, reference client against `iec103/server` (2026-11-11, linux/arm64, `:dev` images) | vitusdong (generic services, list, transfer), Open103 (transfer); ARIEC103 and go-iecp5 have neither | 7 cases × the clients that declare them and 5 value checks: Open103 `case.disturbance-transfer` pass, `values.disturbance-transfer` description, tags and channel ratings pass, its values a known bug (`open103-asdu30-nfe`); vitusdong `case.disturbance-list` pass, its list values a known bug (`vitusdong-sof-bits`), the 5 generic cases, the transfer and 3 value checks known bugs (`vitusdong-generic-command-inf`, `vitusdong-disturbance-procedure`) |
+| contract 2.3, `iec103/client` against a reference server | vitusdong | generic read, generic write and the list: known server bugs (`vitusdong-generic-answer-inf`, `vitusdong-disturbance-list-asdu23`), asserted on the octets; the transfer skipped (vitusdong cannot serve the fixture's records: `disturbanceDataServer` false) |
 
 The server side has the real evidence: four independent clients (three
 independent engines in C#, C++ and Go, and vitusdong, whose test oracle is
@@ -61,9 +66,39 @@ is not the standard's; the suite asserts the octets and skips. What the
 client shows against vitusdong: link start-up, addressed clock
 synchronization, the GI termination with the scan number, an idle line.
 
-Not exercised by any reference: ASDU 2, 4, 10, 11, 21, 23 to 31 (generic
-services, disturbance data: contract 2.2 lists them as capabilities but
-defines no client operation for them), broadcast synchronization (the
+Generic services and disturbance data (contract 2.3). Of the four
+references, two have them (the harness's docs/CAPABILITIES.md cites the
+sources): vitusdong as master and slave of both (but with INF 0 in every
+generic ASDU and a disturbance procedure of its own), Open103 as master of
+the disturbance data only; ARIEC103 and go-iecp5 have neither (go-iecp5
+names the type identifications only). Open103's control system ran the
+whole procedure of clause 7.4.7 against this module's server: it took the
+ASDU 23 the server sends after the GI, selected FAN 7 (ASDU 24 TOO 1), got
+ASDU 26 and requested the data (TOO 2), got ASDU 28 and requested the tags
+(TOO 16), got the ASDUs 29 and the end of the tags and acknowledged them
+(ASDU 25 TOO 68), got each channel offered (ASDU 27), requested it (TOO 8),
+got its ASDUs 30 and the end of the channel and acknowledged it (TOO 66),
+and after the end of the disturbance data acknowledged it (TOO 64). What it
+decoded matches the fixture for the description (FAN, NOC, NOE, INT, the
+time of the first value), the four tags with their positions and the
+ratings of both channels; of the values only the first ASDU 30 of channel 1
+is where it belongs, because Open103 reads NFE through an unpacked struct
+(known bug `open103-asdu30-nfe`; it stores the first ASDU's 25 values at
+0..24, which also shows it numbers the values from 0, as this module does).
+So the server's procedure, ASDUs 23, 26 to 29 and 31, and the layout of ASDU
+30 apart from NFE are independently evidenced; NFE and the values are not.
+The generic services and the disturbance list have no conforming
+independent peer: vitusdong's client and server use INF 0 (the client's
+ASDU 21 and 10 go unanswered, its server's ASDU 10 do not match the
+command), its ASDU 23 has VSQ 81, FUN 255 and TP in bit 8, its client reads
+SOF from bits 8 to 5 and acknowledges the whole transfer (TOO 64) right
+after ASDU 26. This module's client side of both functions is evidenced by
+no reference.
+
+Not exercised by any reference: ASDU 2, 4, 11, the general interrogation of
+generic data, reads of headings, groups and directories, writes with
+confirmation or abort, aborts of a disturbance transfer, the client's
+disturbance transfer, broadcast synchronization (the
 contract has `clock-sync --broadcast`, the case table no case with it),
 test mode, DFC.
 The client's reception of the cause 12 report has no reference server that
@@ -123,8 +158,8 @@ sends it (vitusdong does not).
 | 7.4.4 | general command with RII; acknowledgement ASDU 1 cause 20/21 with SIN = RII; change of state with cause 12; one command at a time | `Command` (`ErrBusy`) | `AckCommand`, `Event`; refuses a second command before the first is acknowledged | e2e (`TestCommands`), independent (server: acknowledgement 20/21 with SIN = RII for vitusdong, Open103, go-iecp5; cause 12 after the acknowledgement for vitusdong, Open103, go-iecp5; client: none, vitusdong's acknowledgement is a known bug) |
 | 7.4.5 | test mode (cause 7) | cause delivered to the handler | not a feature: the application sends INF 21 and cause 7 | e2e (`TestTestModeAndBlocking`, application-driven) |
 | 7.4.6 | monitor direction blocked | - | not a feature: the application sends INF 20 and answers a GI with its termination only | e2e (`TestTestModeAndBlocking`, application-driven) |
-| 7.4.7 | disturbance data: list, select, data, tags, channels, acknowledgements, end, updated list | `DisturbanceList`, `Disturbance` (NFE/NOE check, initial tags at position 0, NOC check, negative ack) | built in from a `DisturbanceSource` | e2e (`TestDisturbanceTransfer`, `TestDisturbanceIncomplete`, `TestDisturbanceOrders`, `TestDisturbanceClientAcks`, lossy line) |
-| 7.4.7 | ASDU 23 after the start of a GI (cause 31) and after a completed or aborted transfer | - | list with the function type of the equipment after the GI termination, after the final acknowledgement and after TOO 33/34 | e2e (`TestListAfterGIHasEquipmentFun`, `TestDisturbanceAbortByEquipment`) |
+| 7.4.7 | disturbance data: list, select, data, tags, channels, acknowledgements, end, updated list | `DisturbanceList`, `Disturbance` (NFE/NOE check, initial tags at position 0, NOC check, negative ack) | built in from a `DisturbanceSource` | e2e (`TestDisturbanceTransfer`, `TestDisturbanceIncomplete`, `TestDisturbanceOrders`, `TestDisturbanceClientAcks`, lossy line), independent (server: the whole procedure with Open103, description, tags and ratings as the fixture; the values not, Open103 known bug; client: none) |
+| 7.4.7 | ASDU 23 after the start of a GI (cause 31) and after a completed or aborted transfer | - | list with the function type of the equipment after the GI termination, after the final acknowledgement and after TOO 33/34 | e2e (`TestListAfterGIHasEquipmentFun`, `TestDisturbanceAbortByEquipment`), independent (after the GI: Open103 starts its transfer from it) |
 | 7.4.7 | abortion by the control system (TOO 3, 9, 17) | not sent | answered with TOO 33, 36, 39 | e2e (`TestDisturbanceOrders`) |
 | 7.4.7 | abortion by the equipment (TOO 34, 37, 40); every ASDU 31 acknowledged | ASDU 25 TOO 65, 67, 69; after 37 and 40 the transfer goes on, 34 ends it (`ErrAborted`) | TOO 34 for implausible orders ends the transfer and the list follows; the selection of a record whose NOC (> 255) or NOE (> 65535) does not fit its field is answered with TOO 34; TOO 37 for an unknown channel | e2e (`TestDisturbanceClientAcks`, `TestDisturbanceAbortByEquipment`, `TestDisturbanceTooLarge`) |
 | 7.4.8.5 | read headings (240), read group (241) | `ReadHeadings`, `ReadGroup` | `GenericAnswer` | annex, e2e |
@@ -173,6 +208,11 @@ the code.
 11. **Write abort over several ASDUs** (7.4.8.6.3): `GenericWrite` with
     INF 251 and data sets sends them with INF 248 and the 251 last, as for
     250; figure 17 shows only 250.
+12. **Numbering of the disturbance values** (7.2.6.9, 7.2.6.25): NFE
+    counts the values of a channel from 0, as TAP counts the tag positions
+    ("the position of the first tag is zero"). Open103 stores the values of
+    an ASDU 30 at NFE onwards from 0 (seen in the interop run); vitusdong
+    numbers them from 1 (its source; no run reaches that point).
 
 ## Not implemented
 

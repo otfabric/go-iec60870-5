@@ -275,6 +275,134 @@ func clientScenario(t *testing.T, a adapter, f *fixture) {
 		knownDifference(t, serverBug(t, a, "command --fun 160 --inf 18"), fmt.Sprintf("% X", raw))
 	})
 
+	// Contract 2.3: the generic services (clause 7.4.8) and the
+	// transmission of disturbance data (clause 7.4.7), where the reference
+	// server declares them, checked against the fixture.
+	t.Run("generic read", func(t *testing.T) {
+		if !a.caps.Features["genericServices"] {
+			t.Skip("server feature genericServices not declared")
+		}
+		// Clause 7.4.8.6.2: ASDU 21, INF 244, answered by ASDU 10 with INF
+		// 244, cause 42, the RII, the entry's GDD and value.
+		for _, g := range f.Generic {
+			n := w.count()
+			rctx, rcancel := context.WithTimeout(ctx, 5*time.Second)
+			res, err := c.ReadEntry(rctx, g.gin(), iec103.KODActualValue)
+			rcancel()
+			if err == nil && len(res.Sets) == 1 && res.Cause == iec103.CauseGenericReadValid {
+				v := res.Sets[0].Value
+				want := g.actual()
+				if v.Type != want.Type || v.Size != want.Size || v.Number != 1 || fmt.Sprint(normalize(valuesOf(v))) != fmt.Sprint(normalize([]any{g.want()})) {
+					t.Errorf("GIN %s: %+v %v, want %+v %v", g.gin(), v.GDD, valuesOf(v), want.GDD, g.want())
+				}
+				continue
+			}
+			asdus, _ := w.since(n)
+			raw := find(asdus, iec103.TypeGenericData, iec103.CauseGenericReadValid)
+			if raw == nil || iec103.InfoNumber(raw[5]) == iec103.InfReadEntry {
+				t.Fatalf("GIN %s: %v %+v; wire %X", g.gin(), err, res, asdus)
+			}
+			knownDifference(t, serverBug(t, a, "generic-read"), fmt.Sprintf("% X", raw))
+		}
+	})
+
+	t.Run("generic write", func(t *testing.T) {
+		if !a.caps.Features["genericServices"] {
+			t.Skip("server feature genericServices not declared")
+		}
+		// Clause 7.4.8.6.3, figure 17: ASDU 10, cause 40, INF 250, answered
+		// by ASDU 10, cause 40, INF 250, the RII; 1.2 is writable.
+		n := w.count()
+		wctx, wcancel := context.WithTimeout(ctx, 5*time.Second)
+		defer wcancel()
+		res, err := c.GenericWrite(wctx, iec103.InfWriteExecute,
+			iec103.DataSet{GIN: iec103.GIN{Group: 1, Entry: 2}, KOD: iec103.KODActualValue, Value: iec103.Float32s(2.25)})
+		if err == nil && res.Cause == iec103.CauseGenericWriteAck {
+			r, err := c.ReadEntry(wctx, iec103.GIN{Group: 1, Entry: 2}, iec103.KODActualValue)
+			if err != nil || len(r.Sets) != 1 {
+				t.Fatalf("read after write: %v %+v", err, r)
+			}
+			if f, _ := r.Sets[0].Value.Float(0); f != 2.25 {
+				t.Errorf("read after write: %v", f)
+			}
+			return
+		}
+		asdus, _ := w.since(n)
+		raw := find(asdus, iec103.TypeGenericData, 0)
+		if raw == nil || iec103.InfoNumber(raw[5]) == iec103.InfWriteExecute {
+			t.Fatalf("%v %+v; wire %X", err, res, asdus)
+		}
+		knownDifference(t, serverBug(t, a, "generic-write"), fmt.Sprintf("% X", raw))
+	})
+
+	t.Run("disturbance list", func(t *testing.T) {
+		if !a.caps.Features["disturbanceList"] {
+			t.Skip("server feature disturbanceList not declared")
+		}
+		// Clause 7.4.7, 7.3.1.11: ASDU 24 with TOO 24 is answered by ASDU
+		// 23, cause 31, the function type of the equipment, VSQ SQ = 0 and
+		// the number of faults, FAN, SOF and the time of each.
+		fun := iec103.FunctionType(f.Station.Identification.Fun)
+		n := w.count()
+		lctx, lcancel := context.WithTimeout(ctx, 5*time.Second)
+		defer lcancel()
+		faults, err := c.DisturbanceList(lctx, fun)
+		if err == nil {
+			got := []faultDoc{}
+			for _, x := range faults {
+				d := faultDoc{FAN: int(x.FAN), Time: x.Time.UTC().Format("2006-01-02T15:04:05.000Z")}
+				d.SOF.TP, d.SOF.TM, d.SOF.Test, d.SOF.OTEV = x.SOF&iec103.SOFTrip != 0, x.SOF&iec103.SOFTM != 0, x.SOF&iec103.SOFTest != 0, x.SOF&iec103.SOFOTEV != 0
+				got = append(got, d)
+			}
+			want := []faultDoc{}
+			for _, d := range f.Disturbances {
+				x := faultDoc{FAN: d.FAN, Time: d.Time}
+				x.SOF.TP, x.SOF.TM, x.SOF.Test, x.SOF.OTEV = d.SOF.TP, d.SOF.TM, d.SOF.Test, d.SOF.OTEV
+				want = append(want, x)
+			}
+			if fmt.Sprint(got) == fmt.Sprint(want) {
+				return
+			}
+			asdus, _ := w.since(n)
+			knownDifference(t, serverBug(t, a, "disturbance-list"), fmt.Sprintf("%+v, want %+v; % X", got, want, find(asdus, iec103.TypeDisturbanceList, 0)))
+		}
+		asdus, _ := w.since(n)
+		raw := find(asdus, iec103.TypeDisturbanceList, iec103.CauseDisturbanceData)
+		if raw == nil {
+			t.Fatalf("no ASDU 23: %v; wire %X", err, asdus)
+		}
+		knownDifference(t, serverBug(t, a, "disturbance-list"), fmt.Sprintf("%v: % X", err, raw))
+	})
+
+	t.Run("disturbance transfer", func(t *testing.T) {
+		if !a.caps.Features["disturbanceDataServer"] {
+			t.Skip("server feature disturbanceDataServer not declared")
+		}
+		d := f.Disturbances[0]
+		tctx, tcancel := context.WithTimeout(ctx, 20*time.Second)
+		defer tcancel()
+		rec, err := c.Disturbance(tctx, iec103.FunctionType(f.Station.Identification.Fun), uint16(d.FAN))
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := disturbanceDoc{FAN: int(rec.FAN), NOC: len(rec.Channels), Interval: int(rec.Interval), Start: rec.Start.UTC().Format("15:04:05.000")}
+		for _, x := range rec.Tags {
+			p := int(x.Pos)
+			got.Tags = append(got.Tags, tag{Pos: &p, Fun: int(x.Fun), Inf: int(x.Inf), DPI: int(x.DPI)})
+		}
+		for _, ch := range rec.Channels {
+			cd := channelDoc{ACC: int(ch.ACC), RPV: float64(ch.RPV), RSV: float64(ch.RSV), RFA: float64(ch.RFA)}
+			for _, v := range ch.Values {
+				cd.Values = append(cd.Values, int(v))
+			}
+			got.NOE = len(ch.Values)
+			got.Channels = append(got.Channels, cd)
+		}
+		if fmt.Sprint(normalize(got)) != fmt.Sprint(normalize(wantDisturbance(d))) {
+			t.Errorf("got %+v\nwant %+v", got, wantDisturbance(d))
+		}
+	})
+
 	t.Run("idle line", func(t *testing.T) {
 		time.Sleep(3 * time.Second)
 		if c.State() != iec103.StateUp {

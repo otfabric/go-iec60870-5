@@ -1,5 +1,3 @@
-# Copied from otfabric/iec60870-5-interop tests/iec103/cases.tsv at v0.3.0 (contract 2.2).
-# Refresh it with the harness version pinned in harness.go.
 # Self-test cases of IEC 60870-5-103 for scripts/interop.sh, against the
 # baseline fixture (fixtures/iec103/baseline), unbalanced, every client with
 # every server. The outcome line leaves out the identification (checked by
@@ -35,3 +33,18 @@ case.command-160-18-not-taken	ro	1	ok=false error=negative-confirmation conf=21n
 case.command-160-16-dco-3	ro	1	ok=false error=negative-confirmation conf=21n term=false asdus=time-tagged-message/21	server:generalCommand,client:generalCommand	command --fun 160 --inf 16 --dco 3 --rii 6 --collect-ms 500
 case.command-160-16-off	rw	0	ok=true error=- conf=20 term=false asdus=time-tagged-message/20,time-tagged-message/12	server:generalCommand,client:generalCommand	command --fun 160 --inf 16 --dco off --rii 42 --collect-ms 500
 case.command-160-19-on	rw	0	ok=true error=- conf=20 term=false asdus=time-tagged-message/20,time-tagged-message/12	server:generalCommand,client:generalCommand	command --fun 160 --inf 19 --dco on --rii 77 --collect-ms 500
+#
+# Contract 2.3: the generic services (clause 7.4.8) and the transmission of
+# disturbance data (clause 7.4.7), against the fixture's generic entries
+# (group 1) and its recorded disturbance FAN 7. Their outcome line leaves out
+# the ASDUs (scripts/lib.sh, SUMMARY_103); the values checks of
+# scripts/interop-iec103.sh compare what arrived with the fixture. A read of
+# an entry the device does not have is answered with cause 43, a write to an
+# entry that is not writable with cause 41 (clause 7.4.8.6).
+case.generic-read-1-3	ro	0	ok=true error=- conf=42 term=false asdus=	server:genericServices,client:genericServices	generic-read --gin 1.3
+case.generic-read-1-4-description	ro	0	ok=true error=- conf=42 term=false asdus=	server:genericServices,client:genericServices	generic-read --gin 1.4 --kod 10
+case.generic-read-not-existing	ro	1	ok=false error=negative-confirmation conf=43n term=false asdus=	server:genericServices,client:genericServices	generic-read --gin 2.1
+case.generic-write-1-3	rw	0	ok=true error=- conf=40 term=false asdus=	server:genericServices,client:genericServices	generic-write --gin 1.3 --type 3 --size 2 --value 450
+case.generic-write-read-only	ro	1	ok=false error=negative-confirmation conf=41n term=false asdus=	server:genericServices,client:genericServices	generic-write --gin 1.1 --type 3 --size 2 --value 5
+case.disturbance-list	ro	0	ok=true error=- conf= term=false asdus=	server:disturbanceList,client:disturbanceList	disturbance-list
+case.disturbance-transfer	rw	0	ok=true error=- conf= term=false asdus=	server:disturbanceDataServer,client:disturbanceData	disturbance-transfer --fan 7

@@ -29,13 +29,23 @@ import (
 	"github.com/otfabric/go-iec60870-5/iec103/server"
 )
 
-// The references: otfabric/iec60870-5-interop v0.3.0 (contract 2.2),
-// pinned by multi-arch index digest (the release's manifest.json).
+// The references: otfabric/iec60870-5-interop, contract 2.3.
+//
+// TODO: pin these by multi-arch index digest from the manifest.json of the
+// harness release that carries contract 2.3 (the generic services and the
+// transmission of disturbance data); until then they are the local images
+// built from the harness branch (make image-iec103-<stack>, tag dev). The
+// v0.3.0 digests (contract 2.2) were:
+//
+//	vitusdong sha256:a00e8ef368d96846c80223e87418b973be16d763f09211aa052ac61227f412a7
+//	ariec103  sha256:95f94fce044dff5973b8859da75063d2ff8d3f1f8a26d433705575b487771cd9
+//	open103   sha256:b632442d67ce8f247b224819308ec8c0711b91260e5ebefa0f6cc91f3327f68d
+//	goiecp5   sha256:43368aca1dd9dc2822f9fc3fced3215fa5a69ed5d5a4f41f372a9aaf273aae6a
 var stacks = []struct{ name, env, image string }{
-	{"vitusdong", "IEC103_INTEROP_VITUSDONG_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-vitusdong@sha256:a00e8ef368d96846c80223e87418b973be16d763f09211aa052ac61227f412a7"},
-	{"ariec103", "IEC103_INTEROP_ARIEC103_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-ariec103@sha256:95f94fce044dff5973b8859da75063d2ff8d3f1f8a26d433705575b487771cd9"},
-	{"open103", "IEC103_INTEROP_OPEN103_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-open103@sha256:b632442d67ce8f247b224819308ec8c0711b91260e5ebefa0f6cc91f3327f68d"},
-	{"goiecp5", "IEC103_INTEROP_GOIECP5_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-goiecp5@sha256:43368aca1dd9dc2822f9fc3fced3215fa5a69ed5d5a4f41f372a9aaf273aae6a"},
+	{"vitusdong", "IEC103_INTEROP_VITUSDONG_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-vitusdong:dev"},
+	{"ariec103", "IEC103_INTEROP_ARIEC103_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-ariec103:dev"},
+	{"open103", "IEC103_INTEROP_OPEN103_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-open103:dev"},
+	{"goiecp5", "IEC103_INTEROP_GOIECP5_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-goiecp5:dev"},
 }
 
 type adapter struct {
@@ -158,7 +168,9 @@ type fixture struct {
 		Type   int     `json:"type"`
 		Values []value `json:"values"`
 	} `json:"measurands"`
-	Commands []command `json:"commands"`
+	Commands     []command            `json:"commands"`
+	Generic      []genericEntry       `json:"generic"`
+	Disturbances []fixtureDisturbance `json:"disturbances"`
 }
 
 // command is a general command the fixture's device takes.
@@ -203,14 +215,18 @@ type station struct {
 	f  *fixture
 	ca uint8
 
-	mu  sync.Mutex
-	dpi map[funInf]iec103.DPI
+	mu      sync.Mutex
+	dpi     map[funInf]iec103.DPI
+	generic map[iec103.GIN]iec103.Value // the actual values (KOD 1)
 }
 
 func newStation(f *fixture) *station {
-	st := &station{f: f, ca: uint8(f.Station.CommonAddress), dpi: map[funInf]iec103.DPI{}}
+	st := &station{f: f, ca: uint8(f.Station.CommonAddress), dpi: map[funInf]iec103.DPI{}, generic: map[iec103.GIN]iec103.Value{}}
 	for _, ind := range f.Indications {
 		st.dpi[funInf{ind.Fun, ind.Inf}] = iec103.DPI(ind.DPI)
+	}
+	for _, g := range f.Generic {
+		st.generic[g.gin()] = g.actual()
 	}
 	return st
 }
@@ -227,6 +243,7 @@ func (st *station) config() (server.Config, error) {
 		Fun:            iec103.FunctionType(id.Fun),
 		Identification: iec103.IdentificationOf(uint8(id.Col), id.ASCII, [4]byte(sw)),
 		Handler:        st,
+		Disturbances:   st,
 		SyncDelay:      -1, // TCP, not a serial line
 	}, nil
 }
@@ -264,6 +281,10 @@ func (st *station) HandleASDU(s *server.Server, a *iec103.ASDU) {
 		if changed {
 			_ = s.Event(iec103.CauseRemoteOperation, a.Fun, a.Inf, b.DCO)
 		}
+	case iec103.GenericCommand:
+		st.genericRead(s, a, b)
+	case iec103.GenericData:
+		st.genericWrite(s, a, b)
 	}
 }
 
@@ -375,8 +396,9 @@ type object struct {
 
 // result is the client result document of the contract.
 type result struct {
-	OK    bool `json:"ok"`
-	Error *struct {
+	Operation string `json:"operation"`
+	OK        bool   `json:"ok"`
+	Error     *struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	} `json:"error"`
@@ -385,8 +407,11 @@ type result struct {
 		Cot      int  `json:"cot"`
 		Negative bool `json:"negative"`
 	} `json:"confirmations"`
-	Terminated bool `json:"terminated"`
-	ASDUs      []struct {
+	Terminated   bool            `json:"terminated"`
+	Generic      *genericDoc     `json:"generic"`
+	Disturbances []faultDoc      `json:"disturbances"`
+	Disturbance  *disturbanceDoc `json:"disturbance"`
+	ASDUs        []struct {
 		Type    string   `json:"type"`
 		TypeID  int      `json:"typeId"`
 		Cot     int      `json:"cot"`
@@ -396,7 +421,9 @@ type result struct {
 
 // summary renders a result as tests/iec103/cases.tsv states it: SUMMARY_103
 // of the harness's scripts/lib.sh, which leaves out the identification
-// (type 5) and the cyclic measurands (cause 2).
+// (type 5) and the cyclic measurands (cause 2), and for the generic
+// services and the transmission of disturbance data every ASDU (contract
+// 2.3: their content is in generic, disturbances and disturbance).
 func (r result) summary() string {
 	code := "-"
 	if r.Error != nil && r.Error.Code != "" {
@@ -410,8 +437,9 @@ func (r result) summary() string {
 		}
 		conf = append(conf, s)
 	}
+	svc := strings.HasPrefix(r.Operation, "generic-") || strings.HasPrefix(r.Operation, "disturbance-")
 	for _, a := range r.ASDUs {
-		if a.TypeID == 5 || a.Cot == 2 {
+		if a.TypeID == 5 || a.Cot == 2 || svc {
 			continue
 		}
 		typ := a.Type
@@ -502,14 +530,30 @@ type knownBug struct {
 // for a reference client against this module's server, nor a client bug
 // for this module's client against a reference server.
 var clientBugs = map[string]bool{
-	"ariec103-clock-sync-cp32":    true,
-	"ariec103-command-no-rii":     true,
-	"open103-command-typical-fun": true,
+	"ariec103-clock-sync-cp32":        true,
+	"ariec103-command-no-rii":         true,
+	"open103-command-typical-fun":     true,
+	"vitusdong-generic-command-inf":   true,
+	"vitusdong-sof-bits":              true,
+	"vitusdong-disturbance-procedure": true,
+	"open103-asdu30-nfe":              true,
 }
 
+// knownBugs reads the harness's known-bugs.tsv and known-bugs-consumer.tsv
+// (contract 2.3: the bugs seen only against a consumer's own station or
+// control system, which no harness pairing shows).
 func knownBugs(t *testing.T) []knownBug {
 	t.Helper()
-	f, err := os.Open("testdata/known-bugs.tsv")
+	var bugs []knownBug
+	for _, name := range []string{"testdata/known-bugs.tsv", "testdata/known-bugs-consumer.tsv"} {
+		bugs = append(bugs, readBugs(t, name)...)
+	}
+	return bugs
+}
+
+func readBugs(t *testing.T, name string) []knownBug {
+	t.Helper()
+	f, err := os.Open(name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -523,11 +567,11 @@ func knownBugs(t *testing.T) []knownBug {
 		}
 		col := strings.Split(line, "\t")
 		if len(col) != 6 {
-			t.Fatalf("known-bugs.tsv: %d columns in %q", len(col), line)
+			t.Fatalf("%s: %d columns in %q", name, len(col), line)
 		}
 		re, err := regexp.Compile(col[2])
 		if err != nil {
-			t.Fatalf("known-bugs.tsv: %v", err)
+			t.Fatalf("%s: %v", name, err)
 		}
 		bugs = append(bugs, knownBug{adapter: col[0], version: col[1], match: re, what: col[3], id: col[4], url: col[5]})
 	}
