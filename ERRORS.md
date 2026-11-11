@@ -24,6 +24,7 @@ companion standards add their own layers, described in
 - [Detection patterns](#detection-patterns)
 - [Serial companion standards](#serial-companion-standards)
 - [IEC 60870-5-103](#iec-60870-5-103)
+- [IEC 60870-5-102](#iec-60870-5-102)
 
 ## Quick reference
 
@@ -316,3 +317,34 @@ cause 43 is not an error: `GenericResult.Cause` reports it and the data sets
 carry the generic reply codes. Link errors (`link.ErrNack` while the
 equipment holds back commands with DFC, `link.ErrTimeout`) are returned
 wrapped.
+
+## IEC 60870-5-102
+
+### Codec (`iec102`, `iec102/ree`)
+
+| Sentinel | Meaning |
+|---|---|
+| `iec102.ErrShort` | the ASDU ends before its last field, or a time a / time b has fewer than 5 / 7 octets |
+| `iec102.ErrTrailing` | octets after the information objects of a type the codec interprets |
+| `iec102.ErrInvalid` | a field out of range: a common address size other than 1 or 2, a length that fits no layout of the type (integrated totals with or without signature, REE tariff records of 63 octets), more than 127 objects, a counter reading wider than its type, a body whose type it cannot encode; also a client helper answered by an ASDU of an unexpected type |
+| `iec102.ErrTooLong` | an ASDU longer than 253 octets, or longer than the server's link carries |
+
+A type identification without a known layout (outside the standard range
+without a profile, M_EI_NA_2, a list with SQ set) is not an error: it
+decodes as `iec102.Raw`. Neither is a refusal whose objects do not fit its
+type.
+
+### Stations (`iec102/client`, `iec102/server`)
+
+| Sentinel | Meaning |
+|---|---|
+| `iec102.ErrLinkDown` | the link could not be initialized, or the station stopped answering during a request (wraps `link.ErrTimeout` or `link.ErrClosed`) |
+| `iec102.ErrClosed` | an operation on a closed client or server, or a request in progress when the client was closed |
+| `iec102.ErrInvalidConfig` | invalid configuration: a link address size other than 1, 2 or `iec102.NoLinkAddr`, a link address that does not fit it, invalid codec parameters or `link.Config` |
+| `iec102.ErrNegative` | the station refused the request: it mirrored it with the P/N bit or a cause 13..18; the error is an `*iec102.RefusedError` with the refusal ASDU and its cause |
+| `server.ErrQueueFull` (`iec102/server`) | the class 2 queue is full |
+
+Requests wrap `context.DeadlineExceeded` when the answer is not complete
+within the context's deadline or `Config.RequestTimeout`. A NACK of the
+request (the station's input is full) is not returned: the client tries
+again after `PollInterval` until the deadline.
