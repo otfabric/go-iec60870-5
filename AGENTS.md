@@ -18,6 +18,8 @@ This repository follows **otfabric/engineering policy 1.4**, profile **protocol-
 | Packages, layering, import rules | ARCHITECTURE.md |
 | IEC 104 clause by clause, verification | docs/iec104/INTEROPERABILITY.md |
 | IEC 101 clause by clause | INTEROPERABILITY.md |
+| IEC 102 and IEC 103, sources, interpretations, interop | docs/iec102/, docs/iec103/ |
+| What is missing or only partly done | LIMITATIONS.md |
 | What came from go-iec104, parity | docs/MIGRATION_AUDIT.md, docs/IEC104_PARITY.md |
 | Next phases | docs/ROADMAP.md, PROGRESS.md |
 | Errors | ERRORS.md |
@@ -40,6 +42,8 @@ This repository follows **otfabric/engineering policy 1.4**, profile **protocol-
 | anything | `make check` |
 | a codec | `make fuzz` |
 | IEC 104 interop-relevant behaviour | `make interop` (Docker) |
+| IEC 101, 102 or 103 interop-relevant behaviour | `make interop-iec101`, `make interop-iec102`, `make interop-iec103` (Docker) |
+| link or station procedures | `make chaos` (long chaos suites) |
 | application-layer security | `make test-cbsigma` (Go 1.26) |
 
 ## Definition of Done

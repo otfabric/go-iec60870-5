@@ -1,13 +1,16 @@
 # Observability: otfabric/go-iec60870-5
 
 Logging and metrics for the client and the server. Both are off by default
-and cost nothing when off.
+and cost nothing when off. The sections up to [Connection state](#connection-state)
+describe the IEC 60870-5-104 packages; the stations of IEC 101, 102 and 103
+are in [Serial companion standards](#serial-companion-standards).
 
 ## Contents
 
 - [Logging](#logging)
 - [Metrics](#metrics)
 - [Connection state](#connection-state)
+- [Serial companion standards](#serial-companion-standards)
 
 ## Logging
 
@@ -209,3 +212,43 @@ State is observable without logs or metrics:
 
 See [ERRORS.md](ERRORS.md#connection-fatal-errors) for the errors the state
 handlers receive.
+
+## Serial companion standards
+
+The clients and servers of `iec101`, `iec102` and `iec103` take the same
+`iec60870.Logger` (and use `FieldLogger` and `ContextLogger` the same way)
+through `Config.Logger`; nil is silent. They have no metrics interface.
+
+| Level | Message | Fields |
+|-------|---------|--------|
+| Info | `link state` | `state`, `err` |
+| Debug | `link init failed` (IEC 101 and 103 clients, IEC 101 server) | `err` |
+| Warn | `undecodable ASDU dropped` | `err` |
+| Warn | `ASDU dropped by the IEC 60870-5-101 profile` (client), `ASDU refused by the IEC 60870-5-101 profile` (server); only with `Params.Strict` | `err` |
+| Debug | `controlling station busy, sending again` (IEC 101 balanced server) | - |
+| Warn | `send failed` (IEC 101 server) | `err` |
+| Warn | `handler queue full, ASDU dropped` (IEC 102 client), `answer not queued` (IEC 102 server) | - |
+| Warn | `identification not queued`, `disturbance data not queued` (IEC 103 server) | - |
+| Debug | `interrogation cycle aborted`, `ASDU for another common address dropped` (IEC 103 server) | - |
+| Debug | `unexpected ASDU in disturbance data transfer` (IEC 103 client) | - |
+| Warn | `time synchronization after initialization failed`, `general interrogation after initialization failed` (IEC 103 client) | `err` |
+
+Every entry carries `component` and `link` (the link address). The
+component value is the station (`iec101-client`, `iec101-server`,
+`iec102-client`, `iec102-server`, `iec103-client`, `iec103-server`) with
+the prefix `iec104.` the shared logger adds. The serial stations name the
+error field `err`, the IEC 104 packages `error`.
+
+State without logs:
+
+- `State()` on every client and server (`Done()` and `Err()` as well on
+  the IEC 101 stations, `Done()` on the IEC 102 server), and
+  `Config.OnState`, called for every change of the link state. The
+  `WaitUp` of the IEC 101 and IEC 103 clients returns after `OnState` for
+  the change to `StateUp` has returned.
+- `link.Config.OnFrame` (every frame sent and received) and
+  `link.Config.OnDiscard` (octets the FT 1.2 decoder skipped, with the
+  reason: noise, a bad checksum, a frame cut off by `FrameGap`), passed in
+  `Config.Link` of the IEC 102 and 103 stations and in the `link.Config`
+  the IEC 101 stations build from `iec101.Params.Link`.
+- `Server.Pending` (IEC 101) for the class 1 and class 2 queues.

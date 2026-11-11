@@ -13,7 +13,9 @@
 //     answers with ASDU 6 and flags its time tags invalid until the first
 //     synchronization and when none came for [Config.SyncTimeout];
 //   - the disturbance data transfer of clause 7.4.7 from a
-//     [DisturbanceSource], when one is configured.
+//     [DisturbanceSource], when one is configured; the selection of a
+//     record whose number of channels (NOC) or of values per channel
+//     (NOE) does not fit its field is answered with TOO 34.
 //
 // The application answers general interrogations, general commands and
 // generic services through the helpers [Server.AnswerGI],

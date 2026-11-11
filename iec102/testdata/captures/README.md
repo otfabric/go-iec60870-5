@@ -1,16 +1,18 @@
-# IEC 60870-5-102 frames for the coming IEC 102 work
+# IEC 60870-5-102 frames
 
-There is no IEC 102 codec in this module yet (docs/ROADMAP.md). These
-files are kept, byte-identical to their sources ([SHA256SUMS](SHA256SUMS),
-`make captures-verify`), as the first evidence for it; their origin, terms
+These files are kept byte-identical to their sources
+([SHA256SUMS](SHA256SUMS), `make captures-verify`); their origin, terms
 and counts are in [manifest.json](manifest.json) (`TestManifest`,
 `make captures-manifest`).
 
 `iec102/internal/capture` extracts every frame and `TestFrames` decodes it
 as FT 1.2 with a 2-octet link address (start and stop characters, both
-length octets, checksum) and encodes it back: all 759 frames pass. The
-ASDUs (183, 123, 11 of the Spanish REE profile) are not decoded; we do not
-hold IEC 60870-5-102 (docs/STANDARDS.md).
+length octets, checksum) and encodes it back: all 759 frames pass (749 of
+the innoWatt log, 10 of the gisce tests). That test checks the framing
+only. The ASDUs are decoded elsewhere: the same innoWatt log, kept a second
+time in [../innowatt](../innowatt/README.md), by `TestCaptureInnowatt` and
+`TestCaptureInnowattFields` (`iec102/capture_test.go`), and the gisce byte
+strings, copied as vectors, by `iec102/asdu_test.go`.
 
 ## Sources and terms
 

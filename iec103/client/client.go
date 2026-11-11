@@ -9,12 +9,19 @@
 //
 // The link is initialized in the background (request status of link,
 // then reset CU or reset FCB, clause 7.4.1) and again when the protection
-// equipment stops answering; [Client.WaitUp] waits for it. Requests fail
-// with [iec103.ErrLinkDown] while the link is down.
+// equipment stops answering, or answers only with frames that cannot
+// answer the message until the last time-out (link.ErrUnexpected wrapping
+// link.ErrTimeout); [Client.WaitUp] waits for it and returns only after
+// Config.OnState for the change to StateUp has returned. Requests fail
+// with [iec103.ErrLinkDown] while the link is down, and return at their
+// context deadline even while the link layer is still repeating their
+// frame; [Client.Broadcast] and [Client.BroadcastClockSync] return
+// [iec103.ErrLinkDown] when the link goes down before they were sent.
+// After a failed poll the client waits PollInterval before it polls again.
 //
 // One client serves one item of protection equipment on a transport of
 // its own; one primary polling several items on a shared line is not
-// supported yet.
+// supported.
 package client
 
 import (

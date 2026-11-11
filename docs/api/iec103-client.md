@@ -8,9 +8,9 @@ import "github.com/otfabric/go-iec60870-5/iec103/client"
 
 Package client is the controlling system of IEC 60870-5-103: the primary station of unbalanced transmission (clause 6.2.3) that polls one item of protection equipment, runs the application functions of clause 7.4 (station initialization, time synchronization, general interrogation, general commands, generic services, disturbance data transfer) and delivers every monitor-direction ASDU to a handler.
 
-The link is initialized in the background (request status of link, then reset CU or reset FCB, clause 7.4.1) and again when the protection equipment stops answering; [Client.WaitUp](#func-client-waitup) waits for it. Requests fail with [iec103.ErrLinkDown](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#ErrLinkDown) while the link is down.
+The link is initialized in the background (request status of link, then reset CU or reset FCB, clause 7.4.1) and again when the protection equipment stops answering, or answers only with frames that cannot answer the message until the last time-out (link.ErrUnexpected wrapping link.ErrTimeout); [Client.WaitUp](#func-client-waitup) waits for it and returns only after Config.OnState for the change to StateUp has returned. Requests fail with [iec103.ErrLinkDown](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#ErrLinkDown) while the link is down, and return at their context deadline even while the link layer is still repeating their frame; [Client.Broadcast](#func-client-broadcast) and [Client.BroadcastClockSync](#func-client-broadcastclocksync) return [iec103.ErrLinkDown](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#ErrLinkDown) when the link goes down before they were sent. After a failed poll the client waits PollInterval before it polls again.
 
-One client serves one item of protection equipment on a transport of its own; one primary polling several items on a shared line is not supported yet.
+One client serves one item of protection equipment on a transport of its own; one primary polling several items on a shared line is not supported.
 
 ## Constants
 

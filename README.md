@@ -13,10 +13,10 @@ dependencies outside the standard library.
 
 | Companion standard | Package | Status |
 |---|---|---|
-| IEC 60870-5-104 (TCP/IP) | [`iec104`](iec104), `iec104/client`, `iec104/server` | Production code carried over from go-iec104 v0.3.0, with its tests, captures and interop suite. See [docs/IEC104_PARITY.md](docs/IEC104_PARITY.md). |
-| IEC 60870-5-101 (serial) | [`iec101`](iec101), `iec101/client`, `iec101/server` | New. Controlling and controlled station, unbalanced and balanced. Client and server pass independent interop runs against lib60870-C and cB-Sigma in both modes, default field sizes (`make interop-iec101`, local; [INTEROPERABILITY.md](INTEROPERABILITY.md)). |
+| IEC 60870-5-104 (TCP/IP) | [`iec104`](iec104), `iec104/client`, `iec104/server` | Carried over from go-iec104 v0.3.0 with its tests and captures; checked clause by clause against edition 1 (2000). Client and server pass independent interop runs against five stacks of iec60870-5-interop (lib60870-C, OpenMUC j60870, wendy512/iec104, cB-Sigma, pascaldekloe/part5). See [docs/iec104](docs/iec104/README.md) and [docs/IEC104_PARITY.md](docs/IEC104_PARITY.md). |
+| IEC 60870-5-101 (serial) | [`iec101`](iec101), `iec101/client`, `iec101/server` | New. Controlling and controlled station, unbalanced and balanced. Client and server pass independent interop runs against lib60870-C and cB-Sigma in both modes, default field sizes (`make interop-iec101`, Interop workflow; [INTEROPERABILITY.md](INTEROPERABILITY.md)). |
 | IEC 60870-5-103 (protection equipment) | [`iec103`](iec103), `iec103/client`, `iec103/server` | New. Own ASDU codec for every compatible type (cl. 7.3), controlling system and protection equipment: initialization, time sync, general interrogation, general commands, generic services, disturbance data transfer. Unit, annex B and e2e evidence; independent evidence for the server (four client stacks of iec60870-5-interop), the client only against one deviating server. See [docs/iec103](docs/iec103/README.md). |
-| IEC 60870-5-102 (integrated totals) | [`iec102`](iec102), `iec102/client`, `iec102/server`, `iec102/ree` | New. Own codec, controlling and integrated total station, opt-in Spanish REE profile. Built without the standard's text, from vendor documentation and recorded meter traffic; **no independent interoperability evidence**. See [docs/iec102](docs/iec102/README.md). |
+| IEC 60870-5-102 (integrated totals) | [`iec102`](iec102), `iec102/client`, `iec102/server`, `iec102/ree` | New. Own codec, controlling and integrated total station, opt-in Spanish REE profile. Built without the standard's text, from vendor documentation and recorded meter traffic. Independent evidence for the server only: the gisce/iec870ree controlling station (REE profile) against `iec102/server` (`make interop-iec102`); the client has no independent peer. See [docs/iec102](docs/iec102/README.md). |
 
 What is implemented, clause by clause, and what evidence backs it:
 [docs/FEATURE-STATUS.md](docs/FEATURE-STATUS.md). Nothing here is
@@ -35,9 +35,10 @@ standards share and nothing more ([ARCHITECTURE.md](ARCHITECTURE.md)):
 | `asdu` | IEC 60870-5-101/-104 | the telecontrol ASDU model and codec, configurable field sizes |
 | `telecontrol` | IEC 60870-5-5 as used by 101/104 | matching answers to requests: confirmations, interrogation, read, commands |
 | `iec101`, `iec101/client`, `iec101/server` | IEC 60870-5-101 | serial telecontrol stations |
+| `iec102`, `iec102/client`, `iec102/server`, `iec102/ree` | IEC 60870-5-102 | integrated totals: own ASDU, stations on `link`, opt-in REE profile |
 | `iec103`, `iec103/client`, `iec103/server` | IEC 60870-5-103 | protection equipment: own ASDU (FUN/INF), stations on `link` |
 | `iec104`, `iec104/apci`, `iec104/client`, `iec104/server` | IEC 60870-5-104 | TCP/IP telecontrol stations |
-| `sec` | IEC 62351-5 / IEC TS 60870-5-7 | application-layer security (used by `iec104`) |
+| `sec` | IEC 62351-5 / IEC TS 60870-5-7 | application-layer security (used by `iec104` only) |
 | root `iec60870` | - | the `Logger` interfaces |
 
 API reference generated from the source: [docs/api](docs/api/README.md);
@@ -90,6 +91,7 @@ with their examples in [iec104/examples](iec104/examples).
 make check    # format, lint, vet, govulncheck, tests with -race, coverage floors, examples, docs
 make fuzz     # fuzz targets
 make interop  # IEC 104 against the pinned reference images (Docker)
+make interop-iec101 interop-iec103 interop-iec102  # the serial standards (Docker)
 ```
 
 [CONTRIBUTING.md](CONTRIBUTING.md), [TESTING.md](TESTING.md),
@@ -98,7 +100,9 @@ make interop  # IEC 104 against the pinned reference images (Docker)
 
 Independent reference implementations live in
 [otfabric/iec60870-5-interop](https://github.com/otfabric/iec60870-5-interop)
-(IEC 101/102/103/104; the IEC 104 suite runs against its v0.2.1 images).
+(IEC 101/102/103/104). The IEC 101, 103 and 104 suites run against its
+v0.2.1 images; the IEC 102 image comes with its v0.3.0 release and is a
+local build until then.
 
 ## Relation to go-iec104
 

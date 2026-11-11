@@ -1,8 +1,8 @@
 # Recorded IEC 60870-5-104 traffic
 
 Network captures between IEC 60870-5-104 implementations that are not
-go-iec104, recorded by others and committed byte-identical. go-iec104's
-tests reassemble every TCP conversation, decode every APDU and encode it
+this library, recorded by others and committed byte-identical. The tests
+of the `iec104` packages reassemble every TCP conversation, decode every APDU and encode it
 again, check both sides' sequence numbers and acknowledgements, compare the
 decoded fields with Wireshark and with CERT.LV's Zeek analyzer, replay the
 recorded controlled stations against the client and the recorded
@@ -132,16 +132,17 @@ implementations (levels C and D) encodes back byte for byte; of the
 synthetic capture 132 do not, and differ only in reserved bits and days of
 week that do not match the date.
 
-The 36 captures added in v0.2.0: 55 conversations, 2,295 APDUs (1,605 I,
-425 S, 262 U), all reassembled; 3 APCI and 6 ASDU errors, all in the
-edited issue 2840 file and the issue 7035 frame; 2,276 APDUs encode back
+The 36 captures added in v0.2.0: 55 conversations, 2,295 APDUs (1,604 I,
+425 S, 262 U), all reassembled; 4 APCI and 5 ASDU errors, all in the
+edited issue 2840 file and the issue 7035 frame (one of the APCI errors is
+an I frame without ASDU, refused since v0.3.0); 2,276 APDUs encode back
 byte for byte, the rest being the 10 impossible CP56Time2a of issue 3900
-and the refused ones. Of the 20 sequence errors, 10 are in the edited
+and the refused ones. Of the 18 sequence errors, 8 are in the edited
 issue 2840 file and 10 in two recordings with TCP gaps (baselines, 32-bit
 bitstring).
 
-Recorded behaviour of other implementations that go-iec104's tests pin
-(`client/capture_test.go`, `server/capture_test.go`):
+Recorded behaviour of other implementations that the tests pin
+(`iec104/client/capture_test.go`, `iec104/server/capture_test.go`):
 
 - **IEC TestServer** (UOWM): on a new connection its first I frame
   acknowledges a frame the controlling station never sent (N(R)=1 left over
@@ -166,7 +167,7 @@ Recorded behaviour of the sources added in v0.2.0 (`TestOracleTshark`,
 `TestCorpusReencode`, the replay suites):
 
 - **MIO8 RTU**: confirms clock synchronization with a time 2.8 s before the
-  one it received (classified in `server/capture_test.go`; which time the
+  one it received (classified in `iec104/server/capture_test.go`; which time the
   confirmation carries is not checked against a text we hold); its
   simulator answers the RTU's TESTFR act after sending its own (the replay
   peer now accepts two U frames in either order).
@@ -190,9 +191,9 @@ Recorded behaviour of the sources added in v0.2.0 (`TestOracleTshark`,
 ## Not in the recordings
 
 TLS (IEC 62351-3) and IEC 62351-5 application-layer security in usable
-real traffic (the IEC 60870-5-7 capture of issue 17130 is encrypted) (the synthetic capture has security ASDUs with placeholder data
-only), redundancy groups and switchover, file directories, deletion, the
+real traffic (the IEC 60870-5-7 capture of issue 17130 is encrypted; the
+synthetic capture has security ASDUs with placeholder data only), redundancy groups and switchover, file directories, deletion, the
 query log, commands with time tag outside the synthetic capture,
 select-before-operate, deactivation, test command C_TS_TA_1, CP24Time2a in
 recorded traffic, k or w above 15 in recorded traffic, and any traffic of
-a physical device.
+a physical device at level A (the MIO8 recordings are level B).

@@ -5,6 +5,10 @@ and the tests that verify it. IEC 60870-5-104 requirements are traced in
 [docs/iec104/INTEROPERABILITY.md](iec104/INTEROPERABILITY.md) (clause by
 clause, with test names and interop cases). "Interpretation" marks a
 requirement whose standard text we do not hold ([STANDARDS.md](STANDARDS.md)).
+The table was started before IEC 60870-5-101:2003 was obtained; the
+shared layers and IEC 101 were then checked against that text
+([INTEROPERABILITY.md](../INTEROPERABILITY.md)), which profiles parts 1 and
+2 in its clause 6. Parts 1, 2 and 5 themselves are not held.
 
 ## FT 1.2 framing (`ft12`)
 
@@ -16,6 +20,7 @@ requirement whose standard text we do not hold ([STANDARDS.md](STANDARDS.md)).
 | FT-4 | Link address field of 0, 1 or 2 octets (system parameter) | interpretation (101); 103 cl. 6.2.3 fixes 1 | `TestRoundTrip`, `TestEncodeErrors` |
 | FT-5 | After an invalid frame the receiver resynchronizes without losing a following valid frame (101:2003 figures 6/9 use a 33-bit line idle; on an io.Reader we hunt for the next start character, a documented deviation) | 101 cl. 6, figures 6 and 9 | `TestDecoderResync` |
 | FT-6 | Malformed input never panics | engineering | `FuzzDecode` |
+| FT-7 | An unfinished frame followed by a pause longer than `Decoder.Gap` (`link.Config.FrameGap`, default the link time-out) is discarded, so noise or a peer stopping mid-frame does not hide the frames that follow | 60870-5-1 6.2.4.2 rules R2/R4 as quoted by 103 cl. 6.1 (stream approximation, interpretation) | `ft12.TestDecoderGap`, `iec101/e2e.TestHostileServer` |
 
 ## Link procedures (`link`)
 
@@ -34,6 +39,8 @@ requirement whose standard text we do not hold ([STANDARDS.md](STANDARDS.md)).
 | LK-11 | Reset of FCB (function 7), IEC 60870-5-103 only (not a 101 function, 101 table 3) | 103 cl. 6.3 | `TestUnbalanced` |
 | LK-12 | Balanced: each station initializes its own direction; DIR set by station A; test function for link | interpretation | `TestBalanced`, `iec101/e2e.TestClientBalancedSupervision` |
 | LK-13 | A secondary ignores frames for other addresses and other secondaries' responses | interpretation | `TestWrongAddressTimesOut`, `TestSecondaryOddMessages` |
+| LK-14 | A response that cannot answer the message is discarded; when only such responses arrive until the last time-out, the primary reports a time-out (`ErrUnexpected` wrapping `ErrTimeout`) | engineering | `TestLateResponseDiscarded`, `TestStrayAnswersAreATimeOut` |
+| LK-15 | The one-bit FCB cannot recognise a repetition delivered after the next message (documented limit) | 60870-5-2 (interpretation) | `TestRepetitionAfterTheNextMessage` |
 
 ## IEC 60870-5-101 application (`iec101`, `telecontrol`)
 
@@ -46,7 +53,7 @@ requirement whose standard text we do not hold ([STANDARDS.md](STANDARDS.md)).
 | 101-5 | Test command C_TS_NA_1 with the fixed test pattern 55AAh; delay acquisition C_CD_NA_1: activation measures, spontaneous sets the delay | 101 cl. 7.2.6.14, 7.3.4.7, 7.4.12 | `TestServices`, `telecontrol.TestRequests` |
 | 101-9 | A counter freeze or reset command (FRZ 1..3) is confirmed without readings or termination | 101 cl. 7.4.8, figures 95, 96 | `TestServices`, `telecontrol.TestRequests` |
 | 101-6 | Answers are recognised by type, CA, IOA and cause; a termination before the confirmation belongs to an earlier request | 104 practice, carried over | `telecontrol.TestRequests`, `TestMatching` |
-| 101-7 | Requests fail promptly while the link is down; the link is re-initialized automatically | engineering | `TestLinkRecovery`, `TestWaitUpTimeout` |
+| 101-7 | Requests fail promptly while the link is down; the link is re-initialized automatically; `WaitUp` returns after `OnState(StateUp)`; a request ends at its deadline even while the link repeats it | engineering | `TestLinkRecovery`, `TestWaitUpTimeout`, `TestWaitUpAfterOnState`, `TestRequestDeadlineWhileTheLinkRepeats` |
 | 101-8 | Undecodable user data is acknowledged at link level and dropped | engineering | `TestServerUnbalancedEdges`, `TestClientBalancedSupervision` |
 
 ## IEC 60870-5-103 (`iec103`)

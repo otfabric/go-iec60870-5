@@ -16,7 +16,7 @@ IEC 60870-5-102 is request driven: the client polls only while a request is open
 
 A mirror with the P/N bit or a cause 13..18 ends any request with an [\*iec102.RefusedError](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec102#RefusedError). These procedures are those of the recorded traffic (innoWatt log: C\_AC\_NA\_2 confirmed with cause 7; C\_CI\_NU\_2 confirmed, 744 ASDUs M\_IT\_TK\_2 with cause 5, terminated with cause 10) and of gisce/iec870ree; the Beckhoff TS650x manual describes no application procedure. They are interpretations; see docs/iec102/INTEROPERABILITY.md.
 
-The link is initialized (request status of link, reset of remote link) by [Client.Init](#func-client-init) or the first request, and again after the station stopped answering. Requests run one at a time; a second waits.
+The link is initialized (request status of link, reset of remote link) by [Client.Init](#func-client-init) or the first request, and again after the station stopped answering (link.ErrTimeout, which link.ErrUnexpected also wraps when only answers to something else came until the last time-out). Requests run one at a time; a second waits.
 
 ## Constants
 

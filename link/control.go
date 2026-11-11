@@ -21,7 +21,19 @@
 // with the frame count bit (FCB/FCV) protocol: a primary toggles FCB for
 // every new message with FCV set and repeats a message with the same FCB
 // after a time-out; a secondary that receives a repeated FCB resends its
-// previous response without processing the message again.
+// previous response without processing the message again. With one bit, a
+// repetition that arrives after the next message cannot be told from a new
+// message (TestRepetitionAfterTheNextMessage).
+//
+// A primary that receives only responses that cannot answer its message
+// (a late answer to an earlier one, a wrong function code) until the last
+// time-out returns an error wrapping both [ErrUnexpected] and
+// [ErrTimeout], so a caller that re-initializes the link after
+// [ErrTimeout] does so in that case too.
+//
+// [Config.FrameGap] (default [Config.Timeout], negative disables) discards
+// an unfinished frame when the line stays idle longer than that inside it
+// (IEC 60870-5-1 6.2.4.2, rules R2 and R4), using [ft12.Decoder.Gap].
 package link
 
 import "fmt"

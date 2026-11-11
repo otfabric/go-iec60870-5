@@ -73,17 +73,17 @@ hardware origin, D simulated or software testbed, E generated.
 ## What the recordings show
 
 The three B captures hold 149 frames. All are FT 1.2 frames with valid
-checksums; 145 encode back byte for byte, including the 20 private ASDUs
-205 (FUN 133) and the private control ASDUs 45 and 46 carried as
-`iec103.Raw`; the other four carry the ASDUs 9 below. Wireshark agrees on
-every field it dissects.
+checksums and all 149 encode back byte for byte, including the 20 private
+ASDUs 205 (FUN 133) and the private control ASDUs 45 and 46 carried as
+`iec103.Raw`, and the ASDUs 9 below. Wireshark agrees on every field it
+dissects.
 
 - **ASDU 9 with more than nine measurands.** The equipment of
   `asdu1-6-7-8-9` sends ASDU 9 with 16 measurands (VSQ 10h), one station
   of `private-asdu205` with 14 (VSQ 0Eh). IEC 60870-5-103 clause 7.3.1.8
-  allows one to nine; `iec103.Decode` refuses these four ASDUs with
-  `ErrInvalid`, and the clients drop them. Recorded as the equipment's
-  deviation, not fixed; Wireshark dissects them.
+  allows one to nine; `iec103.Decode` carries them up to
+  `iec103.MaxMeasurandsWire` (127) and records them as the equipment's
+  deviation. Wireshark dissects them.
 - **The files are excerpts.** The RTAC polls continuously, yet
   `asdu1-5-20-45-46` has 2.2 s and 41 s without a frame and
   `asdu1-6-7-8-9` 149 s: the link findings at those points (FCB looking
@@ -95,8 +95,9 @@ every field it dissects.
   causes 20 and 12, and the private ASDUs 45 and 46 with cause 20.
 
 The ARIEC103 vectors encode the VSQ of ASDUs 1 and 8 as 01h instead of
-81h, and the identification vector has 24 characters and no compatibility
-level, which the codec refuses: the vectors' errors, listed in
+81h: the codec decodes them and writes 81h, so they do not encode back.
+The identification vector has 24 characters and no compatibility level,
+which the codec refuses. Both are the vectors' errors, listed in
 `corpus_test.go`. The ASDU 9 vector's "first signed 16-bit value 1234"
 is the MEA 154 with ER set (clause 7.2.6.8).
 

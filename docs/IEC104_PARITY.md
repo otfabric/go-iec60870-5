@@ -55,24 +55,31 @@ go-iec104 v0.3.0 still has them.
 
 ## Tests
 
+Counts and runs below are dated; they are history, not a live status. The
+current interop pins and results are in
+[iec104/INTEROPERABILITY.md](iec104/INTEROPERABILITY.md#verification-status).
+
 | | go-iec104 v0.3.0 | go-iec60870-5 (iec104 subtree) |
 |---|---|---|
-| Test, fuzz, benchmark and example functions, whole module | 333 | 371 (all 333 carried over; 38 new for cp, ft12, link, telecontrol, iec101) |
-| Interop functions (build tag `interop`) | 37 | 37, pinned to the IEC 104 images of iec60870-5-interop v0.2.1 (five references, part5 added) |
+| Test, fuzz, benchmark and example functions, whole module, at the copy (2026-11-10) | 333 | 371 (all 333 carried over; 38 new for cp, ft12, link, telecontrol, iec101) |
+| Interop test functions (build tag `interop`) | 37, as counted at the copy | at v0.3.0: 31 top-level tests in `iec104/interop`, pinned to the IEC 104 images of iec60870-5-interop v0.2.1 (five references, part5 added), and 5 in the `iec104/interop/cbsigma` module |
 | Committed captures | as listed in SHA256SUMS | identical files and SHA256SUMS |
 | `make check` (lint, vet, race, coverage floors, examples, docs) | green | green (2026-11-11, local) |
-| `make interop` against iec104-interop v0.5.0 images (lib60870, openmuc, wendy512, cbsigma, same digests) | green in go-iec104 CI | green, local 2026-11-11 (Docker linux/arm64): 31 top-level tests, 482 subtests passed, 0 failed; 22 subtests skipped where an image does not declare the feature (openmuc: read; wendy512: time-tagged commands, upload, redundancy, TLS server); run with `IEC104_REQUIRE_INTEROP=1`, 381 s. Superseded by the next row |
-| `make interop` against the IEC 104 images of iec60870-5-interop v0.2.1 (lib60870, openmuc, wendy512, cbsigma, part5) | not run (go-iec104 pins iec104-interop) | green, local 2026-11-11 (Docker linux/arm64), after the ed. 1 fixes: 31 top-level tests, 519 subtests passed, 0 failed, 35 skipped where an image does not declare the feature (openmuc: read, the known j60870 bug; wendy512: time-tagged commands, file download, upload, redundancy, TLS; part5: file transfer, TLS, redundancy). Passed per reference: lib60870 112, openmuc 107, wendy512 88, cbsigma 132, part5 68. `IEC104_REQUIRE_INTEROP=1`, 444 s |
+| History: `make interop` against iec104-interop v0.5.0 images (lib60870, openmuc, wendy512, cbsigma, same digests) | green in go-iec104 CI | green, local 2026-11-11 (Docker linux/arm64): 31 top-level tests, 482 subtests passed, 0 failed; 22 subtests skipped where an image does not declare the feature (openmuc: read; wendy512: time-tagged commands, upload, redundancy, TLS server); run with `IEC104_REQUIRE_INTEROP=1`, 381 s. These were the pins of v0.2.0, whose Interop workflow also ran green in CI; replaced in v0.3.0 by the next row |
+| `make interop` against the IEC 104 images of iec60870-5-interop v0.2.1 (lib60870, openmuc, wendy512, cbsigma, part5), the pins of v0.3.0 | not run (go-iec104 pins iec104-interop) | green, local 2026-11-11 (Docker linux/arm64), after the ed. 1 fixes: 31 top-level tests, 519 subtests passed, 0 failed, 35 skipped where an image does not declare the feature (openmuc: read, the known j60870 bug; wendy512: time-tagged commands, file download, upload, redundancy, TLS; part5: file transfer, TLS, redundancy). Passed per reference: lib60870 112, openmuc 107, wendy512 88, cbsigma 132, part5 68. `IEC104_REQUIRE_INTEROP=1`, 444 s |
 | `make test-cbsigma` | green | green (local, 2026-11-11) |
 
 ## Known limitations
 
-Those of go-iec104 v0.3.0, unchanged: [iec104/LIMITATIONS.md](iec104/LIMITATIONS.md).
+Those of go-iec104 v0.3.0 apart from the five deviations fixed above; the
+current list is [iec104/LIMITATIONS.md](iec104/LIMITATIONS.md).
 
 ## Open items before parity can be called demonstrated
 
-- Run the same suite in CI (it ran locally only).
-- ~~Move the interop suite onto otfabric/iec60870-5-interop images~~: done
-  2026-11-11, v0.2.1, with part5 as a fifth reference.
+- Run the interop suite on the v0.2.1 pins in CI: the Interop workflow
+  runs on every push and pull request that changes more than Markdown, and
+  ran green on the v0.2.0 pins; the v0.2.1 pins have run locally only.
+- History: moving the interop suite onto otfabric/iec60870-5-interop
+  images was done on 2026-11-11 (v0.2.1, with part5 as a fifth reference).
 - Decide whether `iec104/client` adopts `telecontrol.Requester` (shared with
-  IEC 101) — only with the full IEC 104 suite green before and after.
+  IEC 101), only with the full IEC 104 suite green before and after.

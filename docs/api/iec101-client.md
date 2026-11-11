@@ -8,7 +8,7 @@ import "github.com/otfabric/go-iec60870-5/iec101/client"
 
 Package client is the controlling station of IEC 60870-5-101: it brings up the link, polls the controlled station (unbalanced transmission) or exchanges messages with it (balanced transmission), runs requests (interrogation, counter interrogation, read, commands, clock synchronization, test, reset process, delay acquisition) and delivers monitor-direction ASDUs to a handler.
 
-The link is initialized in the background and re-initialized when the controlled station stops answering; [Client.WaitUp](#func-client-waitup) waits for it. Requests fail with [iec101.ErrLinkDown](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec101#ErrLinkDown) while the link is down.
+The link is initialized in the background and re-initialized when the controlled station stops answering, or answers only with frames that cannot answer the message until the last time-out (link.ErrUnexpected wrapping link.ErrTimeout); [Client.WaitUp](#func-client-waitup) waits for it and returns only after Config.OnState for the change to StateUp has returned. Requests fail with [iec101.ErrLinkDown](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec101#ErrLinkDown) while the link is down, and return at their context deadline even while the link layer is still repeating their user data. After a failed poll the client waits PollInterval before it polls again.
 
 ## Constants
 

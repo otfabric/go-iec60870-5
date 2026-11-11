@@ -24,6 +24,21 @@ We will acknowledge your report within 48 hours and aim to provide a fix or miti
 
 ## Security Considerations
 
+### IEC 60870-5-101, -102 and -103 have no security
+
+The serial companion standards carry no authentication and no encryption,
+and this module adds none: the FT 1.2 checksum detects line errors, not
+tampering. IEC TS 60870-5-7 profiles security for 101 (and 104) only; `sec`
+is wired into IEC 104 only. Keep serial lines and the terminal servers
+that carry them on trusted, isolated networks.
+
+What the serial stations do against a faulty or hostile peer: every frame
+and ASDU is checked before use and the decoders and receive paths are
+fuzzed; the send queues are bounded (`QueueSize`, `server.ErrQueueFull`);
+the hostile-peer suites (`iec101/e2e`, `iec102/e2e`, `iec103/e2e`,
+`hostile_test.go`) check that a station stays bounded and serves a peer
+that behaves afterwards ([TESTING.md](TESTING.md)).
+
 ### IEC 60870-5-104 Has No Built-In Security
 
 Plain IEC 60870-5-104 carries no authentication and no encryption: anyone who can reach a station on port 2404 can interrogate it and send it commands, and anyone on the path can read or alter the traffic. The commands operate physical equipment.
@@ -57,7 +72,7 @@ What it does not have: the curves secp256k1 and X448 (both mandatory in the IEC 
 
 #### Provenance and interoperability
 
-The IEC documents are not freely available, and this implementation was not written from them. The message formats, the algorithms and the state machines were derived from [cB-Sigma/iec60870](https://github.com/cB-Sigma/iec60870) (Apache-2.0), the only open-source implementation of this edition we found, and implemented anew; no code was copied. The unit tests check our encodings against octet strings that its encoder produced, and differential tests run complete associations, in both roles and with every data protection algorithm, between the two implementations. Where the two differ, the difference is deliberate and listed in [docs/iec104/INTEROPERABILITY.md](docs/iec104/INTEROPERABILITY.md#application-layer-security). Neither implementation has been tested against a third, independent one or certified: treat the A-Profile as interoperable with cB-Sigma, not as conformance-tested, and keep TLS with client certificates where both ends support it.
+The IEC documents are not freely available, and this implementation was not written from them (IEC TS 60870-5-7:2025 was obtained afterwards and the framing checked against it, below). The message formats, the algorithms and the state machines were derived from [cB-Sigma/iec60870](https://github.com/cB-Sigma/iec60870) (Apache-2.0), the only open-source implementation of this edition we found, and implemented anew; no code was copied. The unit tests check our encodings against octet strings that its encoder produced, and differential tests run complete associations, in both roles and with every data protection algorithm, between the two implementations. Where the two differ, the difference is deliberate and listed in [docs/iec104/INTEROPERABILITY.md](docs/iec104/INTEROPERABILITY.md#application-layer-security). Neither implementation has been tested against a third, independent one or certified: treat the A-Profile as interoperable with cB-Sigma, not as conformance-tested, and keep TLS with client certificates where both ends support it.
 
 #### Checked against IEC TS 60870-5-7:2025
 

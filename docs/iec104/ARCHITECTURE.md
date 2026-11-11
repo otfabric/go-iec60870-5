@@ -1,6 +1,8 @@
 # Architecture: IEC 60870-5-104 (iec104 packages)
 
-How the module is divided, why, and how a connection works inside.
+How the IEC 60870-5-104 packages are divided, why, and how a connection
+works inside. The layering of the whole module, shared with the serial
+companion standards, is in the root [ARCHITECTURE.md](../../ARCHITECTURE.md).
 
 ## Layers
 
@@ -18,8 +20,8 @@ running a TCP connection (APCI) and the application data it carries (ASDU).
 │         keys, Secure Data: IEC 62351-5,      │
 │         IEC TS 60870-5-7                     │
 ├──────────────────────────────────────────────┤
-│  APCI   APDU framing, I/S/U frames,          │  package apci (codec)
-│         sequence numbers, acknowledgements,  │  internal/link (state machine)
+│  APCI   APDU framing, I/S/U frames,          │  package iec104/apci (codec)
+│         sequence numbers, acknowledgements,  │  iec104/internal/link (state machine)
 │         STARTDT / STOPDT / TESTFR            │
 └──────────────────────────────────────────────┘
                       TCP (optionally TLS)
@@ -27,47 +29,53 @@ running a TCP connection (APCI) and the application data it carries (ASDU).
 
 The packages follow the reuse boundaries rather than the picture:
 
-- **APCI stays inside this module.** It has no life outside
-  IEC 60870-5-104, so it is not a separate library. It is split into a pure
-  codec (`apci`, exported, useful to analysers and test tools) and the state
-  machine (`internal/link`, private, because its API is shaped by the client
+- **APCI stays inside the `iec104` tree.** It has no life outside
+  IEC 60870-5-104. It is split into a pure codec (`iec104/apci`, exported,
+  useful to analysers and test tools) and the state machine
+  (`iec104/internal/link`, private, because its API is shaped by the client
   and the server and nothing else).
 - **ASDU is the reusable part.** IEC 60870-5-101 carries the same ASDUs over
-  a serial link layer with different field widths. `asdu` therefore knows
-  nothing about TCP or APCI and takes the widths as `asdu.Params`.
+  a serial link layer with different field widths, and this module's
+  `iec101` uses `asdu` for it. `asdu` therefore knows nothing about TCP or
+  APCI and takes the widths as `asdu.Params`.
 - **TCP is the standard library.** The client accepts any `Dialer`, the
   server any `net.Listener`.
 - **The application-layer security sits between them.** IEC TS 60870-5-7
   wraps every application ASDU in a Secure Data ASDU and adds its own key
   management ASDUs; the APCI carries both like any other. `sec` is
   sans-IO: an `Endpoint` takes received ASDUs and the time and returns the
-  ASDUs to send, so the same code would serve an IEC 60870-5-101 link.
+  ASDUs to send, so the same code could serve an IEC 60870-5-101 link
+  (not wired into `iec101`).
 
 ## Packages and import rules
 
+Import paths are relative to the module, github.com/otfabric/go-iec60870-5.
+
 ```text
-iec104 (root)      errors, State, Logger, Metrics
-  ├── apci         frames, sequence arithmetic, Params          imports: nothing
-  ├── asdu         ASDU model and codec                         imports: nothing
-  ├── sec          IEC 62351-5 A-Profile, sans-IO               imports: asdu
-  ├── internal/link  connection state machine                   imports: root, apci, logx
-  ├── internal/logx  structured or formatted log entries        imports: root
-  ├── client       controlling station                          imports: root, apci, asdu, sec, link
-  └── server       controlled station                           imports: root, apci, asdu, sec, link
+iec60870 (module root)  Logger interfaces                               imports: nothing
+asdu                    ASDU model and codec                            imports: cp
+sec                     IEC 62351-5 A-Profile, sans-IO                  imports: asdu
+internal/logx           structured or formatted log entries             imports: iec60870
+iec104                  errors, State, Metrics                          imports: apci, asdu
+  ├── apci              frames, sequence arithmetic, Params             imports: nothing
+  ├── internal/link     connection state machine                        imports: iec104, apci, logx
+  ├── client            controlling station                             imports: iec60870, iec104, apci, asdu, sec, link, logx
+  └── server            controlled station                              imports: iec60870, iec104, apci, asdu, sec, link, logx
 ```
 
-- `apci` and `asdu` import nothing from the module and nothing outside the
-  standard library. They do no I/O beyond `apci.ReadFrame(io.Reader)`.
-- `internal/link` deals in raw ASDU bytes. It never imports `asdu` or
-  `sec`: the protocol machine is independent of what the I frames carry. It
-  sees the security through a small interface (`link.Security`) that
+- `iec104/apci` imports nothing from the module and nothing outside the
+  standard library; `asdu` only `cp`. They do no I/O beyond
+  `apci.ReadFrame(io.Reader)`.
+- `iec104/internal/link` deals in raw ASDU bytes. It never imports `asdu`
+  or `sec`: the protocol machine is independent of what the I frames carry.
+  It sees the security through a small interface (`link.Security`) that
   `*sec.Endpoint` satisfies.
 - `sec` imports `asdu` for the field sizes and type identifications only,
   and nothing outside the standard library: the cryptography is
   `crypto/...`.
-- `client` and `server` never import each other (their tests do, to use the
-  other side as a peer).
-- The root package imports `apci` and `asdu` only for the types in its
+- `iec104/client` and `iec104/server` never import each other (their tests
+  do, to use the other side as a peer).
+- `iec104` imports `iec104/apci` and `asdu` only for the types in its
   `Metrics` and `NegativeError` signatures.
 
 ## One connection
@@ -135,9 +143,10 @@ to it and from then on hands everything to it.
 
 | Situation | Behaviour |
 |-----------|-----------|
+| APDU that does not parse, including an I frame without ASDU | Close (`ErrProtocol`, wrapping the `apci` error) |
 | I frame with unexpected N(S) | Close (`ErrProtocol`) |
 | N(R) acknowledging frames never sent | Close (`ErrProtocol`) |
-| I frame received while stopped | Close (`ErrProtocol`) |
+| I frame received while stopped | Close (`ErrProtocol`); edition 2 behaviour, see [INTEROPERABILITY.md](INTEROPERABILITY.md#clauses-4-and-5-protocol-structure-and-apci) |
 | STOPDT act sent (client) | Received I frames are acknowledged first, and at once until the con arrives |
 | I frame received between STOPDT act and con | Accepted and acknowledged immediately |
 | `t1` expires on an I frame or a U activation | Close (`ErrTimeout`) |
@@ -194,14 +203,11 @@ once" across a switchover without the application tracking anything.
 
 ## Testing
 
-| Layer | How it is tested |
-|-------|------------------|
-| `apci`, `asdu` | Byte vectors from the standard, round trips over every type identification, error tables, fuzzing (parse, re-encode, fixed point) |
-| `internal/link` | A scripted peer writing raw APDUs over loopback TCP: windows, each timer, each violation |
-| `sec` | Octet strings from cB-Sigma/iec60870's encoder and RFC 3394 and RFC 5869 vectors; two endpoints on a simulated connection with their own clock: every procedure, retransmission, failure and backoff, tampering, replay, restarts, crossing requests, refused certificates and algorithms; fuzzing |
-| `client`, `server` | Against each other over loopback TCP, including TLS, reconnect and server restart |
-| `e2e` | Client against server of this module, end to end over TCP, TLS and with the A-Profile (HMAC, and AES-256-GCM over TLS), with the fixture-driven station of `internal/station` |
-| `interop` | Against lib60870-C, OpenMUC j60870 and wendy512/iec104 in containers, as client and as server (`make interop`) |
-| `interop/cbsigma` | `sec` against cB-Sigma/iec60870 in process, a module of its own (`make test-cbsigma`) |
-
-Everything runs with the race detector.
+The test tiers, what each suite covers and how to run them are in
+[TESTING.md](../../TESTING.md). Per layer: `iec104/apci` and `asdu` with
+byte vectors, round trips and fuzzing; `iec104/internal/link` against a
+scripted peer over loopback TCP; `sec` with octet strings from
+cB-Sigma/iec60870's encoder, RFC 3394 and RFC 5869 vectors and two
+endpoints on a simulated clock; `iec104/client` and `iec104/server`
+against each other; `iec104/e2e` end to end; `iec104/interop` against the
+reference images; `iec104/interop/cbsigma` against cB-Sigma in process.

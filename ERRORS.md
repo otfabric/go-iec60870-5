@@ -50,7 +50,7 @@ All sentinels are wrapped with detail. Always test with `errors.Is` and
 
 ## Sentinels
 
-Defined in the root package and shared by client and server:
+Defined in package `iec104` and shared by `iec104/client` and `iec104/server`:
 
 | Sentinel | Meaning |
 |----------|---------|
@@ -120,9 +120,10 @@ Returned by `asdu.Encode`/`Decode` and by every method that encodes an ASDU
 | `asdu.ErrMalformed` | Decode: truncated header or payload size not matching the object count |
 | `asdu.ErrInvalidParams` | The `Params` field sizes are not allowed |
 
-`apci` has the framing counterparts: `ErrInvalidStart`, `ErrInvalidLength`,
+`apci` has the framing counterparts: `ErrInvalidStart`, `ErrInvalidLength`
+(also an I frame without ASDU, on receipt and on send),
 `ErrInvalidControl`, `ErrASDUTooLong`. Received over a connection they are
-wrapped in `iec104.ErrProtocol`.
+wrapped in `iec104.ErrProtocol` and close it.
 
 An encode error never touches the connection: nothing was sent.
 
@@ -171,7 +172,7 @@ Package `sec` (IEC 62351-5) has its own sentinels. They are usually wrapped with
 Off by default. `client.WithRetry` repeats a request when all of these hold:
 
 1. **The request only reads**: `Interrogate`, `CounterInterrogate` with
-   `asdu.FreezeRead`, `Read`, `TestCommand`.
+   `asdu.FreezeRead`, `Read`, `TestCommand`, `ListFiles`.
 2. **The failure is transient**: the connection is not there
    (`ErrNotConnected`, `ErrNotStarted`), was lost during the attempt
    (`ErrConnectionLost`, `ErrTimeout`, `ErrProtocol`), or the station did not
@@ -183,7 +184,7 @@ A `*NegativeError` is never retried: the station answered. `ErrBusy` is not
 retried either.
 
 `Command`, `Deactivate`, `ClockSync`, `ResetProcess`, a counter freeze or
-reset and `Send` are **never** repeated. If the confirmation of a command is
+reset, `GetFile`, `PutFile` and `Send` are **never** repeated. If the confirmation of a command is
 lost, the command may have been executed; IEC 60870-5-104 offers no way to
 find out, and sending it again could operate the process twice. Decide in the
 application, typically by reading the state back.
@@ -320,8 +321,8 @@ transmission, is not an error: it decodes as `iec103.Raw`.
 
 Requests wrap `context.DeadlineExceeded` when no answer arrives within the
 context's deadline or `Config.RequestTimeout`, also while the link layer is
-still repeating their user data (the exchange runs to its end). A generic read answered with
-cause 43 is not an error: `GenericResult.Cause` reports it and the data sets
+still repeating their user data (the exchange runs to its end). A generic
+read answered with cause 43 is not an error: `GenericResult.Cause` reports it and the data sets
 carry the generic reply codes. Link errors (`link.ErrNack` while the
 equipment holds back commands with DFC, `link.ErrTimeout`) are returned
 wrapped.

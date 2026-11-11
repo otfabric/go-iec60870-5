@@ -246,8 +246,8 @@ answers with fixed frames by default).
 
 ## Interoperability candidates
 
-Both open implementations are controlling stations (masters) only, so
-they could only test our server:
+Both open implementations we found are controlling stations (masters)
+only, so they can only test our server:
 
 - **gisce/iec870ree** (Python, AGPL-3.0): in use, see above. It runs as a
   separate container of the interop repository (iec60870-5-interop), never
@@ -256,8 +256,8 @@ they could only test our server:
 - **daiiniel/IEC60870-5-102** (C#): **no licence**, so it cannot be
   redistributed or packaged in an interop image; usable only for reading.
 
-No IEC 102 controlled station is available as open source to test our
-client against; the recorded traffic is the only evidence on that side.
+We found no open-source IEC 102 controlled station to test our client
+against; the recorded traffic is the only evidence on that side.
 
 ## Not implemented
 

@@ -11,7 +11,7 @@
 // both roles with every data protection algorithm, segmentation, renewal,
 // restarts and reconnects, and certificates issued by an authority.
 //
-//	cd interop/cbsigma && go test ./...
+//	cd iec104/interop/cbsigma && go test ./...
 //
 // or make test-cbsigma in the repository root.
 package cbsigma

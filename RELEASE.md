@@ -83,6 +83,10 @@ images. Several behaviours change; see "Behaviour changes".
   behaviour marked as not verifiable from the held text.
 - New documented limit: the one-bit FCB of IEC 60870-5-2 cannot recognise a
   repetition delivered after the next message.
+- All documents read against the code, the tests and each other: stale
+  go-iec104 and iec104-interop references, the IEC 102, 103 and 104
+  evidence, the serial stations in OBSERVABILITY.md and API.md, the
+  security gaps and texts not held in LIMITATIONS.md.
 
 ### Behaviour changes
 

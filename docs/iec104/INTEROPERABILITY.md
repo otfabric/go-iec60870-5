@@ -16,7 +16,7 @@ clause by clause on 2026-11-11 against the only text of IEC 60870-5-104 we
 hold: GOST R IEC 60870-5-104-2004, the full authentic text of
 IEC 60870-5-104:2000 (**edition 1**) in Russian (see
 [docs/STANDARDS.md](../STANDARDS.md)). Edition 2 (2006) and Amendment 1
-(2016) are **not held**. The code was written by go-iec104 against
+(2016) are **not held**. The code, carried over from go-iec104, was written against
 edition 2; where it follows edition 2 and edition 1 is silent or differs,
 the row says **ed. 2** (edition 2 behaviour, not verifiable from the held
 text) and the code was left as it is.
@@ -122,7 +122,7 @@ edition 2, see [Redundancy](#redundancy)), type 127, TLS (IEC 62351-3) and
 the application-layer security with types 81-91 and causes 14-17
 (IEC TS 60870-5-7).
 
-Result: 63 rows. 44 conform (three of them with part of the behaviour left
+Result: 63 rows. 44 conform (two of them with part of the behaviour left
 to the station application), 4 are the application's, 5 deviations were
 fixed in this check, 3 follow edition 2, 3 are interpretations, 2 are
 extensions beyond the clause, 1 is a documented deviation and 1 does not
@@ -193,7 +193,7 @@ decoded for every type. Encoding uses SQ = 1 only when `ASDU.Sequence` is set.
 | Sequence number validation | yes; a violation closes the connection |
 
 The parameters are not negotiated: configure both sides alike. See
-[ARCHITECTURE.md](ARCHITECTURE.md)#conformance-decisions) for the behaviour in
+[ARCHITECTURE.md](ARCHITECTURE.md#conformance-decisions) for the behaviour in
 each exceptional situation.
 
 ## Type identifications
@@ -365,7 +365,7 @@ registered for the type and provides `Confirm`, `Negative`, `Terminate` and
 IEC 60870-5-104 edition 2, clause 10 ("Redundant connections"), lets a
 controlled station serve several connections of one redundancy group, of
 which exactly one is started. Closing the connection that is taken over, below,
-is how go-iec104 keeps it at one; it is not taken from the text of clause 10.
+is how this library keeps it at one; it is not taken from the text of clause 10.
 
 - **Server**: `WithRedundancyGroups` assigns each connection to a group by
   the client's address. Each connection has its own STARTDT/STOPDT state; the
@@ -447,18 +447,12 @@ Where the two differ in what a controlled station permits:
   station) needs the file read permission, so a VIEWER downloads a file to
   its end. cB-Sigma asks for file write, and refuses a viewer's
   acknowledgement with cause 17 after sending the whole file (seen in the
-  container suite); a go-iec104 client then reports the refusal.
+  container suite); our client then reports the refusal.
 
 ## Known deviations
 
-- While the application lags 256 received events behind, received I frames
-  are not acknowledged (neither after `w` frames nor at `t2`), so that the
-  peer stops after `k` frames; a lag longer than the peer's `t1` makes the
-  peer close the connection (ed. 1, 5.1 and 5.5; see the clause table above).
-- The client's activation confirmation wait does not extend to the
-  activation termination of a command; the termination reaches the `Handler`.
-- A received ASDU that cannot be decoded is dropped without a negative
-  answer.
+The deviations that remain after the edition 1 check are listed once, in
+[LIMITATIONS.md](LIMITATIONS.md#known-deviations).
 
 ## Verification status
 
@@ -471,19 +465,20 @@ issued by an authority.
 
 The container suite below runs it against cB-Sigma too, through the
 security flags of container contract 1.2 (now part of contract 2.1 of
-iec60870-5-interop): go-iec104's
-client against the cB-Sigma station and the cB-Sigma client against a
-go-iec104 station, with certificates issued by an authority and pinned
+iec60870-5-interop): our
+client against the cB-Sigma station and the cB-Sigma client against our
+station, with certificates issued by an authority and pinned
 self-signed ones, secp256r1 and X25519, HMAC-SHA-256 and AES-256-GCM, other
 association identities, role-based access control (a viewer's command
-refused with cause 17, an operator's executed, a viewer's download from a
-go-iec104 station completed), a station that refuses an
+refused with cause 17, an operator's executed, a viewer's download from our
+station completed), a station that refuses an
 AIM, untrusted certificates on either side and a client without security.
 Where a reference station can do the same, the cB-Sigma client's complete
-result must not tell go-iec104 from it.
+result must not tell our station from it.
 
 Besides its own tests the library is run against five independent
-implementations, as client and as server, on every push. The reference
+implementations, as client and as server, on every push and pull request that changes more
+than Markdown (Interop workflow). The reference
 builds are the IEC 104 images of
 [otfabric/iec60870-5-interop v0.2.1](https://github.com/otfabric/iec60870-5-interop/releases/tag/v0.2.1)
 (container contract 2.1, which for IEC 104 is contract 1.3 of the earlier
@@ -519,7 +514,7 @@ it no longer reproduces; a fix is proposed upstream in
 have (its image declares none of them); everything else, commands with time
 tag included, in both directions.
 
-The suite (`make interop`, package `interop`) covers the types of the
+The suite (`make interop`, package `iec104/interop`) covers the types of the
 reference fixture: `M_SP`, `M_DP`, `M_ST`, `M_BO`, `M_ME_NA/NB/NC`, `M_IT`
 and their CP56Time2a variants; `C_SC`, `C_DC`, `C_RC`, `C_SE_NA/NB/NC` with
 and without time tag; `C_IC`, `C_CI`, `C_RD`, `C_CS`, `C_TS_TA`; the negative
@@ -538,7 +533,7 @@ redundancy groups (IEC 60870-5-104 edition 2, clause 10). The images pinned abov
 offer it wherever their upstream supports it. The suite reads the
 capabilities from the image under test and runs in both directions:
 
-| Feature | go-iec104 client → reference server | reference client → go-iec104 server |
+| Feature | our client → reference server | reference client → our server |
 |---------|-------------------------------------|-------------------------------------|
 | Interrogation groups | `TestClientGroups`: all five | `TestServerGroups`: all five |
 | Quality on `M_BO_NA_1` | `TestClientBitstringQuality`: all five (j60870 without read) | `TestServerBitstringQuality`: all five |
@@ -557,22 +552,26 @@ Besides the live suite, the client and the server are tested against
 recorded traffic of other implementations
 ([testdata/captures](../../iec104/testdata/captures/README.md)): CERT.LV's
 spicy-iec104 traces, the University of Western Macedonia IEC 104 dataset
-(QTester104 against IEC TestServer, with attacks) and Wireshark's synthetic
-coverage capture. Evidence levels: one recording of unknown origin on
-Ethernet (C), software testbeds (D), generated (E). None is traffic of a
-device that can be identified as physical.
+(QTester104 against IEC TestServer, with attacks), Wireshark's synthetic
+coverage capture, and the captures added in v0.2.0 (Industroyer2, the MIO8
+RTU and others attached to Wireshark issues, the Wireshark wiki, ITI, nDPI,
+EmreEkin). Evidence levels: one physical RTU documented in a
+Wireshark issue (B, the MIO8 recordings), recordings of unknown origin (C),
+software testbeds (D), generated (E). None is level A.
 
-- Every APDU is decoded and encoded again: the recorded implementations
-  byte for byte. The decoded fields agree with Wireshark 4.6.9 and with
+- Every APDU is decoded and encoded again: those of the recorded
+  implementations byte for byte, except the impossible CP56Time2a years of
+  issue 3900 and the APDUs the codec refuses (see the captures README).
+  The decoded fields agree with Wireshark 4.6.9 and with
   CERT.LV's Zeek analyzer; the differences are classified in
-  `internal/capture/oracle_test.go` (ASDUs whose length does not match their
-  type, which go-iec104 refuses whole; types it carries raw; Wireshark not
+  `iec104/internal/capture/oracle_test.go` (ASDUs whose length does not match their
+  type, which the codec refuses whole; types it carries raw; Wireshark not
   dissecting a reused port).
-- `client/capture_test.go` plays every recorded station against the client,
+- `iec104/client/capture_test.go` plays every recorded station against the client,
   through `Send` and the request methods, including three file downloads and
-  three uploads. `server/capture_test.go` plays every recorded controlling
+  three uploads. `iec104/server/capture_test.go` plays every recorded controlling
   station against the server with `Mux` and `FileServer`.
-- Classified differences: go-iec104 states the day of the week in
+- Classified differences: the client states the day of the week in
   `ClockSync` (the recorded clients send 0), calls a whole file with section
   number 0 and numbers the last section of a file after its last section (as
   lib60870-C v2.4.1; the recorded CERT.LV programs send 1 and the last

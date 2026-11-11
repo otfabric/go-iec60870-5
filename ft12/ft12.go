@@ -19,8 +19,11 @@
 // FT 1.2 also requires that a frame is sent without gaps between its
 // characters and that a receiver discards a frame with a gap (IEC 60870-5-1
 // 6.2.4.2, rule R2/R4). A [Decoder] on a generic io.Reader cannot see
-// character timing: it validates structure and checksum, and leaves idle
-// line detection to the transport (see link.Config).
+// character timing: it validates structure and checksum. [Decoder.Gap]
+// approximates the check from the time between reads: octets of an
+// unfinished frame followed by a longer pause are discarded (link sets it
+// from link.Config.FrameGap). Exact character timing is left to the
+// transport.
 package ft12
 
 import (

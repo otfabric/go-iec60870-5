@@ -41,7 +41,7 @@ iec103/client iec103/server  iec101/client  iec101/server        iec104/client  
 | `iec103` | 103 only | Its own ASDU (one-octet data unit identifier, FUN/INF addressing, types 1-31), IEC 60870-5-103 cl. 7. |
 | `telecontrol` | 101 (104 later) | How a controlling station recognises the answers to its requests. Neither 101 nor 104 has a transaction identifier; both use the same matching rules. |
 | `iec104/...` | 104 only | APCI framing, sequence numbers, k/w, t0..t3, TLS, redundancy groups: nothing of it applies to a serial line. |
-| `sec` | 104 (101 planned) | IEC TS 60870-5-7 profiles IEC 62351-5 for 101 and 104; it is wired into 104 only. `Config.Serial` selects the MAC lengths of serial links. The `Endpoint` also emits the statistic reports (M_IT_TB_1 Secure Data) with the output of the call that made them due, and refuses monitor-direction data for roles without MONITOR DATA in `Protect`, so the transport needs no extra wiring. |
+| `sec` | 104 only | IEC TS 60870-5-7 profiles IEC 62351-5 for 101 and 104; it is wired into 104 only. `Config.Serial` selects the MAC lengths of serial links. The `Endpoint` also emits the statistic reports (M_IT_TB_1 Secure Data) with the output of the call that made them due, and refuses monitor-direction data for roles without MONITOR DATA in `Protect`, so the transport needs no extra wiring. |
 
 What is deliberately not shared: there is no universal client or server
 interface across the companion standards. IEC 103 (protection equipment,
@@ -60,8 +60,9 @@ APIs that follow their own application models.
   `iec102`, `iec102/client` and `iec102/server`.
 - `iec103` imports `cp`; `iec103/client` and `iec103/server` add `ft12`,
   `link` and `internal/logx`.
-- The `iec104` tree imports `asdu`, `sec` and the root package; nothing
-  outside `iec104/` imports it.
+- `sec` imports `asdu`.
+- The `iec104` tree imports `asdu`, `sec`, `internal/logx` and the root
+  package; nothing outside `iec104/` imports it.
 - The root package `iec60870` holds only the `Logger` interfaces; every
   package may import it.
 - Test infrastructure of the capture suites: `internal/pcapio` (pcap,
@@ -69,7 +70,7 @@ APIs that follow their own application models.
   library; `internal/serialcap` adds `ft12` and `link`;
   `internal/testutil/corpus` adds `pcapio`. The `<standard>/internal/capture`
   packages build on them; no production package imports any of them.
-- The graph is acyclic; `go vet` enforces it.
+- The graph is acyclic; the Go toolchain refuses import cycles.
 
 ## IEC 101 stations
 
@@ -88,8 +89,10 @@ it when it is an `io.Closer`. A station runs two goroutines on it:
 IEC 60870-5-101:2003 (6.1) does not require a receiver to measure gaps
 between characters, but after a receive error it looks for a 33-bit line
 idle. A generic `io.Reader` does not expose timing, so `ft12` validates
-structure and checksum and hunts for the next start character instead; see
-[LIMITATIONS.md](LIMITATIONS.md).
+structure and checksum and hunts for the next start character instead, and
+discards an unfinished frame when the time between reads inside it exceeds
+`link.Config.FrameGap` (`ft12.Decoder.Gap`); see
+[LIMITATIONS.md](LIMITATIONS.md#iec-60870-5-101).
 
 ### Link layer
 
@@ -100,7 +103,10 @@ message with FCV set and clears it after reset of remote link. A response
 whose function code cannot answer the message sent (an ACK while a class 2
 poll is outstanding: a late repetition) is discarded and the real answer
 awaited; up to 8 frames queue for the exchange, and those left over are
-discarded before the next message. `Init` repeats request status of link
+discarded before the next message. When only such responses arrive until
+the last repetition times out, the error wraps both `ErrUnexpected` and
+`ErrTimeout`, so the IEC 101, 102 and 103 clients take the link down and
+initialize it again. `Init` repeats request status of link
 while the secondary reports DFC (IEC 60870-5-101:2003 figure 5).
 
 `link.Secondary` follows the states of IEC 60870-5-101:2003 figure 6:

@@ -28,7 +28,9 @@
 //
 // The link is initialized (request status of link, reset of remote link)
 // by [Client.Init] or the first request, and again after the station
-// stopped answering. Requests run one at a time; a second waits.
+// stopped answering (link.ErrTimeout, which link.ErrUnexpected also wraps
+// when only answers to something else came until the last time-out).
+// Requests run one at a time; a second waits.
 package client
 
 import (

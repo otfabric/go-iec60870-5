@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
 
 // Package capture reads the recorded IEC 60870-5-102 frames kept in
-// testdata/captures for the coming IEC 102 work: the frame log of the
-// innoWatt icra-tarifes-optic tool and the frames in the gisce/iec870ree
-// tests. There is no IEC 102 ASDU codec yet (docs/ROADMAP.md); the tests
-// check the FT 1.2 framing, which IEC 102 shares (with a 2-octet link
-// address in these sources).
+// testdata/captures: the frame log of the innoWatt icra-tarifes-optic tool
+// and the frames in the gisce/iec870ree tests. Its tests check the FT 1.2
+// framing (with the 2-octet link address of these sources) and the
+// manifest; the ASDUs of the same log are decoded by the iec102 package
+// tests (capture_test.go).
 //
 // It is test infrastructure and not part of the public API.
 package capture

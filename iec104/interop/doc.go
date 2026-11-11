@@ -34,6 +34,7 @@
 // the reference clients talk to lives in internal/station, shared with the
 // end-to-end tests of package e2e.
 //
-// Build with -tags=interop. Running needs Docker; see README.md § Interop
-// tests. Editor/gopls: add -tags=interop to buildFlags.
+// Build with -tags=interop. Running needs Docker (make interop); see the
+// section "Interop tests" of docs/iec104/README.md. Editor/gopls: add
+// -tags=interop to buildFlags.
 package interop

@@ -16,7 +16,11 @@ The procedures implemented (IEC 60870-5-2 clause 4):
   - S2 send/confirm: [Primary.SendConfirm](#func-primary-sendconfirm), [Primary.ResetLink](#func-primary-resetlink), [Primary.ResetUser](#func-primary-resetuser), [Balanced.Send](#func-balanced-send), [Balanced.Test](#func-balanced-test)
   - S3 request/respond: [Primary.RequestStatus](#func-primary-requeststatus), [Primary.RequestData](#func-primary-requestdata)
 
-with the frame count bit (FCB/FCV) protocol: a primary toggles FCB for every new message with FCV set and repeats a message with the same FCB after a time-out; a secondary that receives a repeated FCB resends its previous response without processing the message again.
+with the frame count bit (FCB/FCV) protocol: a primary toggles FCB for every new message with FCV set and repeats a message with the same FCB after a time-out; a secondary that receives a repeated FCB resends its previous response without processing the message again. With one bit, a repetition that arrives after the next message cannot be told from a new message (TestRepetitionAfterTheNextMessage).
+
+A primary that receives only responses that cannot answer its message (a late answer to an earlier one, a wrong function code) until the last time-out returns an error wrapping both ErrUnexpected and ErrTimeout, so a caller that re-initializes the link after ErrTimeout does so in that case too.
+
+[Config.FrameGap](#func-config-framegap) (default [Config.Timeout](#func-config-timeout), negative disables) discards an unfinished frame when the line stays idle longer than that inside it (IEC 60870-5-1 6.2.4.2, rules R2 and R4), using [ft12.Decoder.Gap](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/ft12#Decoder.Gap).
 
 ## Constants
 

@@ -8,8 +8,14 @@
 // monitor-direction ASDUs to a handler.
 //
 // The link is initialized in the background and re-initialized when the
-// controlled station stops answering; [Client.WaitUp] waits for it.
-// Requests fail with [iec101.ErrLinkDown] while the link is down.
+// controlled station stops answering, or answers only with frames that
+// cannot answer the message until the last time-out (link.ErrUnexpected
+// wrapping link.ErrTimeout); [Client.WaitUp] waits for it and returns only
+// after Config.OnState for the change to StateUp has returned. Requests
+// fail with [iec101.ErrLinkDown] while the link is down, and return at
+// their context deadline even while the link layer is still repeating
+// their user data. After a failed poll the client waits PollInterval
+// before it polls again.
 package client
 
 import (
