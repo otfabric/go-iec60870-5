@@ -33,7 +33,7 @@ contract's defaults (1-octet link address, COT 1, CA 1, IOA 2):
 The run was repeated on 2026-11-11 after the link-state changes below
 (not-reset state, DFC handling, response filtering, FCB repetition by
 function and content, receiver address in balanced responses): all pass,
-44 of 44 in each direction.
+20 of 20 client scenarios and 124 of 124 reference-client cases.
 
 Balanced mode with distinct addresses (station 1 and 2) was run once by
 hand against the lib60870-C image (`server --link-address 2
