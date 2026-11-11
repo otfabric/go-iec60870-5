@@ -370,7 +370,7 @@ func rawEquipment(t *testing.T, b *serialline.End) *serialline.RawSecondary {
 		case iec103.TimeSync:
 			out = iec103.New(iec103.CauseTimeSync, 3, iec103.FunGlobal, iec103.InfTimeSync, iec103.TimeSync{Time: x.Time})
 		case iec103.GIInit:
-			out = iec103.New(iec103.CauseGITermination, 3, iec103.FunGlobal, iec103.InfGIEnd, iec103.GITermination{SCN: x.SCN})
+			out = iec103.New(iec103.CauseGITermination, 3, iec103.FunGlobal, iec103.InfGIEnd, iec103.GITermination(x))
 		case iec103.GeneralCommand:
 			out = iec103.New(iec103.CauseCommandAck, 3, a.Fun, a.Inf, iec103.TimeTagged{DPI: x.DCO, SIN: x.RII, Time: cp.At(time.Now())})
 		default:

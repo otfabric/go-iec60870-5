@@ -146,8 +146,12 @@ fuzz: ## Run every Fuzz target for FUZZTIME (targets discovered, never listed)
 # Seconds of each chaos seed and number of seeds. The defaults are the nightly run's.
 CHAOS_SECONDS ?= 30
 CHAOS_SEEDS ?= 20
-chaos: ## Run the chaos test for CHAOS_SEEDS seeds of CHAOS_SECONDS each
-	@E2E_CHAOS_SECONDS=$(CHAOS_SECONDS) E2E_CHAOS_SEEDS=$(CHAOS_SEEDS) go test -count=1 -race -timeout=60m -run '^TestChaos$$' ./iec104/e2e/
+# The chaos suites: IEC 104 over TCP, the serial standards over a faulty
+# in-memory line (IEC 101 runs every seed unbalanced and balanced). Narrow
+# it with e.g. CHAOS_PKGS=./iec103/e2e/.
+CHAOS_PKGS ?= ./iec104/e2e/ ./iec101/e2e/ ./iec102/e2e/ ./iec103/e2e/
+chaos: ## Run the chaos tests of CHAOS_PKGS for CHAOS_SEEDS seeds of CHAOS_SECONDS each
+	@E2E_CHAOS_SECONDS=$(CHAOS_SECONDS) E2E_CHAOS_SEEDS=$(CHAOS_SEEDS) go test -count=1 -race -timeout=90m -run '^TestChaos$$' $(CHAOS_PKGS)
 
 cross: ## Cross-compile without cgo (build only, the tests do not run there)
 	@for p in linux/amd64 linux/arm64 linux/arm darwin/arm64 windows/amd64; do \

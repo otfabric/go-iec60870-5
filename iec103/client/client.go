@@ -338,6 +338,7 @@ func (c *Client) up() (<-chan struct{}, error) {
 		return c.downCh, nil
 	case iec103.StateClosed:
 		return nil, iec103.ErrClosed
+	case iec103.StateDown:
 	}
 	return nil, iec103.ErrLinkDown
 }

@@ -142,7 +142,7 @@ func frame(t testing.TB, fn byte, fcb, fcv bool, addr uint16, data []byte) []byt
 }
 
 func TestHostileServer(t *testing.T) {
-	interro := func(t *testing.T) []byte {
+	giReq := func(t *testing.T) []byte {
 		return encode(t, asdu.New(asdu.CauseActivation, ca, asdu.Interrogation{Qualifier: asdu.QOIStation}))
 	}
 	cases := []struct {
@@ -161,7 +161,7 @@ func TestHostileServer(t *testing.T) {
 			legitimate(t, rp)
 		}},
 		{"truncated frames", nil, func(t *testing.T, _ *server.Server, rp *serialline.RawPrimary, _ *counted) {
-			full := frame(t, link.FuncUserDataConf, true, true, 3, interro(t))
+			full := frame(t, link.FuncUserDataConf, true, true, 3, giReq(t))
 			for n := 1; n < len(full); n++ {
 				rp.MustRaw(full[:n])
 			}
@@ -172,7 +172,7 @@ func TestHostileServer(t *testing.T) {
 			// A frame as long as FT 1.2 allows carries an ASDU longer than
 			// the profile's: it is acknowledged and dropped.
 			big := make([]byte, ft12.Params{AddrSize: 1}.MaxData())
-			copy(big, interro(t))
+			copy(big, giReq(t))
 			rp.Expect(link.FuncUserDataConf, big, 0, -1)
 			// The two length octets disagree; the length is below C and A.
 			rp.MustRaw([]byte{0x68, 0x10, 0x11, 0x68, 0x73, 0x03, 0x00, 0x00, 0x16})
@@ -303,7 +303,7 @@ func TestHostileServer(t *testing.T) {
 			rp.Init()
 			nacks := 0
 			for range 500 {
-				a := rp.Expect(link.FuncUserDataConf, interro(t), 0, 1, -1)
+				a := rp.Expect(link.FuncUserDataConf, giReq(t), 0, 1, -1)
 				if serialline.Func(a) == 1 {
 					nacks++
 				}
@@ -317,7 +317,7 @@ func TestHostileServer(t *testing.T) {
 			legitimate(t, rp)
 		}},
 		{"half-open line", nil, func(t *testing.T, _ *server.Server, rp *serialline.RawPrimary, _ *counted) {
-			full := frame(t, link.FuncUserDataConf, true, true, 3, interro(t))
+			full := frame(t, link.FuncUserDataConf, true, true, 3, giReq(t))
 			rp.MustRaw(full[:7])
 			rp.Silent(300*time.Millisecond, "half a frame")
 			legitimate(t, rp)
@@ -344,7 +344,7 @@ func TestHostileServer(t *testing.T) {
 		{"reset in the middle of an exchange", nil, func(t *testing.T, s *server.Server, rp *serialline.RawPrimary, _ *counted) {
 			rp.Init()
 			rp.PollAll(16)
-			rp.Expect(link.FuncUserDataConf, interro(t), 0, -1)
+			rp.Expect(link.FuncUserDataConf, giReq(t), 0, -1)
 			time.Sleep(50 * time.Millisecond)
 			rp.Poll(1)
 			// Reset of remote link keeps the queued data; reset of user
@@ -359,7 +359,7 @@ func TestHostileServer(t *testing.T) {
 		}},
 		{"peer vanishes mid-frame", nil, func(t *testing.T, s *server.Server, rp *serialline.RawPrimary, _ *counted) {
 			rp.Init()
-			rp.MustRaw(frame(t, link.FuncUserDataConf, true, true, 3, interro(t))[:6])
+			rp.MustRaw(frame(t, link.FuncUserDataConf, true, true, 3, giReq(t))[:6])
 			_ = rp.End.Close()
 			select {
 			case <-s.Done():
