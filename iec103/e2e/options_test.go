@@ -64,10 +64,23 @@ func TestBroadcastSyncAnswer(t *testing.T) {
 		if _, err := r.c.Interrogate(ctx(t)); err != nil {
 			t.Fatal(err)
 		}
+		// The client hands received ASDUs to the handler on a goroutine of
+		// its own: an ASDU 6 polled before the GI can still be on its way
+		// when Interrogate returns. Wait for it when it is expected.
 		got := false
-		for len(r.got) > 0 {
-			if a := <-r.got; a.Type == iec103.TypeTimeSync {
-				got = true
+		deadline := time.After(2 * time.Second)
+	drain:
+		for !got {
+			select {
+			case a := <-r.got:
+				got = a.Type == iec103.TypeTimeSync
+			case <-deadline:
+				break drain
+			default:
+				if !answer {
+					break drain
+				}
+				time.Sleep(5 * time.Millisecond)
 			}
 		}
 		if got != answer {
