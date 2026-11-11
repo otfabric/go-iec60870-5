@@ -12,7 +12,9 @@ import (
 	"errors"
 	"io"
 	"math/rand"
+	"os"
 	"runtime"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -294,6 +296,31 @@ func (e *End) flushHeld() error {
 		e.tmr = nil
 	}
 	return e.out.write(h)
+}
+
+// ChaosFaults are the faults of each direction of the chaos suites:
+// frequent enough that every kind happens within a second, rare enough
+// that exchanges still succeed. The pauses stay below the link time-outs
+// of the suites (50 ms and more).
+var ChaosFaults = Faults{Drop: 0.03, Dup: 0.03, Corrupt: 0.03, Noise: 0.03, Truncate: 0.02,
+	Split: 0.05, Reorder: 0.02, Delay: 0.05, MaxDelay: 20 * time.Millisecond}
+
+// ChaosRuns returns how long each chaos seed runs and how many seeds run:
+// E2E_CHAOS_SECONDS (default 2) and E2E_CHAOS_SEEDS (default 3), the
+// variables of the IEC 104 chaos test; with -short one seed of one second.
+func ChaosRuns() (time.Duration, int) {
+	seconds, seeds := envInt("E2E_CHAOS_SECONDS", 2), envInt("E2E_CHAOS_SEEDS", 3)
+	if testing.Short() {
+		seconds, seeds = 1, 1
+	}
+	return time.Duration(seconds) * time.Second, seeds
+}
+
+func envInt(name string, def int) int {
+	if v, err := strconv.Atoi(os.Getenv(name)); err == nil && v > 0 {
+		return v
+	}
+	return def
 }
 
 // Goroutines records the number of goroutines and returns a check that
