@@ -89,6 +89,9 @@ func TestRequests(t *testing.T) {
 				req.Reply(asdu.CauseActivationTerm, false),
 			}
 		case asdu.CounterInterrogation:
+			if o.Freeze != asdu.FreezeRead { // a freeze command: confirmation only
+				return []*asdu.ASDU{req.Reply(asdu.CauseActivationCon, false)}
+			}
 			return []*asdu.ASDU{req.Reply(asdu.CauseActivationCon, true)}
 		case asdu.Read:
 			if o.IOA == 9 {
@@ -115,6 +118,9 @@ func TestRequests(t *testing.T) {
 	if _, err := r.CounterInterrogate(ctx, 1, asdu.CounterGeneral, asdu.FreezeRead); !errors.As(err, &neg) {
 		t.Fatalf("counter: %v", err)
 	}
+	if data, err := r.CounterInterrogate(ctx, 1, asdu.CounterGeneral, asdu.FreezeWithReset); err != nil || data != nil {
+		t.Fatalf("freeze: %v %v", data, err)
+	}
 	a, err := r.Read(ctx, 1, 4)
 	if err != nil || a.First().Address() != 4 {
 		t.Fatalf("read %v %v", a, err)
@@ -129,7 +135,14 @@ func TestRequests(t *testing.T) {
 		func() error { return r.TestCommand(ctx, 1, false) },
 		func() error { return r.TestCommand(ctx, 1, true) },
 		func() error { return r.ResetProcess(ctx, 1, asdu.ResetProcessGeneral) },
-		func() error { return r.DelayAcquisition(ctx, 1, time.Hour) },
+		func() error { return r.SetDelay(ctx, 1, time.Hour) },
+		func() error {
+			d, err := r.MeasureDelay(ctx, 1)
+			if err == nil && (d < 0 || d > time.Second) {
+				err = errors.New("implausible delay")
+			}
+			return err
+		},
 	} {
 		if err := f(); err != nil {
 			t.Fatal(err)

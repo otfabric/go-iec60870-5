@@ -14,7 +14,7 @@ requirement whose standard text we do not hold ([STANDARDS.md](STANDARDS.md)).
 | FT-2 | CS is the sum modulo 256 of C, A and user data; a mismatch rejects the frame | idem | `TestDecodeErrors`, `FuzzDecode` |
 | FT-3 | Both length octets equal; L counts C, A and user data; at most 255 | idem, 103 cl. 6.1 note 2 | `TestDecodeErrors`, `TestEncodeErrors` |
 | FT-4 | Link address field of 0, 1 or 2 octets (system parameter) | interpretation (101); 103 cl. 6.2.3 fixes 1 | `TestRoundTrip`, `TestEncodeErrors` |
-| FT-5 | After an invalid frame the receiver resynchronizes on the next start character without losing a following valid frame | 60870-5-1 rule R4 (interpretation) | `TestDecoderResync` |
+| FT-5 | After an invalid frame the receiver resynchronizes without losing a following valid frame (101:2003 figures 6/9 use a 33-bit line idle; on an io.Reader we hunt for the next start character, a documented deviation) | 101 cl. 6, figures 6 and 9 | `TestDecoderResync` |
 | FT-6 | Malformed input never panics | engineering | `FuzzDecode` |
 
 ## Link procedures (`link`)
@@ -31,7 +31,7 @@ requirement whose standard text we do not hold ([STANDARDS.md](STANDARDS.md)).
 | LK-8 | Answers 14 (not functioning) and 15 (not implemented) are reported; a secondary answers 15 to undefined functions | 103 cl. 6.3 | `TestPrimaryNegativeAnswers`, `TestSecondaryOddMessages` |
 | LK-9 | Broadcast address (all ones) accepts send/no reply only, without answer | 103 cl. 6.2.3 | `TestUnbalanced` |
 | LK-10 | E5h may replace ACK and the no-data NACK when ACD and DFC are clear; a primary always accepts it | 103 cl. 6.1; interpretation | `TestUnbalanced` (single char variant) |
-| LK-11 | Reset of FCB (function 7) | 103 cl. 6.3 | `TestUnbalanced` |
+| LK-11 | Reset of FCB (function 7), IEC 60870-5-103 only (not a 101 function, 101 table 3) | 103 cl. 6.3 | `TestUnbalanced` |
 | LK-12 | Balanced: each station initializes its own direction; DIR set by station A; test function for link | interpretation | `TestBalanced`, `iec101/e2e.TestClientBalancedSupervision` |
 | LK-13 | A secondary ignores frames for other addresses and other secondaries' responses | interpretation | `TestWrongAddressTimesOut`, `TestSecondaryOddMessages` |
 
@@ -43,7 +43,8 @@ requirement whose standard text we do not hold ([STANDARDS.md](STANDARDS.md)).
 | 101-2 | Controlled station sends end of initialization after link reset (and after reset of user process, COI remote reset) | 60870-5-5 station initialization (interpretation) | `TestServices`, `TestServerUnbalancedEdges` |
 | 101-3 | Interrogation: confirmation, data with the "interrogated by" cause, termination | 104 cl. 9 / 60870-5-5 (held for 104) | `TestServices`, `telecontrol.TestRequests` |
 | 101-4 | Select-before-operate: select, execute, deactivate; execute without select refused negatively | idem | `TestServices` |
-| 101-5 | Test command C_TS_NA_1 with the fixed test pattern 55AAh; delay acquisition C_CD_NA_1 | interpretation (101-only types) | `TestServices` |
+| 101-5 | Test command C_TS_NA_1 with the fixed test pattern 55AAh; delay acquisition C_CD_NA_1: activation measures, spontaneous sets the delay | 101 cl. 7.2.6.14, 7.3.4.7, 7.4.12 | `TestServices`, `telecontrol.TestRequests` |
+| 101-9 | A counter freeze or reset command (FRZ 1..3) is confirmed without readings or termination | 101 cl. 7.4.8, figures 95, 96 | `TestServices`, `telecontrol.TestRequests` |
 | 101-6 | Answers are recognised by type, CA, IOA and cause; a termination before the confirmation belongs to an earlier request | 104 practice, carried over | `telecontrol.TestRequests`, `TestMatching` |
 | 101-7 | Requests fail promptly while the link is down; the link is re-initialized automatically | engineering | `TestLinkRecovery`, `TestWaitUpTimeout` |
 | 101-8 | Undecodable user data is acknowledged at link level and dropped | engineering | `TestServerUnbalancedEdges`, `TestClientBalancedSupervision` |

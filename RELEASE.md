@@ -17,10 +17,14 @@ First version of go-iec60870-5.
 - `ft12`: FT 1.2 frames and a resynchronizing stream decoder.
 - `link`: IEC 60870-5-2 link procedures, unbalanced primary and secondary,
   balanced station.
-- `telecontrol`: the request procedures IEC 101 and IEC 104 share.
+- `telecontrol`: the request procedures IEC 101 and IEC 104 share. A
+  counter freeze command returns at its confirmation (101:2003 7.4.8);
+  delay acquisition is `MeasureDelay` (activation) and `SetDelay`
+  (spontaneous), per 101:2003 7.4.12.
 - `iec101`: IEC 60870-5-101 controlling station (`iec101/client`) and
   controlled station (`iec101/server`), unbalanced and balanced, with
-  `Done`/`Err`. Interop suite `iec101/interop` (`make interop-iec101`)
+  `Done`/`Err`, checked against IEC 60870-5-101:2003 (open deviations in
+  LIMITATIONS.md). Interop suite `iec101/interop` (`make interop-iec101`)
   against the lib60870-C and cB-Sigma images of iec60870-5-interop.
 - `iec103`: IEC 60870-5-103 codec for every compatible type, controlling
   system (`iec103/client`) and protection equipment (`iec103/server`),

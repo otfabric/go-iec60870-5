@@ -91,14 +91,6 @@ func (c *Client) Deactivate(ctx context.Context, ca asdu.CommonAddr, obj asdu.In
 
 Deactivate cancels a selected command (cause deactivation).
 
-#### func (Client) DelayAcquisition
-
-```go
-func (c *Client) DelayAcquisition(ctx context.Context, ca asdu.CommonAddr, d time.Duration) error
-```
-
-DelayAcquisition sends a delay acquisition command (C\_CD\_NA\_1).
-
 #### func (Client) Done
 
 ```go
@@ -123,6 +115,14 @@ func (c *Client) Interrogate(ctx context.Context, ca asdu.CommonAddr, qoi asdu.Q
 
 Interrogate runs an interrogation (C\_IC\_NA\_1) with qualifier qoi ([asdu.QOIStation](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#QOIStation) or [asdu.QOIGroup](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#QOIGroup)) and returns the data the station sent with the matching cause until the activation termination.
 
+#### func (Client) MeasureDelay
+
+```go
+func (c *Client) MeasureDelay(ctx context.Context, ca asdu.CommonAddr) (time.Duration, error)
+```
+
+MeasureDelay measures the transmission delay with the delay acquisition procedure (C\_CD\_NA\_1, cause activation). See [telecontrol.Requester.MeasureDelay](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/telecontrol#Requester.MeasureDelay).
+
 #### func (Client) Read
 
 ```go
@@ -146,6 +146,14 @@ func (c *Client) Send(ctx context.Context, a *asdu.ASDU) error
 ```
 
 Send transmits a in the control direction without waiting for an application answer. Answers reach the Handler.
+
+#### func (Client) SetDelay
+
+```go
+func (c *Client) SetDelay(ctx context.Context, ca asdu.CommonAddr, d time.Duration) error
+```
+
+SetDelay sends the transmission delay to the station (C\_CD\_NA\_1, cause spontaneous), which corrects following clock synchronizations by it. See [telecontrol.Requester.SetDelay](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/telecontrol#Requester.SetDelay).
 
 #### func (Client) State
 

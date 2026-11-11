@@ -51,9 +51,11 @@ type Config struct {
 	FT12 ft12.Params
 
 	// Timeout is how long a primary waits for the response to a message
-	// before it repeats it. Zero means [DefaultTimeout]. Choose it from
-	// the line speed and the secondary's reaction time (IEC 60870-5-2
-	// annex A).
+	// before it repeats it. Zero means [DefaultTimeout]. It must exceed the
+	// round trip plus the transmission time of the longest frame
+	// (IEC 60870-5-101:2003 6.2.2, formulas (1) and (2)): about 2.25 s at
+	// 1200 bit/s with 240-octet frames. The 1 s default suits 9600 bit/s
+	// and faster, and transports such as TCP.
 	Timeout time.Duration
 
 	// Retries is how often a primary repeats a message that was not

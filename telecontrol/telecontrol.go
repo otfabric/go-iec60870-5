@@ -367,9 +367,21 @@ func (r *Requester) Interrogate(ctx context.Context, ca asdu.CommonAddr, qoi asd
 }
 
 // CounterInterrogate runs a counter interrogation (C_CI_NA_1).
+//
+// With freeze [asdu.FreezeRead] it is a counter request: the station
+// confirms, sends the integrated totals and terminates, and the totals are
+// returned. With a freeze or reset qualifier it is a counter freeze
+// command: the station only confirms it and sends no readings
+// (IEC 60870-5-101:2003 7.4.8, mode C/D, figures 95 and 96), so the call
+// returns at the confirmation with no data; collect the frozen values with
+// a following request.
 func (r *Requester) CounterInterrogate(ctx context.Context, ca asdu.CommonAddr, request, freeze uint8) ([]*asdu.ASDU, error) {
 	obj := asdu.CounterInterrogation{Request: request, Freeze: freeze}
-	return r.Collect(ctx, asdu.New(asdu.CauseActivation, ca, obj), obj.Cause())
+	req := asdu.New(asdu.CauseActivation, ca, obj)
+	if freeze != asdu.FreezeRead {
+		return nil, r.Confirmed(ctx, req)
+	}
+	return r.Collect(ctx, req, obj.Cause())
 }
 
 // Command sends a process command with cause activation (or deactivation
@@ -409,11 +421,57 @@ func (r *Requester) TestCommand(ctx context.Context, ca asdu.CommonAddr, withTim
 	return r.Confirmed(ctx, asdu.New(asdu.CauseActivation, ca, obj))
 }
 
-// DelayAcquisition sends a delay acquisition command (C_CD_NA_1,
-// IEC 60870-5-101 only) carrying d, and waits for its confirmation.
-func (r *Requester) DelayAcquisition(ctx context.Context, ca asdu.CommonAddr, d time.Duration) error {
+// SetDelay sends the transmission delay d to the station: C_CD_NA_1 with
+// cause spontaneous ("set delay", IEC 60870-5-101:2003 7.3.4.7 and
+// 7.4.12). The station corrects the time of every following clock
+// synchronization command by it. No application answer is defined; the
+// call returns when the link layer delivered the command. d is sent in
+// milliseconds, 0..59999.
+func (r *Requester) SetDelay(ctx context.Context, ca asdu.CommonAddr, d time.Duration) error {
 	ms := min(max(d.Milliseconds(), 0), 59999)
-	return r.Confirmed(ctx, asdu.New(asdu.CauseActivation, ca, asdu.DelayAcquisition{Delay: uint16(ms)}))
+	return r.Send(ctx, asdu.New(asdu.CauseSpontaneous, ca, asdu.DelayAcquisition{Delay: uint16(ms)}))
+}
+
+// MeasureDelay measures the transmission delay to a station with the
+// delay acquisition procedure (IEC 60870-5-101:2003 7.4.12): it sends
+// C_CD_NA_1 with cause activation carrying the sending time (second and
+// millisecond of the minute, CP16Time2a), and the station's confirmation
+// carries that time plus its reaction time. The one-way delay is half of
+// the round trip less the reaction time.
+//
+// The formula is that of IEC 60870-5-5 6.13 as IEC 60870-5-101 refers to
+// it; we do not hold IEC 60870-5-5, so it is an interpretation. Send the
+// result with [Requester.SetDelay].
+func (r *Requester) MeasureDelay(ctx context.Context, ca asdu.CommonAddr) (time.Duration, error) {
+	ctx, cancel := r.bound(ctx)
+	defer cancel()
+	start := time.Now()
+	sent := (start.Second()*1000 + start.Nanosecond()/int(time.Millisecond)) % 60000
+	req := asdu.New(asdu.CauseActivation, ca, asdu.DelayAcquisition{Delay: uint16(sent)})
+	x, err := r.begin(ctx, req, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer r.end(x)
+	for {
+		a, err := x.next(ctx)
+		if err != nil {
+			return 0, err
+		}
+		if a.Cause == asdu.CauseActivationTerm {
+			continue
+		}
+		if err := Rejected(a); err != nil {
+			return 0, err
+		}
+		roundTrip := time.Since(start)
+		var reaction time.Duration
+		if o, ok := a.First().(asdu.DelayAcquisition); ok {
+			reaction = time.Duration((int(o.Delay)-sent+60000)%60000) * time.Millisecond
+		}
+		d := (roundTrip - reaction) / 2
+		return max(d, 0), nil
+	}
 }
 
 // ResetProcess sends a reset process command (C_RP_NA_1).

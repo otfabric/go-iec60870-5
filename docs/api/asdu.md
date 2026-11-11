@@ -1694,7 +1694,7 @@ IsFileTransfer reports whether the type belongs to the file transfer services (1
 func (t TypeID) IsPrivate() bool
 ```
 
-IsPrivate reports whether the type is in the range the standard reserves for private use (128..255).
+IsPrivate reports whether the type is in 128..255, the range IEC 104 leaves to private use. IEC 60870-5-101:2003 7.2.1.1 reserves 128..135 and leaves only 136..255 private.
 
 #### func (TypeID) IsProcessCommand
 

@@ -35,10 +35,13 @@ link addresses, balanced mode with distinct addresses, single character
 acknowledgement, multidrop. cB-Sigma's IEC 101 was debugged against
 lib60870, so the two references are not fully independent of each other.
 
-We do not hold the text of IEC 60870-5-1, -2 or -101; the behaviour below
-follows the extracts of IEC 60870-5-1 and -2 quoted in IEC 60870-5-103
-clause 6 (GOST R IEC 60870-5-103-2005, an identical translation) and the
-documented behaviour of lib60870-C. See [docs/STANDARDS.md](docs/STANDARDS.md).
+The implementation was checked clause by clause on 2026-11-11 against
+IEC 60870-5-101:2003 (GOST R IEC 60870-5-101-2006, an identical
+translation), which also profiles the FT 1.2 rules of IEC 60870-5-1 and the
+link procedures of IEC 60870-5-2 (clause 6). Amendment 1:2015 is not held.
+The deviations found and still open are listed in
+[LIMITATIONS.md](LIMITATIONS.md#iec-60870-5-101). See
+[docs/STANDARDS.md](docs/STANDARDS.md).
 
 ## Physical and link layer
 
@@ -62,19 +65,22 @@ documented behaviour of lib60870-C. See [docs/STANDARDS.md](docs/STANDARDS.md).
 
 ASDU field sizes: cause of transmission 1 or 2 octets, common address 1 or
 2, information object address 1, 2 or 3 (`asdu.Params`); every type
-identification of the `asdu` package (IEC 104's 67 plus the 101-only
-C_TS_NA_1 and C_CD_NA_1) encodes under any of them.
+identification of the `asdu` package encodes under any of them. The codec
+does not restrict itself to the 101 profile: the IEC 104 types 58..64
+(CP56Time2a commands), C_TS_TA_1 and 127 are reserved in IEC 60870-5-101:2003
+(7.2.1.1) and must not be sent on a 101 link; the 101-only C_TS_NA_1 and
+C_CD_NA_1 are supported.
 
 | Function | Client | Server | Evidence |
 |---|---|---|---|
 | End of initialization (M_EI_NA_1) after the first link reset and after reset of user process | delivered to the handler | sent | e2e |
 | General and group interrogation (C_IC_NA_1) | `Interrogate` | handler | e2e, independent (station; groups e2e only) |
-| Counter interrogation (C_CI_NA_1) | `CounterInterrogate` | handler | e2e, independent |
+| Counter interrogation (C_CI_NA_1): request (mode B) and freeze/reset commands confirmed without readings (modes C/D, 7.4.8) | `CounterInterrogate` | handler | e2e; independent for the request |
 | Read (C_RD_NA_1) | `Read` | handler | e2e, independent |
 | Clock synchronization (C_CS_NA_1) | `ClockSync` | handler | e2e, independent |
 | Test command (C_TS_NA_1, fixed test pattern) | `TestCommand` | handler | e2e, independent |
 | Reset process (C_RP_NA_1) | `ResetProcess` | handler | e2e |
-| Delay acquisition (C_CD_NA_1) | `DelayAcquisition` | handler | e2e |
+| Delay acquisition (C_CD_NA_1, 7.4.12): measurement with cause activation, setting the delay with cause spontaneous | `MeasureDelay`, `SetDelay` | handler (the clock correction is the application's) | e2e |
 | Process commands, direct and select-before-operate, deactivation | `Command`, `Deactivate` | handler | e2e, independent (C_SC, C_DC, C_RC, C_SE_NA/NB/NC) |
 | Spontaneous (class 1) and cyclic (class 2) data | handler | `Send`, `SendClass` | e2e, independent (class 1 reports) |
 | Negative confirmations and "unknown ..." causes | `*telecontrol.NegativeError` | `Negative`, `Reject` | e2e, independent |

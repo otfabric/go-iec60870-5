@@ -140,13 +140,7 @@ func (r *Requester) CounterInterrogate(ctx context.Context, ca asdu.CommonAddr, 
 
 CounterInterrogate runs a counter interrogation (C\_CI\_NA\_1).
 
-#### func (Requester) DelayAcquisition
-
-```go
-func (r *Requester) DelayAcquisition(ctx context.Context, ca asdu.CommonAddr, d time.Duration) error
-```
-
-DelayAcquisition sends a delay acquisition command (C\_CD\_NA\_1, IEC 60870-5-101 only) carrying d, and waits for its confirmation.
+With freeze [asdu.FreezeRead](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#FreezeRead) it is a counter request: the station confirms, sends the integrated totals and terminates, and the totals are returned. With a freeze or reset qualifier it is a counter freeze command: the station only confirms it and sends no readings (IEC 60870-5-101:2003 7.4.8, mode C/D, figures 95 and 96), so the call returns at the confirmation with no data; collect the frozen values with a following request.
 
 #### func (Requester) Dispatch
 
@@ -172,6 +166,16 @@ func (r *Requester) Interrogate(ctx context.Context, ca asdu.CommonAddr, qoi asd
 
 Interrogate runs an interrogation (C\_IC\_NA\_1) with qualifier qoi.
 
+#### func (Requester) MeasureDelay
+
+```go
+func (r *Requester) MeasureDelay(ctx context.Context, ca asdu.CommonAddr) (time.Duration, error)
+```
+
+MeasureDelay measures the transmission delay to a station with the delay acquisition procedure (IEC 60870-5-101:2003 7.4.12): it sends C\_CD\_NA\_1 with cause activation carrying the sending time (second and millisecond of the minute, CP16Time2a), and the station's confirmation carries that time plus its reaction time. The one-way delay is half of the round trip less the reaction time.
+
+The formula is that of IEC 60870-5-5 6.13 as IEC 60870-5-101 refers to it; we do not hold IEC 60870-5-5, so it is an interpretation. Send the result with [Requester.SetDelay](#func-requester-setdelay).
+
 #### func (Requester) Read
 
 ```go
@@ -187,6 +191,14 @@ func (r *Requester) ResetProcess(ctx context.Context, ca asdu.CommonAddr, qualif
 ```
 
 ResetProcess sends a reset process command (C\_RP\_NA\_1).
+
+#### func (Requester) SetDelay
+
+```go
+func (r *Requester) SetDelay(ctx context.Context, ca asdu.CommonAddr, d time.Duration) error
+```
+
+SetDelay sends the transmission delay d to the station: C\_CD\_NA\_1 with cause spontaneous ("set delay", IEC 60870-5-101:2003 7.3.4.7 and 7.4.12). The station corrects the time of every following clock synchronization command by it. No application answer is defined; the call returns when the link layer delivered the command. d is sent in milliseconds, 0..59999.
 
 #### func (Requester) TestCommand
 

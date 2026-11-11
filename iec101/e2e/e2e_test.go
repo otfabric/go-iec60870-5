@@ -30,6 +30,7 @@ type station struct {
 	point    bool
 	selected bool
 	clock    time.Time
+	delay    time.Duration
 	resets   int
 }
 
@@ -50,6 +51,11 @@ func (st *station) HandleASDU(s *server.Server, a *asdu.ASDU) {
 		_ = s.Send(asdu.New(cause, ca, asdu.MeasuredFloat{IOA: 200, Value: 49.5}))
 		_ = s.Terminate(a)
 	case asdu.CounterInterrogation:
+		if o.Freeze != asdu.FreezeRead {
+			// A freeze command is confirmed only (101:2003 7.4.8, mode C).
+			_ = s.Confirm(a)
+			return
+		}
 		_ = s.Confirm(a)
 		_ = s.Send(asdu.New(o.Cause(), ca, asdu.IntegratedTotal{IOA: 300, Value: 123456, Sequence: 1}))
 		_ = s.Terminate(a)
@@ -83,7 +89,16 @@ func (st *station) HandleASDU(s *server.Server, a *asdu.ASDU) {
 	case asdu.ClockSync:
 		st.clock = o.Time.Time
 		_ = s.Confirm(a)
-	case asdu.TestCommand, asdu.DelayAcquisition:
+	case asdu.DelayAcquisition:
+		if a.Cause == asdu.CauseSpontaneous {
+			st.delay = time.Duration(o.Delay) * time.Millisecond
+			return
+		}
+		// The confirmation carries the sending time plus the reaction time.
+		r := a.Reply(asdu.CauseActivationCon, false)
+		r.Objects = []asdu.InformationObject{asdu.DelayAcquisition{Delay: (o.Delay + 5) % 60000}}
+		_ = s.Send(r)
+	case asdu.TestCommand:
 		_ = s.Confirm(a)
 	case asdu.ResetProcess:
 		st.resets++
@@ -170,6 +185,13 @@ func TestServices(t *testing.T) {
 			if err != nil || len(tot) != 1 || tot[0].First().(asdu.IntegratedTotal).Value != 123456 {
 				t.Fatalf("counters: %v %v", tot, err)
 			}
+			if frz, err := r.c.CounterInterrogate(ctx, ca, asdu.CounterGeneral, asdu.FreezeWithReset); err != nil || frz != nil {
+				t.Fatalf("counter freeze: %v %v", frz, err)
+			}
+			d, err := r.c.MeasureDelay(ctx, ca)
+			if err != nil || d < 0 || d > 5*time.Second {
+				t.Fatalf("measure delay: %v %v", d, err)
+			}
 			rd, err := r.c.Read(ctx, ca, 200)
 			if err != nil || rd.First().(asdu.MeasuredFloat).Value != 49.5 {
 				t.Fatalf("read: %v %v", rd, err)
@@ -210,7 +232,7 @@ func TestServices(t *testing.T) {
 			r.st.mu.Unlock()
 			for _, f := range []func() error{
 				func() error { return r.c.TestCommand(ctx, ca) },
-				func() error { return r.c.DelayAcquisition(ctx, ca, 1500*time.Millisecond) },
+				func() error { return r.c.SetDelay(ctx, ca, 1500*time.Millisecond) },
 				func() error { return r.c.ResetProcess(ctx, ca, asdu.ResetProcessGeneral) },
 			} {
 				if err := f(); err != nil {

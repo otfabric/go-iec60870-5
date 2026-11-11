@@ -496,7 +496,16 @@ func (c *Client) ResetProcess(ctx context.Context, ca asdu.CommonAddr, qualifier
 	return c.req.ResetProcess(ctx, ca, qualifier)
 }
 
-// DelayAcquisition sends a delay acquisition command (C_CD_NA_1).
-func (c *Client) DelayAcquisition(ctx context.Context, ca asdu.CommonAddr, d time.Duration) error {
-	return c.req.DelayAcquisition(ctx, ca, d)
+// SetDelay sends the transmission delay to the station (C_CD_NA_1,
+// cause spontaneous), which corrects following clock synchronizations by
+// it. See [telecontrol.Requester.SetDelay].
+func (c *Client) SetDelay(ctx context.Context, ca asdu.CommonAddr, d time.Duration) error {
+	return c.req.SetDelay(ctx, ca, d)
+}
+
+// MeasureDelay measures the transmission delay with the delay acquisition
+// procedure (C_CD_NA_1, cause activation). See
+// [telecontrol.Requester.MeasureDelay].
+func (c *Client) MeasureDelay(ctx context.Context, ca asdu.CommonAddr) (time.Duration, error) {
+	return c.req.MeasureDelay(ctx, ca)
 }

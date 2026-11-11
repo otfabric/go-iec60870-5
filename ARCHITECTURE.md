@@ -72,9 +72,10 @@ it when it is an `io.Closer`. A station runs two goroutines on it:
   their peer does the same; with synchronous transports (`net.Pipe`) a
   direct write would deadlock.
 
-IEC 60870-5-1 also requires a receiver to discard a frame interrupted by a
-line idle interval. A generic `io.Reader` does not expose character timing,
-so `ft12` validates structure and checksum only; see
+IEC 60870-5-101:2003 (6.1) does not require a receiver to measure gaps
+between characters, but after a receive error it looks for a 33-bit line
+idle. A generic `io.Reader` does not expose timing, so `ft12` validates
+structure and checksum and hunts for the next start character instead; see
 [LIMITATIONS.md](LIMITATIONS.md).
 
 ### Link layer
@@ -93,7 +94,9 @@ lost ACK from executing a command twice (test
 IEC 103 adds optional secondary hooks a `SecondaryHandler` may implement:
 `FCBResetHandler` (function 7, 103 cl. 6.3), `FlowControlHandler` (DFC on
 every response) and `FunctionFilter` (function codes outside 103 cl. 6.2.3
-answered with 15, FCB still advancing). IEC 101 does not use them.
+answered with 15, FCB still advancing). The IEC 101 server does not use
+them yet, although 101:2003 figures 6 and 9 call for DFC on every response
+while busy (LIMITATIONS.md).
 
 `link.Balanced` is a primary for its own direction and a secondary for the
 peer's, over a full-duplex line, with the DIR bit set by station A.

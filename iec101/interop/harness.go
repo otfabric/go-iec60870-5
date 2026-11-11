@@ -324,8 +324,12 @@ func (st *station) HandleASDU(s *server.Server, a *asdu.ASDU) {
 			return
 		}
 		_ = s.Send(asdu.New(asdu.CauseRequest, st.ca, p))
-	case asdu.ClockSync, asdu.DelayAcquisition:
+	case asdu.ClockSync:
 		reply(a.Reply(asdu.CauseActivationCon, false))
+	case asdu.DelayAcquisition:
+		if a.Cause == asdu.CauseActivation {
+			reply(a.Reply(asdu.CauseActivationCon, false))
+		}
 	case asdu.TestCommand:
 		if a.Type != asdu.C_TS_NA_1 {
 			_ = s.Reject(a, asdu.CauseUnknownType)
