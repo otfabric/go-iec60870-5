@@ -1,5 +1,4 @@
-# Copied from otfabric/iec60870-5-interop tests/iec103/known-bugs.tsv at commit
-# 8c84ea8caedee4af5f55b01e598df10d58312d85 (branch feat/iec103, contract 2.1).
+# Copied from otfabric/iec60870-5-interop tests/iec103/known-bugs.tsv at v0.2.1 (contract 2.1).
 # Refresh it with cases.tsv.
 # Known bugs of upstream versions for IEC 60870-5-103, for scripts/interop.sh.
 # Same columns and rules as tests/iec104/known-bugs.tsv. Every entry was seen

@@ -119,10 +119,8 @@ jobs:
 
   # IEC 60870-5-103: the clients of vitusdong/iec103-dotnet, ARIEC103,
   # Open103 and go-iecp5 against the server, and the client against the
-  # vitusdong server, of otfabric/iec60870-5-interop (contract 2.1). The
-  # images in iec103/interop/harness.go are the local :dev builds until the
-  # harness v0.2.0 release publishes them; they get pinned by digest there
-  # before this job runs in CI.
+  # vitusdong server, of otfabric/iec60870-5-interop v0.2.1 (contract 2.1),
+  # pinned by digest in iec103/interop/harness.go.
   iec103:
     name: IEC 103 against vitusdong + ARIEC103 + Open103 + go-iecp5, both directions
     runs-on: ubuntu-latest

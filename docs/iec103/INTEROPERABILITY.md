@@ -20,8 +20,8 @@ IEC 60870-5-103-2005.
 
 `iec103/interop` (build tag `interop`, `make interop-iec103`) runs this
 module against the IEC 103 images of otfabric/iec60870-5-interop
-(contract 2.1; local `:dev` builds of branch feat/iec103 at 8c84ea8, to be
-pinned by digest at the harness v0.2.0 release). Expected outcomes are the
+(v0.2.1, contract 2.1; images pinned by digest in
+`iec103/interop/harness.go`). Expected outcomes are the
 harness's own: its case table (`testdata/cases.tsv`), its value and
 session checks (`scripts/interop-iec103.sh`) and the fixture the images
 print; known bugs of the references are skipped with their id, never

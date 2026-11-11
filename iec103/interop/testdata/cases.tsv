@@ -1,5 +1,4 @@
-# Copied from otfabric/iec60870-5-interop tests/iec103/cases.tsv at commit
-# 8c84ea8caedee4af5f55b01e598df10d58312d85 (branch feat/iec103, contract 2.1).
+# Copied from otfabric/iec60870-5-interop tests/iec103/cases.tsv at v0.2.1 (contract 2.1).
 # Refresh it with the harness version pinned in harness.go.
 # Self-test cases of IEC 60870-5-103 for scripts/interop.sh, against the
 # baseline fixture (fixtures/iec103/baseline), unbalanced, every client with

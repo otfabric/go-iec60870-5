@@ -29,15 +29,13 @@ import (
 	"github.com/otfabric/go-iec60870-5/iec103/server"
 )
 
-// The references: otfabric/iec60870-5-interop, branch feat/iec103 at
-// 8c84ea8 (contract 2.1). The images are the local :dev builds of that
-// commit; they get pinned by multi-arch index digest (the release's
-// manifest.json) at the harness v0.2.0 release.
+// The references: otfabric/iec60870-5-interop v0.2.1 (contract 2.1),
+// pinned by multi-arch index digest (the release's manifest.json).
 var stacks = []struct{ name, env, image string }{
-	{"vitusdong", "IEC103_INTEROP_VITUSDONG_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-vitusdong:dev"},
-	{"ariec103", "IEC103_INTEROP_ARIEC103_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-ariec103:dev"},
-	{"open103", "IEC103_INTEROP_OPEN103_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-open103:dev"},
-	{"goiecp5", "IEC103_INTEROP_GOIECP5_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-goiecp5:dev"},
+	{"vitusdong", "IEC103_INTEROP_VITUSDONG_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-vitusdong@sha256:8b57e04605c019421620bc67c4cbb869b541f28c1bd41c6dd6439d98e21e864c"},
+	{"ariec103", "IEC103_INTEROP_ARIEC103_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-ariec103@sha256:6d547854c49422a29ec6d6066b5cdc52bd102c0b7780b93fe42239bc2be105ce"},
+	{"open103", "IEC103_INTEROP_OPEN103_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-open103@sha256:f7ac7ba1f162758f6cb504ed27367ab51d8ef88c00a7e503525b434b76990509"},
+	{"goiecp5", "IEC103_INTEROP_GOIECP5_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-goiecp5@sha256:be1dc40989157beded7b1d50c62d78a583d6878ade66549075dc394dcbad95fe"},
 }
 
 type adapter struct {
