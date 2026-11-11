@@ -49,13 +49,13 @@ all: build ## Default target: build the examples
 build: ## Build the example client and server into ./bin
 	@echo "Building examples"
 	@mkdir -p $(BIN_DIR)
-	@for dir in iec104/examples/*/ iec101/examples/*/ iec103/examples/*/; do \
+	@for dir in iec104/examples/*/ iec101/examples/*/ iec103/examples/*/ iec102/examples/*/; do \
 		name="$$(basename "$$dir")"; \
 		go build -o "$(BIN_DIR)/example-$$name" "./$$dir"; \
 	done
 
 # The self-contained examples: each starts both sides and exits by itself.
-RUN_EXAMPLES := iec104/examples/quickstart iec104/examples/commands iec104/examples/files iec104/examples/events iec104/examples/redundancy iec104/examples/tls iec104/examples/secure iec104/examples/observability iec101/examples/quickstart iec103/examples/quickstart
+RUN_EXAMPLES := iec104/examples/quickstart iec104/examples/commands iec104/examples/files iec104/examples/events iec104/examples/redundancy iec104/examples/tls iec104/examples/secure iec104/examples/observability iec101/examples/quickstart iec103/examples/quickstart iec102/examples/quickstart
 
 examples: ## Run the self-contained examples (each must exit successfully)
 	@for e in $(RUN_EXAMPLES); do \

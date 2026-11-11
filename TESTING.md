@@ -10,6 +10,7 @@ How to run each test tier of go-iec60870-5. What is implemented and at which evi
 | End-to-end, on loopback TCP | `make e2e` (also part of `make test`) | none | CI workflow |
 | IEC 101 end-to-end: client against server over in-memory and lossy lines, unbalanced and balanced (`iec101/e2e`) | `make test` | none | CI workflow |
 | IEC 103 end-to-end: controlling system against protection equipment, lossy and muted lines (`iec103/e2e`); annex B examples (`iec103`) | `make test` | none | CI workflow |
+| IEC 102 end-to-end: controlling station against integrated total station (`iec102/e2e`); recorded meter traffic and gisce/iec870ree vectors (`iec102`, testdata/innowatt) | `make test` | none | CI workflow |
 | Coverage gate | `make coverage-check` | none | CI workflow |
 | Per-package coverage floor | `make coverage-pkg-check` | none | CI workflow, `Per-package coverage` |
 | Fuzz | `make fuzz` | none | CI workflow, 10s per discovered target; `Extended` workflow, 5 minutes per target |
