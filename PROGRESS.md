@@ -3,6 +3,20 @@
 Working log of the IEC 60870-5 program (go-iec60870-5 and
 otfabric/iec60870-5-interop). Newest first. Plan: [docs/ROADMAP.md](docs/ROADMAP.md).
 
+## 2026-11-11 (v0.2.0)
+
+- v0.2.0: IEC 60870-5-102 (from vendor documentation and recorded meter
+  traffic; the standard's text is not held), the conformance fixes from
+  checking IEC 101:2003, IEC 103:1997 and IEC TS 60870-5-7:2025 against
+  their texts (and IEC 103 against six independent implementations),
+  capture corpora for all four standards, and the IEC 103 interop suite
+  against iec60870-5-interop v0.2.1 (vitusdong, ARIEC103, Open103,
+  go-iecp5; pinned by digest, in CI).
+- Next: IEC 102 interop (a gisce/iec870ree master adapter), IEC 101
+  digitalpetri and non-default field sizes, IEC 103 generic services and
+  disturbance data in the harness contract, the remaining open deviations
+  (LIMITATIONS.md).
+
 ## 2026-11-11 (later)
 
 - Repositories public on GitHub (otfabric/go-iec60870-5,

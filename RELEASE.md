@@ -2,7 +2,7 @@
 
 ## v0.2.0
 
-**Date:** not released (prepared)
+**Date:** 2026-11-11
 **Previous release:** v0.1.0
 
 IEC 60870-5-102, conformance fixes from checking IEC 101, IEC 103 and the
