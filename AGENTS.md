@@ -2,7 +2,7 @@
 
 ## What this is
 
-Pure Go implementation of the IEC 60870-5 telecontrol family with no dependencies outside the standard library. IEC 60870-5-104 (carried over from go-iec104 v0.3.0: APCI, ASDU codec, file transfer, redundancy, TLS, IEC 62351-5) and IEC 60870-5-101 (FT 1.2, IEC 60870-5-2 link procedures, unbalanced and balanced stations). IEC 60870-5-103 (own ASDU codec, controlling system and protection equipment, docs/iec103). IEC 60870-5-102 is planned (docs/ROADMAP.md). Profile: **protocol-library**. Nothing is certified; see LIMITATIONS.md.
+Pure Go implementation of the IEC 60870-5 telecontrol family with no dependencies outside the standard library. IEC 60870-5-104 (carried over from go-iec104 v0.3.0: APCI, ASDU codec, file transfer, redundancy, TLS, IEC 62351-5) and IEC 60870-5-101 (FT 1.2, IEC 60870-5-2 link procedures, unbalanced and balanced stations). IEC 60870-5-103 (own ASDU codec, controlling system and protection equipment, docs/iec103). IEC 60870-5-102 (own ASDU codec, controlling and integrated total station, opt-in Spanish REE profile, docs/iec102). Profile: **protocol-library**. Nothing is certified; see LIMITATIONS.md.
 
 ## Organisation standards
 

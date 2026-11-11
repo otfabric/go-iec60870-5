@@ -12,19 +12,19 @@ library against itself), **independent** (pinned reference images),
 
 | Capability | IEC 101 | IEC 102 | IEC 103 | IEC 104 |
 |---|---|---|---|---|
-| Controlling station | yes: unit, e2e, independent (2 stacks), recorded | no | yes: unit, annex B, e2e | yes: unit, e2e, independent (5 stacks), recorded |
-| Controlled station | yes: unit, e2e, independent (2 stacks), recorded | no (FT 1.2 frames of a meter recorded) | yes: unit, annex B, e2e | yes: unit, e2e, independent, recorded |
-| Transport | any io.ReadWriter (serial, terminal server TCP stream) | - | any io.ReadWriter | TCP, TLS |
-| Link: unbalanced | yes: recorded | - | yes (1-octet address, FC 7): recorded | n/a |
+| Controlling station | yes: unit, e2e, independent (2 stacks), recorded | yes: unit, e2e, recorded (meter responses) | yes: unit, annex B, e2e, recorded | yes: unit, e2e, independent (5 stacks), recorded |
+| Controlled station | yes: unit, e2e, independent (2 stacks), recorded | yes: unit, e2e | yes: unit, annex B, e2e | yes: unit, e2e, independent, recorded |
+| Transport | any io.ReadWriter (serial, terminal server TCP stream) | any io.ReadWriter | any io.ReadWriter | TCP, TLS |
+| Link: unbalanced | yes: recorded, link states per 101:2003 figures 5-9 | yes (link address 0, 1, 2 octets) | yes (1-octet address, FC 7): recorded | n/a |
 | Link: balanced | yes | - | - | n/a |
-| Standard ASDU types | all of `asdu` (configurable sizes); recorded: 2, 4, 11, 13, 30-32, 34, 46, 100, 103, 104 | - | all compatible types 1-11, 20-31; private types raw; recorded: 1, 5-9, 20, 45, 46, 205 (ASDU 9 with more than nine measurands refused) | 67 + 2 (101-only) |
+| Standard ASDU types | all of `asdu` (configurable sizes); recorded: 2, 4, 11, 13, 30-32, 34, 46, 100, 103, 104 | 40 standard types classified (37 with a vendor layout), 38 REE; recorded: 11, 123, 183 | all compatible types 1-11, 20-31; private types raw; recorded: 1, 5-9, 20, 45, 46, 205 (ASDU 9 with up to 127 measurands carried) | 67 + 2 (101-only) |
 | Interrogation, counters, read, clock, commands, SBO, test, reset | yes: e2e, independent (reset process e2e only), recorded (interrogation, SBO) | - | - | yes: independent |
 | File transfer | no | - | - | yes: independent |
 | TLS (IEC 62351-3) | n/a | n/a | n/a | yes: independent |
-| IEC 62351-5 / TS 60870-5-7 | no | n/a | n/a | yes: independent (cB-Sigma) |
+| IEC 62351-5 / TS 60870-5-7 | no | n/a | n/a | yes: independent (cB-Sigma); statistics reports, FILEMNGT and MONITOR DATA: unit and e2e |
 | Redundancy (104 cl. 10) | n/a | n/a | n/a | yes: independent |
 | Protection functions: GI, time sync, general commands, generic services, disturbance transfer | n/a | n/a | yes: e2e | n/a |
-| Fuzzed decoders | ft12, asdu, cp | - | iec103 | apci, asdu, sec, e2e |
+| Fuzzed decoders | ft12, asdu, cp | iec102 | iec103 | apci, asdu, sec, e2e |
 
 ## Security capability matrix
 

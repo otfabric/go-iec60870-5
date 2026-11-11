@@ -6,11 +6,11 @@ Phases of go-iec60870-5 and otfabric/iec60870-5-interop. Status as of
 | Phase | Scope | Status |
 |---|---|---|
 | 0 | Audit of go-iec104/iec104-interop/iec104ctl, architecture, standards matrix, reference-stack survey, scaffolding | done ([MIGRATION_AUDIT.md](MIGRATION_AUDIT.md), [STANDARDS.md](STANDARDS.md), interop docs/REFERENCE_STACKS.md) |
-| 1 | IEC 104 in the new layout with all tests; shared `cp` and `telecontrol` | code and tests done; `make interop` run pending record in [IEC104_PARITY.md](IEC104_PARITY.md) |
-| 2 | IEC 101: `ft12`, `link`, client and server, unbalanced and balanced | implemented; independent interop against lib60870-C and cB-Sigma passes in both directions and modes (default sizes); digitalpetri, other sizes and CI pending |
-| 3 | IEC 103: own ASDU codec (types 1-11, 20-31, generic services), protection-specific stations on `link` | implemented with unit, annex B and e2e tests; independent interop (ARIEC103, vitusdong/iec103-dotnet) next |
-| 4 | IEC 102: integrated totals model | after 103; no open controlled-station reference exists, only REE-profile masters (gisce/iec870ree) |
-| 5 | Interop and conformance coverage: all references, negative cases, capture corpus | ongoing |
+| 1 | IEC 104 in the new layout with all tests; shared `cp` and `telecontrol` | done; interop parity recorded in [IEC104_PARITY.md](IEC104_PARITY.md) |
+| 2 | IEC 101: `ft12`, `link`, client and server, unbalanced and balanced | done, checked against IEC 60870-5-101:2003; interop with lib60870-C and cB-Sigma in CI; digitalpetri and non-default sizes pending |
+| 3 | IEC 103: own ASDU codec (types 1-11, 20-31, generic services), protection-specific stations on `link` | done, checked against IEC 60870-5-103:1997 and compared with six implementations; interop adapters (vitusdong, ARIEC103, Open103, go-iecp5 cs103) in progress |
+| 4 | IEC 102: integrated totals model | implemented without the standard's text (vendor documentation, recorded meter traffic); a gisce/iec870ree master adapter is next; no open controlled station exists |
+| 5 | Interop and conformance coverage: all references, negative cases, capture corpus | capture corpora for all four standards in v0.2.0; ongoing |
 | 6 | Hardening: performance, API review, security review, real devices | later |
 
 ## Open decisions
