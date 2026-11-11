@@ -322,9 +322,15 @@ func (c *Client) send(ctx context.Context, a *asdu.ASDU) error {
 	case <-c.ctx.Done():
 		return iec101.ErrClosed
 	}
+	// The poller finishes the exchange it started (a primary repeats a
+	// message until it is answered or Config.Retries ran out; giving up
+	// half way would leave the FCB in doubt), but the request ends at its
+	// deadline.
 	select {
 	case err := <-r.done:
 		return err
+	case <-ctx.Done():
+		return ctx.Err()
 	case <-c.ctx.Done():
 		return iec101.ErrClosed
 	}
@@ -394,6 +400,12 @@ func (c *Client) runUnbalanced() {
 		data, st, err := c.pri.RequestData(c.ctx, addr, class)
 		if err != nil {
 			c.linkFailed(err)
+			// A station that answers every poll with an error (function
+			// 14 or 15, say) is polled at the poll interval, not as fast
+			// as it answers.
+			if !c.sleep(c.cfg.PollInterval) {
+				return
+			}
 			continue
 		}
 		acd, dfc = st.ACD, st.DFC

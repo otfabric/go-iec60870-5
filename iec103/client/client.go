@@ -328,13 +328,33 @@ func (c *Client) Broadcast(a *iec103.ASDU) error {
 	return c.broadcast(sendReq{data: raw})
 }
 
+// up returns the channel closed when the link goes down, or ErrLinkDown
+// (ErrClosed) when it is not up.
+func (c *Client) up() (<-chan struct{}, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	switch c.state {
+	case iec103.StateUp:
+		return c.downCh, nil
+	case iec103.StateClosed:
+		return nil, iec103.ErrClosed
+	}
+	return nil, iec103.ErrLinkDown
+}
+
 func (c *Client) broadcast(r sendReq) error {
-	if c.State() != iec103.StateUp {
-		return iec103.ErrLinkDown
+	down, err := c.up()
+	if err != nil {
+		return err
 	}
 	r.done = make(chan error, 1)
+	// The link loop takes broadcasts only while the link is up: one that
+	// goes down before it took this one ends the call, which has no
+	// context to bound it.
 	select {
 	case c.bcasts <- r:
+	case <-down:
+		return iec103.ErrLinkDown
 	case <-c.ctx.Done():
 		return iec103.ErrClosed
 	}
@@ -352,20 +372,28 @@ func (c *Client) send(ctx context.Context, raw []byte) error {
 
 // submit hands r to the link loop and waits for the confirmation.
 func (c *Client) submit(ctx context.Context, r sendReq) error {
-	if c.State() != iec103.StateUp {
-		return iec103.ErrLinkDown
+	down, err := c.up()
+	if err != nil {
+		return err
 	}
 	r.done = make(chan error, 1)
 	select {
 	case c.sends <- r:
+	case <-down:
+		return iec103.ErrLinkDown
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-c.ctx.Done():
 		return iec103.ErrClosed
 	}
+	// The link loop finishes the exchange it started (a primary repeats a
+	// message until it is answered or Link.Retries ran out), but the
+	// request ends at its deadline.
 	select {
 	case err := <-r.done:
 		return err
+	case <-ctx.Done():
+		return ctx.Err()
 	case <-c.ctx.Done():
 		return iec103.ErrClosed
 	}
@@ -470,6 +498,12 @@ func (c *Client) run() {
 		data, st, err := c.pri.RequestData(c.ctx, addr, class)
 		if err != nil {
 			c.linkFailed(err)
+			// A station that answers every poll with an error (function
+			// 14 or 15, say) is polled at the poll interval, not as fast
+			// as it answers.
+			if !c.sleep(c.cfg.PollInterval) {
+				return
+			}
 			continue
 		}
 		acd, dfc = st.ACD, st.DFC
