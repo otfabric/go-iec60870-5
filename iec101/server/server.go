@@ -221,10 +221,20 @@ func (s *Server) Send(a *asdu.ASDU) error { return s.SendClass(a, Class1) }
 // SendClass queues a monitor-direction ASDU as class 1 or class 2 data.
 // In balanced transmission the class is ignored.
 func (s *Server) SendClass(a *asdu.ASDU, c Class) error {
+	if s.cfg.Strict {
+		if err := iec101.Validate(a, s.cfg.ASDU); err != nil {
+			return err
+		}
+	}
 	raw, err := a.Encode(s.cfg.ASDU)
 	if err != nil {
 		return err
 	}
+	return s.queue(raw, c)
+}
+
+// queue queues an encoded ASDU as class c data.
+func (s *Server) queue(raw []byte, c Class) error {
 	if s.ctx.Err() != nil {
 		return iec101.ErrClosed
 	}
@@ -307,6 +317,9 @@ func (s *Server) handle() {
 	for {
 		select {
 		case a := <-s.in:
+			if s.cfg.Strict && !s.admit(a) {
+				continue
+			}
 			if s.cfg.Handler == nil {
 				_ = s.Reject(a, asdu.CauseUnknownType)
 				continue
@@ -316,6 +329,27 @@ func (s *Server) handle() {
 			return
 		}
 	}
+}
+
+// admit applies the profile checks of Params.Strict to a received ASDU: one
+// that fails is mirrored negatively with the "unknown ..." cause that fits
+// (IEC 60870-5-101:2003 7.2.3), or dropped.
+func (s *Server) admit(a *asdu.ASDU) bool {
+	err := iec101.Validate(a, s.cfg.ASDU)
+	if err == nil {
+		return true
+	}
+	s.log.Warn("ASDU refused by the IEC 60870-5-101 profile", "asdu", a.String(), "err", err)
+	var pe *iec101.ProfileError
+	if errors.As(err, &pe) && pe.Cause != 0 && a.Type.InControlDirection() {
+		// The mirror itself would fail the checks (reserved type, cause 0,
+		// common address 0): sent without them.
+		r := a.Reply(pe.Cause, true)
+		if raw, err := r.Encode(s.cfg.ASDU); err == nil {
+			_ = s.queue(raw, Class1)
+		}
+	}
+	return false
 }
 
 func (s *Server) endOfInit(coi uint8) {
@@ -374,7 +408,35 @@ func (u secondaryUser) Reset(user bool) {
 	}
 }
 
+// sendBalanced sends one ASDU, again while the controlling station refuses
+// it as busy: NACK, or DFC that stays set (IEC 60870-5-101:2003 figure 8,
+// "secondary link busy").
+func (s *Server) sendBalanced(raw []byte) error {
+	for {
+		err := s.bal.Send(s.ctx, raw)
+		if !errors.Is(err, link.ErrNack) && !errors.Is(err, link.ErrDataFlow) {
+			return err
+		}
+		s.log.Debug("controlling station busy, sending again", "err", err)
+		t := time.NewTimer(s.cfg.Link.Timeout)
+		select {
+		case <-t.C:
+		case <-s.ctx.Done():
+			t.Stop()
+			return err
+		}
+	}
+}
+
+// busy reports a handler queue more than half full: the link sets DFC and
+// refuses further user data (IEC 60870-5-101:2003 figures 6 and 9).
+func (s *Server) busy() bool { return len(s.in) > cap(s.in)/2 }
+
+func (u secondaryUser) Busy() bool { return u.s.busy() }
+
 type balancedUser struct{ s *Server }
+
+func (u balancedUser) Busy() bool { return u.s.busy() }
 
 func (u balancedUser) UserData(data []byte) bool { return u.s.receive(data) }
 
@@ -413,7 +475,7 @@ func (s *Server) runBalanced() {
 			case <-s.ctx.Done():
 				return
 			}
-			if err := s.bal.Send(s.ctx, raw); err != nil {
+			if err := s.sendBalanced(raw); err != nil {
 				s.log.Warn("send failed", "err", err)
 				if errors.Is(err, link.ErrTimeout) {
 					s.setState(iec101.StateDown, err)

@@ -139,29 +139,37 @@ func (pr *Primary) ResetFCB(ctx context.Context, addr uint16) (Status, error) {
 }
 
 // Init brings up the link to a secondary: request status of link until it
-// answers, then reset of remote link (IEC 60870-5-2 5.1, link
-// initialization).
+// answers with DFC = 0, then reset of remote link (IEC 60870-5-2 5.1, link
+// initialization; IEC 60870-5-101:2003 6.2.1.1, figure 5). While the
+// secondary answers with DFC = 1 the request is repeated every
+// Config.Timeout, at most Config.Retries times, then Init fails with
+// [ErrDataFlow].
 func (pr *Primary) Init(ctx context.Context, addr uint16) (Status, error) {
-	if _, err := pr.RequestStatus(ctx, addr); err != nil {
+	if _, err := untilFree(ctx, pr.p.cfg, func(ctx context.Context) (Status, error) {
+		return pr.RequestStatus(ctx, addr)
+	}); err != nil {
 		return Status{}, err
 	}
 	return pr.ResetLink(ctx, addr)
 }
 
 // SendConfirm sends user data with confirmation (function 3). It returns
-// [ErrNack] when the secondary did not accept it.
+// [ErrNack] when the secondary did not accept it, and [ErrNoData] for
+// empty data, which has no variable-length frame (IEC 60870-5-101:2003
+// 6.1).
 func (pr *Primary) SendConfirm(ctx context.Context, addr uint16, data []byte) (Status, error) {
-	if data == nil {
-		data = []byte{}
+	if len(data) == 0 {
+		return Status{}, ErrNoData
 	}
 	return pr.confirm(ctx, addr, FuncUserDataConf, data)
 }
 
 // SendNoReply sends user data without reply (function 4), typically to
-// the broadcast address. Nothing is awaited.
+// the broadcast address. Nothing is awaited. Empty data fails with
+// [ErrNoData].
 func (pr *Primary) SendNoReply(addr uint16, data []byte) error {
-	if data == nil {
-		data = []byte{}
+	if len(data) == 0 {
+		return ErrNoData
 	}
 	f := ft12.Frame{Kind: ft12.KindVariable, Control: byte(PrimaryControl(FuncUserDataNoRepl, false, false, false)), Addr: addr, Data: data}
 	pr.x.mu.Lock()

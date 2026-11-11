@@ -41,17 +41,22 @@ type BalancedConfig struct {
 // Balanced is a combined station of balanced transmission: it is primary
 // for the messages it initiates and secondary for its peer's. Both
 // directions run at the same time over a full-duplex line.
+//
+// Its secondary answers only request status of link and reset of remote
+// link until the peer reset the link (IEC 60870-5-101:2003 figure 9). Its
+// primary waits for the peer to clear DFC before it sends user data again
+// (figure 8).
 type Balanced struct {
-	p   *port
-	x   *exchanger
-	bc  BalancedConfig
-	h   BalancedHandler
-	fcb bool // last FCB sent
+	p    *port
+	x    *exchanger
+	bc   BalancedConfig
+	h    BalancedHandler
+	fcb  bool // last FCB sent
+	full bool // the peer's last response had DFC set
 
-	mu       sync.Mutex // secondary state
-	known    bool
-	expected bool
-	last     *ft12.Frame
+	mu    sync.Mutex // secondary state
+	reset bool
+	rx    fcbState
 }
 
 // NewBalanced starts a balanced station on rw. Close stops it; rw is
@@ -66,6 +71,7 @@ func NewBalanced(rw io.ReadWriter, cfg Config, bc BalancedConfig, h BalancedHand
 	}
 	pt := newPort(rw, cfg)
 	b := &Balanced{p: pt, x: newExchanger(pt, bc.DIR), bc: bc, h: h}
+	b.x.alt, b.x.altOK = bc.Addr, true
 	go pt.run(b.receive)
 	return b, nil
 }
@@ -90,17 +96,19 @@ func (b *Balanced) receive(f ft12.Frame) {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if c.FCV() && fcvRequired(c.Func()) {
-		if b.known && c.FCB() != b.expected && b.last != nil {
-			_ = b.p.write(*b.last)
-			return
-		}
-		b.known, b.expected = true, !c.FCB()
+	if !b.reset && c.Func() != FuncRequestStatus && c.Func() != FuncResetLink {
+		// "Secondary link not reset" (IEC 60870-5-101:2003 figure 9).
+		return
+	}
+	if r := b.rx.repeated(c, f); r != nil {
+		_ = b.p.write(*r)
+		return
 	}
 	var r *ft12.Frame
 	switch c.Func() {
 	case FuncResetLink:
-		b.known, b.expected = true, true
+		b.rx.resetFCB()
+		b.reset = true
 		b.h.Reset(false)
 		r = b.reply(FuncAck, false)
 	case FuncResetUser:
@@ -114,6 +122,9 @@ func (b *Balanced) receive(f ft12.Frame) {
 		switch {
 		case f.Kind != ft12.KindVariable:
 			r = b.reply(FuncNotImplemented, false)
+		case b.busy():
+			// "Secondary link busy" (figure 9): Rx[FC3]/Tx (FC1, DFC = 1).
+			r = b.reply(FuncNack, true)
 		case b.h.UserData(f.Data):
 			r = b.reply(FuncAck, false)
 		default:
@@ -127,15 +138,25 @@ func (b *Balanced) receive(f ft12.Frame) {
 	default:
 		r = b.reply(FuncNotImplemented, false)
 	}
-	b.last = r
+	b.rx.remember(c, f, r)
 	_ = b.p.write(*r)
 }
 
+func (b *Balanced) busy() bool {
+	f, ok := b.h.(FlowControlHandler)
+	return ok && f.Busy()
+}
+
 func (b *Balanced) reply(fn byte, dfc bool) *ft12.Frame {
+	dfc = dfc || b.busy()
 	if b.p.cfg.SingleCharAck && fn == FuncAck && !dfc {
 		return &ft12.Frame{Kind: ft12.KindSingle}
 	}
-	return &ft12.Frame{Kind: ft12.KindFixed, Addr: b.bc.Addr, Control: byte(SecondaryControl(fn, false, dfc, b.bc.DIR))}
+	addr := b.bc.Remote
+	if b.p.cfg.SenderAddr {
+		addr = b.bc.Addr
+	}
+	return &ft12.Frame{Kind: ft12.KindFixed, Addr: addr, Control: byte(SecondaryControl(fn, false, dfc, b.bc.DIR))}
 }
 
 func (b *Balanced) exchange(ctx context.Context, fn byte, data []byte) (ft12.Frame, error) {
@@ -144,7 +165,13 @@ func (b *Balanced) exchange(ctx context.Context, fn byte, data []byte) (ft12.Fra
 	if fcvRequired(fn) {
 		b.fcb = !b.fcb
 	}
-	return b.x.exchange(ctx, b.bc.Remote, fn, b.fcb, data)
+	r, err := b.x.exchange(ctx, b.bc.Remote, fn, b.fcb, data)
+	if err == nil && r.Kind != ft12.KindSingle {
+		b.full = Control(r.Control).DFC()
+	} else if err == nil {
+		b.full = false
+	}
+	return r, err
 }
 
 func (b *Balanced) confirm(ctx context.Context, fn byte, data []byte) (Status, error) {
@@ -189,9 +216,10 @@ func (b *Balanced) ResetLink(ctx context.Context) error {
 }
 
 // Init brings up this station's direction of the link: request status of
-// link, then reset of remote link.
+// link until the peer answers with DFC = 0, then reset of remote link
+// (IEC 60870-5-101:2003 figure 8). See [Primary.Init] for the repetition.
 func (b *Balanced) Init(ctx context.Context) error {
-	if _, err := b.RequestStatus(ctx); err != nil {
+	if _, err := untilFree(ctx, b.p.cfg, b.RequestStatus); err != nil {
 		return err
 	}
 	return b.ResetLink(ctx)
@@ -203,11 +231,25 @@ func (b *Balanced) Test(ctx context.Context) error {
 	return err
 }
 
-// Send sends user data with confirmation.
+// Send sends user data with confirmation. When the peer's last response
+// had DFC set it first requests status of link until DFC is clear
+// ("secondary link busy", IEC 60870-5-101:2003 figure 8) and fails with
+// [ErrDataFlow] when it stays set. Empty data fails with [ErrNoData].
 func (b *Balanced) Send(ctx context.Context, data []byte) error {
-	if data == nil {
-		data = []byte{}
+	if len(data) == 0 {
+		return ErrNoData
+	}
+	if b.peerFull() {
+		if _, err := untilFree(ctx, b.p.cfg, b.RequestStatus); err != nil {
+			return err
+		}
 	}
 	_, err := b.confirm(ctx, FuncUserDataConf, data)
 	return err
+}
+
+func (b *Balanced) peerFull() bool {
+	b.x.mu.Lock()
+	defer b.x.mu.Unlock()
+	return b.full
 }

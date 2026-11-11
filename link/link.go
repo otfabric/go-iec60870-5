@@ -35,8 +35,14 @@ var (
 	// ErrInvalidConfig reports a Config a station cannot be built with.
 	ErrInvalidConfig = errors.New("link: invalid configuration")
 	// ErrDataFlow reports a secondary with DFC set: it cannot accept
-	// further user data now.
+	// further user data now, and did not clear DFC while the primary
+	// requested the status of link (IEC 60870-5-101:2003 6.2.1, figures 5
+	// and 8).
 	ErrDataFlow = errors.New("link: data flow control (DFC) set")
+	// ErrNoData reports user data without octets: a frame without an ASDU
+	// is a fixed-length frame (IEC 60870-5-101:2003 6.1), so send/confirm
+	// and send/no reply of user data need at least one octet.
+	ErrNoData = errors.New("link: empty user data")
 )
 
 // Defaults of [Config].
@@ -67,6 +73,15 @@ type Config struct {
 	// "no data" NACK when neither ACD nor DFC is set (IEC 60870-5-2 5.1).
 	// Primaries always accept E5h.
 	SingleCharAck bool
+
+	// SenderAddr makes a balanced station's responses (secondary
+	// messages) carry its own link address instead of the peer's. By
+	// default they carry the address of the receiver, the peer:
+	// IEC 60870-5-101:2003 6.2.1.2 asks for the receiver's address "in
+	// primary and secondary messages". lib60870-C v2.4.1 answers with its
+	// own address and accepts either. Responses with either address are
+	// accepted whatever this says. Unbalanced stations ignore it.
+	SenderAddr bool
 
 	// OnFrame, when set, is called for every frame sent (tx true) and
 	// received. It runs on the station's goroutines and must not block.
@@ -246,18 +261,39 @@ type exchanger struct {
 	dir  bool
 	mu   sync.Mutex // one exchange at a time
 	resp chan ft12.Frame
+	// alt, when altOK, is a second address a response may carry: a
+	// balanced peer answers with its own address or, as
+	// IEC 60870-5-101:2003 6.2.1.2 reads, with ours (the receiver's).
+	alt   uint16
+	altOK bool
 }
 
 func newExchanger(p *port, dir bool) *exchanger {
-	return &exchanger{p: p, dir: dir, resp: make(chan ft12.Frame, 1)}
+	return &exchanger{p: p, dir: dir, resp: make(chan ft12.Frame, respQueue)}
 }
 
-// offer hands a secondary frame to a waiting exchange; without a waiter
-// it is dropped.
+// respQueue is how many secondary frames wait for an exchange to look at
+// them: a late answer followed by the real one must both get there.
+const respQueue = 8
+
+// offer hands a secondary frame to the exchange; when frames pile up
+// beyond respQueue (nobody is waiting) it is dropped.
 func (x *exchanger) offer(f ft12.Frame) {
 	select {
 	case x.resp <- f:
 	default:
+	}
+}
+
+// drain discards the frames that arrived while no message was
+// outstanding, or answer an earlier one.
+func (x *exchanger) drain() {
+	for {
+		select {
+		case <-x.resp:
+		default:
+			return
+		}
 	}
 }
 
@@ -271,11 +307,9 @@ func (x *exchanger) exchange(ctx context.Context, addr uint16, fn byte, fcb bool
 	f.Control = byte(PrimaryControl(fn, fcb && fcvRequired(fn), fcvRequired(fn), x.dir))
 	timer := time.NewTimer(x.p.cfg.Timeout)
 	defer timer.Stop()
+	var stray *ft12.Frame // the last response that cannot answer fn
 	for attempt := 0; ; attempt++ {
-		select {
-		case <-x.resp: // a late answer to an earlier attempt
-		default:
-		}
+		x.drain() // late answers to earlier attempts or messages
 		if err := x.p.write(f); err != nil {
 			return ft12.Frame{}, err
 		}
@@ -283,12 +317,21 @@ func (x *exchanger) exchange(ctx context.Context, addr uint16, fn byte, fcb bool
 	wait:
 		select {
 		case r := <-x.resp:
-			if r.Kind != ft12.KindSingle && r.Addr != addr {
+			if r.Kind != ft12.KindSingle && r.Addr != addr && (!x.altOK || r.Addr != x.alt) {
 				goto wait // another station's answer on a shared line
+			}
+			if !answers(fn, r) {
+				// A late repetition of the answer to an earlier message,
+				// say: the answer to this one may still come.
+				stray = &r
+				goto wait
 			}
 			return r, nil
 		case <-timer.C:
 			if attempt >= x.p.cfg.Retries {
+				if stray != nil {
+					return *stray, fmt.Errorf("%w: %v to function %d", ErrUnexpected, *stray, fn)
+				}
 				return ft12.Frame{}, fmt.Errorf("%w: function %d to address %d after %d attempt(s)", ErrTimeout, fn, addr, attempt+1)
 			}
 		case <-ctx.Done():
@@ -300,6 +343,29 @@ func (x *exchanger) exchange(ctx context.Context, addr uint16, fn byte, fcb bool
 			return ft12.Frame{}, ErrClosed
 		}
 	}
+}
+
+// answers reports whether r can be the response to a primary message with
+// function fn (IEC 60870-5-101:2003 tables 3 and 4, figures 5 and 8): ACK
+// or NACK to send/confirm, status of link to request status of link and to
+// request for access demand, user data or "no data" to a request for user
+// data. Functions 14 and 15 answer anything; the single character E5h
+// stands for ACK or for "no data".
+func answers(fn byte, r ft12.Frame) bool {
+	if r.Kind == ft12.KindSingle {
+		return fn != FuncRequestStatus && fn != FuncAccessDemand
+	}
+	got := Control(r.Control).Func()
+	if got == FuncNotFunctioning || got == FuncNotImplemented {
+		return true
+	}
+	switch fn {
+	case FuncRequestStatus, FuncAccessDemand:
+		return got == FuncStatus
+	case FuncRequestClass1, FuncRequestClass2:
+		return got == FuncUserData || got == FuncNoData
+	}
+	return got == FuncAck || got == FuncNack
 }
 
 // classify turns a secondary's negative answer into an error.
@@ -325,4 +391,29 @@ func statusOf(r ft12.Frame) Status {
 	}
 	c := Control(r.Control)
 	return Status{ACD: c.ACD(), DFC: c.DFC()}
+}
+
+// untilFree repeats request status of link while the secondary answers
+// with DFC set (IEC 60870-5-101:2003 6.2.1, figure 5: Rx[FC11, DFC = 1]
+// leads back to "request status of secondary link"; figure 8: "secondary
+// link busy" sends FC9 until FC11 with DFC = 0). It waits Config.Timeout
+// between requests and gives up with [ErrDataFlow] after Config.Retries
+// repetitions.
+func untilFree(ctx context.Context, cfg Config, request func(context.Context) (Status, error)) (Status, error) {
+	for attempt := 0; ; attempt++ {
+		st, err := request(ctx)
+		if err != nil || !st.DFC {
+			return st, err
+		}
+		if attempt >= cfg.Retries {
+			return st, fmt.Errorf("%w: still set after %d request(s) of status of link", ErrDataFlow, attempt+1)
+		}
+		t := time.NewTimer(cfg.Timeout)
+		select {
+		case <-t.C:
+		case <-ctx.Done():
+			t.Stop()
+			return st, ctx.Err()
+		}
+	}
 }
