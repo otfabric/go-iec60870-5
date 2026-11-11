@@ -176,8 +176,8 @@ test-cbsigma: ## Run the IEC 62351-5 differential tests against cB-Sigma/iec6087
 # Recorded traffic (<standard>/testdata/captures/README.md). The committed
 # captures run in `make test`; these targets check them, fetch the full
 # recordings that are not committed, and regenerate what is derived from them.
-CAPTURE_DIRS := iec104/testdata/captures iec101/testdata/captures iec103/testdata/captures
-CAPTURE_PKGS := ./iec101/internal/capture/ ./iec103/internal/capture/
+CAPTURE_DIRS := iec104/testdata/captures iec101/testdata/captures iec103/testdata/captures iec102/testdata/captures
+CAPTURE_PKGS := ./iec101/internal/capture/ ./iec103/internal/capture/ ./iec102/internal/capture/
 captures-verify: ## Check the committed captures against the SHA256SUMS of every testdata/captures directory
 	@for d in $(CAPTURE_DIRS); do \
 		(cd $$d && if command -v sha256sum >/dev/null; then sha256sum -c --quiet SHA256SUMS; else shasum -a 256 -c --quiet SHA256SUMS; fi) || exit 1; \
