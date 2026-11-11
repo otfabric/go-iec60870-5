@@ -7,7 +7,8 @@ import "testing"
 func TestSHA3(t *testing.T) {
 	for _, m := range []MACAlgorithm{HMACSHA3_256, HMACSHA3_256Serial} {
 		t.Run(m.Name, func(t *testing.T) {
-			p := newPair(t, func(a, _ *Config) { a.MAC = m.Code })
+			// The 8-octet MAC is the serial-link profile (IEC TS 60870-5-7:2025 9.3.2).
+			p := newPair(t, func(a, b *Config) { a.MAC, a.Serial, b.Serial = m.Code, m.Len == 8, m.Len == 8 })
 			p.up()
 			p.mustReady()
 			p.exchange()

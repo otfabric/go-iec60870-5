@@ -17,6 +17,7 @@ import (
 	iec104 "github.com/otfabric/go-iec60870-5/iec104"
 	"github.com/otfabric/go-iec60870-5/iec104/apci"
 	"github.com/otfabric/go-iec60870-5/internal/logx"
+	"github.com/otfabric/go-iec60870-5/sec"
 )
 
 // ErrServerClosed is returned by [Server.Serve] and
@@ -317,8 +318,9 @@ func (s *Server) Broadcast(ctx context.Context, a *asdu.ASDU) (int, error) {
 		switch err := sess.link.Send(ctx, raw); {
 		case err == nil:
 			sent++
-		case errors.Is(err, iec104.ErrNotStarted):
-			// Stopped in the meantime.
+		case errors.Is(err, iec104.ErrNotStarted), errors.Is(err, sec.ErrNotPermitted):
+			// Stopped in the meantime, or a controlling station whose
+			// roles lack MONITOR DATA (IEC TS 60870-5-7:2025 8.2).
 		default:
 			errs = append(errs, fmt.Errorf("session %s: %w", sess.RemoteAddr(), err))
 		}

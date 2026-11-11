@@ -12,6 +12,8 @@ Two stations first agree on update keys (the Station Association: their certific
 
 An [Endpoint](#type-endpoint) is one station's end of such an association. It does no I/O: the caller hands it what was received and sends what it returns, which is what the client and server packages do when they are given one (client.WithSecurity, server.WithSecurity). On its own it is useful to test and to analyse.
 
+A controlled station also applies role-based access control ([Config.Roles](#func-config-roles), [Endpoint.PermitsASDU](#func-endpoint-permitsasdu); without MONITOR DATA [Endpoint.Protect](#func-endpoint-protect) refuses monitor-direction data) and reports its security statistics spontaneously in M\_IT\_TB\_1 ([Config.Reports](#func-config-reports)), as IEC TS 60870-5-7:2025 8.2 and 5.4.2.3 ask. [Config.Serial](#func-config-serial) selects the MAC lengths of a serial link.
+
 #### Provenance {#hdr-Provenance}
 
 The normative documents are not public. The message formats, MAC inputs, key derivation and state machines of this package were derived from the open-source implementation github.com/cB-Sigma/iec60870 (Apache-2.0), which states that it follows licensed copies of both standards; the code is this module's own. Interoperability with that implementation is tested (the module interop/cbsigma of this repository); conformance to the standards is not established independently. See SECURITY.md.
@@ -29,6 +31,24 @@ const (
 ```
 
 Codes that are not MAC algorithms.
+
+```go
+const (
+	DefaultReplyTimeout     = 2 * time.Second
+	DefaultMaxReplyTimeouts = 3
+	DefaultRequestTimeout   = 6 * time.Second
+	DefaultKeyLifetime      = 24 * time.Hour
+	DefaultKeyUses          = 1<<16 - 1
+)
+```
+
+Defaults of [Settings](#type-settings) at a controlling station; a controlled station doubles the key usage limits.
+
+```go
+const StatMax = 1<<31 - 1
+```
+
+StatMax is the largest value of a statistic; the next increment gives 0.
 
 ## Variables
 
@@ -96,6 +116,10 @@ var (
 
 	// ErrConfig reports a [Config] an Endpoint cannot run with.
 	ErrConfig = errors.New("sec: invalid configuration")
+	// ErrNotPermitted reports monitor-direction data that a controlled
+	// station does not send: the roles of the controlling station lack
+	// MONITOR DATA (IEC TS 60870-5-7:2025 8.2).
+	ErrNotPermitted = errors.New("sec: not permitted by the roles of the controlling station")
 )
 ```
 
@@ -145,6 +169,14 @@ func Authorized(roles []AccessRole, t asdu.TypeID) bool
 
 Authorized reports whether any of the roles may request type t.
 
+### func AuthorizedASDU
+
+```go
+func AuthorizedASDU(roles []AccessRole, a *asdu.ASDU) bool
+```
+
+AuthorizedASDU reports whether any of the roles may make request a; see [RequiredPermissionOf](#func-requiredpermissionof).
+
 ### func Decode
 
 ```go
@@ -168,6 +200,14 @@ func Fingerprint(c *x509.Certificate) [32]byte
 ```
 
 Fingerprint returns the SHA-256 digest of a certificate's DER encoding, which [Trust.Fingerprints](#func-trust-fingerprints) lists.
+
+### func IsMonitorData
+
+```go
+func IsMonitorData(t asdu.TypeID) bool
+```
+
+IsMonitorData reports whether type t carries the runtime data values of the monitor direction that only a role with MONITOR DATA may receive, "whether sent spontaneously or sent in response to a request" (IEC TS 60870-5-7:2025 8.2): the process information types 1 to 44. End of initialization, confirmations of commands (which mirror the control-direction type), file transfer and security messages are not.
 
 ### func ParseCertificates
 
@@ -306,9 +346,15 @@ type Config struct {
 	// for devices without a reliable clock.
 	IgnoreValidity bool
 
+	// Serial says that the association runs over a serial link
+	// (IEC 60870-5-101) rather than TCP/IP (IEC 60870-5-104, the default).
+	// It selects the MAC lengths of IEC TS 60870-5-7:2025 9.3 and 9.5: 8
+	// octets on serial links, 16 on TCP/IP.
+	Serial bool
+
 	// MAC is the MAC algorithm a controlling station selects for the key
 	// management messages and the key derivation; default
-	// [HMACSHA256].Code.
+	// [HMACSHA256].Code, or [HMACSHA256Serial].Code when Serial.
 	MAC uint8
 
 	// DataProtection is the algorithm a controlling station selects for
@@ -316,7 +362,11 @@ type Config struct {
 	DataProtection uint8
 
 	// AcceptMAC and AcceptDataProtection limit what a controlled station
-	// accepts. Empty accepts every algorithm this package implements.
+	// accepts. Empty accepts the algorithms of the link
+	// (IEC TS 60870-5-7:2025 9.3.2, 9.3.3, 9.5.2, 9.5.3) this package
+	// implements: over TCP/IP HMAC-SHA-256 and HMAC-SHA3-256 truncated to
+	// 16 octets (and AES-256-GCM for data), over a serial link the same
+	// truncated to 8 octets. List codes to accept others.
 	AcceptMAC            []uint8
 	AcceptDataProtection []uint8
 
@@ -336,9 +386,18 @@ type Config struct {
 	Originator uint8
 
 	// Roles are the roles of the controlling station at a controlled
-	// station, for [Endpoint.Permits]. Nil applies no role-based access
-	// control: every request is permitted.
+	// station, for [Endpoint.Permits] and [Endpoint.PermitsASDU]; without
+	// MONITOR DATA, [Endpoint.Protect] also refuses monitor-direction
+	// data. Nil applies no role-based access control: every request is
+	// permitted.
 	Roles []AccessRole
+
+	// Reports are the statistics a controlled station reports on the wire
+	// and where (IEC TS 60870-5-7:2025 5.4.2.3, 9.7): see
+	// [StatisticReport]. The reports are Secure Data, sent with the output
+	// of the call that made them due. Empty reports nothing. Only for a
+	// controlled station.
+	Reports map[Stat]StatisticReport
 
 	// OnEvent is called for every security event (a statistic with an
 	// event mnemonic was incremented). It is called without locks held,
@@ -452,6 +511,11 @@ type Endpoint struct {
 
 	// the latest time the caller passed
 
+	// statistic reports (controlled station)
+	// the value last reported
+
+	// sending reports: their own counting makes none due
+
 	// the association
 
 	// valid update keys
@@ -556,6 +620,14 @@ func (e *Endpoint) Permits(t asdu.TypeID) bool
 
 Permits reports whether the roles of the controlling station allow a request of type t (see [Config.Roles](#func-config-roles)). The controlled station answers a refused request with a negative confirmation with cause [asdu.CauseNotAuthorized](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#CauseNotAuthorized); call [Endpoint.Refused](#func-endpoint-refused) to count it.
 
+#### func (Endpoint) PermitsASDU
+
+```go
+func (e *Endpoint) PermitsASDU(a *asdu.ASDU) bool
+```
+
+PermitsASDU is [Endpoint.Permits](#func-endpoint-permits) for a decoded request, which also tells file deletion (FILEMNGT) from the other file calls; see [RequiredPermissionOf](#func-requiredpermissionof).
+
 #### func (Endpoint) Protect
 
 ```go
@@ -563,6 +635,8 @@ func (e *Endpoint) Protect(now time.Time, data []byte) ([][]byte, error)
 ```
 
 Protect wraps an application ASDU in Secure Data and returns its segments. It returns ErrNotReady while no session keys may be used; the caller waits for [Endpoint.Changed](#func-endpoint-changed). The segments must be sent in order and before anything else this Endpoint returns later: the receiver accepts only increasing sequence numbers.
+
+A controlled station whose [Config.Roles](#func-config-roles) lack MONITOR DATA refuses monitor-direction data ([IsMonitorData](#func-ismonitordata)) with ErrNotPermitted (IEC TS 60870-5-7:2025 8.2). The statistic reports of [Config.Reports](#func-config-reports) that are due follow the protected data in the result.
 
 #### func (Endpoint) Ready
 
@@ -880,6 +954,14 @@ RequiredPermission is the permission a request of type t needs. The standard lea
 
 F\_AF\_NA\_1 needs file read: from a controlling station it can only acknowledge a section or file it downloaded, since in an upload the controlled station acknowledges. cB-Sigma/iec60870 v0.3.0 asks for file write, which lets a viewer read a whole file and then refuses its acknowledgement.
 
+#### func RequiredPermissionOf
+
+```go
+func RequiredPermissionOf(a *asdu.ASDU) Permission
+```
+
+RequiredPermissionOf is the permission request a needs: that of its type, except that F\_SC\_NA\_1 with the qualifier "delete file" needs file management, the permission "to delete existing files on a device" (IEC TS 60870-5-7:2025 8.2, FILEMNGT).
+
 ### type ProtocolInfo
 
 ```go
@@ -1061,8 +1143,10 @@ type Settings struct {
 	// KeyLifetime and KeyUses limit how long and for how many messages a
 	// pair of session keys is used: a controlling station changes them when
 	// either is reached, a controlled station stops accepting them.
-	// Defaults 15 minutes and 1000 messages at a controlling station,
-	// twice that at a controlled one, which must allow more than its peer.
+	// Defaults 24 hours and 65535 messages at a controlling station, the
+	// lower ends of the ranges IEC TS 60870-5-7:2025 Table 9 recommends,
+	// and twice that at a controlled one, which must allow more than its
+	// peer (Table 9, notes 2 and 3).
 	KeyLifetime time.Duration
 	KeyUses     uint32
 }
@@ -1141,6 +1225,14 @@ const (
 
 The statistics.
 
+#### func (Stat) DefaultThreshold
+
+```go
+func (s Stat) DefaultThreshold() uint32
+```
+
+DefaultThreshold is the default statistic threshold of IEC TS 60870-5-7:2025 Table 10: how much the statistic must have grown since it was last reported before the controlled station reports it.
+
 #### func (Stat) Event
 
 ```go
@@ -1178,13 +1270,26 @@ State is what one end of an association keeps over a restart: the association ID
 
 The session keys are kept only so that a controlled station can authenticate the Session Initiation Request that asks for new ones; they are not used for data after a restart.
 
+### type StatisticReport
+
+```go
+type StatisticReport struct {
+	IOA       asdu.IOA
+	Threshold uint32
+}
+```
+
+StatisticReport says where and when a controlled station reports a statistic (IEC TS 60870-5-7:2025 5.4.2.3 and 9.7, Table 10): as the integrated total at IOA, in M\_IT\_TB\_1 with cause spontaneous, whenever the statistic grew by Threshold since it was last reported. A zero Threshold takes [Stat.DefaultThreshold](#func-stat-defaultthreshold).
+
 ### type Statistics
 
 ```go
 type Statistics [NumStats]uint32
 ```
 
-Statistics are the counters of one association. The counters wrap after 2^32-1.
+Statistics are the counters of one association. Each is in the range of the BCR value that reports it, 0 to 2^31-1, and wraps to 0 after 2^31-1 (IEC TS 60870-5-7:2025 5.4.2.3).
+
+Remote Station's Certificate Revocations, Local Station's Certificate Revocations and the two Cryptographic Keys Invalidations due to a certificate revocation stay 0: the package does not check revocation.
 
 ### type Status
 

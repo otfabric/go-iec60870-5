@@ -14,6 +14,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/asn1"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -384,6 +385,11 @@ func (id *Identity) Pin() Trust {
 	return Trust{Fingerprints: [][32]byte{Fingerprint(id.Certificate)}}
 }
 
+// errExpired marks a remote certificate refused because its validity
+// period ended: Remote Station's Certificate Expirations, not Validity
+// Check Failures.
+var errExpired = errors.New("certificate expired")
+
 // verify checks a remote station certificate (DER) for an association whose
 // local key is on curve: same curve, within its validity period unless
 // ignoreValidity, signed correctly, and authorized by t. notAuthorized tells
@@ -406,7 +412,10 @@ func (t Trust) verify(der []byte, curve Curve, now time.Time, ignoreValidity boo
 	if rc != curve {
 		return fail(false, "remote key on %s, ours on %s", rc, curve)
 	}
-	if !ignoreValidity && (now.Before(c.NotBefore) || now.After(c.NotAfter)) {
+	if !ignoreValidity && now.After(c.NotAfter) {
+		return nil, nil, false, fmt.Errorf("%w: %w: %q expired %s", ErrCertificate, errExpired, c.Subject, c.NotAfter.Format(time.RFC3339))
+	}
+	if !ignoreValidity && now.Before(c.NotBefore) {
 		return fail(false, "%q is outside its validity period", c.Subject)
 	}
 	// The authorities first: a station certificate whose subject equals its

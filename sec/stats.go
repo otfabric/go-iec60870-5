@@ -2,7 +2,11 @@
 
 package sec
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/otfabric/go-iec60870-5/asdu"
+)
 
 // Stat is one of the security statistics of IEC TS 60870-5-7 (the counters
 // of IEC 62351-5), in the order of its table.
@@ -119,9 +123,45 @@ func (s Severity) String() string {
 	return "none"
 }
 
-// Statistics are the counters of one association. The counters wrap after
-// 2^32-1.
+// Statistics are the counters of one association. Each is in the range of
+// the BCR value that reports it, 0 to 2^31-1, and wraps to 0 after 2^31-1
+// (IEC TS 60870-5-7:2025 5.4.2.3).
+//
+// Remote Station's Certificate Revocations, Local Station's Certificate
+// Revocations and the two Cryptographic Keys Invalidations due to a
+// certificate revocation stay 0: the package does not check revocation.
 type Statistics [NumStats]uint32
+
+// StatMax is the largest value of a statistic; the next increment gives 0.
+const StatMax = 1<<31 - 1
+
+// DefaultThreshold is the default statistic threshold of
+// IEC TS 60870-5-7:2025 Table 10: how much the statistic must have grown
+// since it was last reported before the controlled station reports it.
+func (s Stat) DefaultThreshold() uint32 {
+	switch s {
+	case StatSuccessfulSessionKeyChanges, StatUnexpectedMessages, StatDiscardedMessages:
+		return 10
+	case StatSuccessfulDataAuthentications:
+		return 100
+	case StatReplyTimeouts:
+		return 3
+	case StatMessagesSent, StatMessagesReceived:
+		return 500
+	default:
+		return 1
+	}
+}
+
+// StatisticReport says where and when a controlled station reports a
+// statistic (IEC TS 60870-5-7:2025 5.4.2.3 and 9.7, Table 10): as the
+// integrated total at IOA, in M_IT_TB_1 with cause spontaneous, whenever
+// the statistic grew by Threshold since it was last reported. A zero
+// Threshold takes [Stat.DefaultThreshold].
+type StatisticReport struct {
+	IOA       asdu.IOA
+	Threshold uint32
+}
 
 // Event is a security event: a statistic was incremented. Err, when not nil,
 // says why (a refused certificate, a MAC that did not verify). An event that

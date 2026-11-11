@@ -263,12 +263,13 @@ for what it protects and where it came from.
 | Key agreement | ECDH on secp256r1 or Curve25519 |
 | Key derivation | HKDF with the hash of the MAC algorithm |
 | Key wrap (KWA) | 2, AES-256 key wrap (RFC 3394) |
-| MAC algorithms (MAL) | 3 HMAC-SHA-256/8, 4 HMAC-SHA-256/16 (default), 7 and 8 HMAC-SHA3-256/8 and /16 |
-| Data protection (DPA) | the MAC algorithms above, 11 AES-256-GCM |
+| MAC algorithms (MAL) | 3 HMAC-SHA-256/8, 4 HMAC-SHA-256/16 (default), 7 and 8 HMAC-SHA3-256/8 and /16. Over TCP/IP a controlled station accepts 4 and 8 by default (TS 9.3.3), on serial links (`Config.Serial`) 3 and 7 (TS 9.3.2); `AcceptMAC` lists others |
+| Data protection (DPA) | the MAC algorithms above, 11 AES-256-GCM; accepted by default: the MACs of the link and 11 (TS 9.5.2, 9.5.3) |
+| Key usage limits | 24 h and 65535 messages at the controlling station, twice that at the controlled station (TS Table 9, lower ends of the recommended ranges) |
 | Certificates | X.509, self-signed and pinned, or issued by a trusted Central Authority, optionally restricted by subject |
-| Role-based access control | the seven roles of IEC TS 60870-5-7, configured per association; refusals with cause 17 |
+| Role-based access control | the seven roles of IEC TS 60870-5-7, configured per association; refusals with cause 17; file deletion needs FILEMNGT; without MONITOR DATA no monitor-direction data (types 1 to 44) is sent to the association (TS 8.2) |
 | Several controlling stations at one station | yes, one association per AIM, made on first contact or refused |
-| Security statistics and events | counters and mnemonics locally (`Endpoint.Statistics`, `Config.OnEvent`); **no M_IT_TB_1 reporting on the wire** (TS 5.4.2.3), five counters never incremented |
+| Security statistics and events | counters (0 to 2^31-1) and mnemonics locally (`Endpoint.Statistics`, `Config.OnEvent`); M_IT_TB_1 reports, cause spontaneous, at the IOAs and thresholds of `Config.Reports` (TS 5.4.2.3, 9.7, Table 10 defaults); the four revocation counters stay 0 (no revocation checking) |
 | Broadcast session key (IEC 60870-5-101) | no |
 | secp256k1, X448 (mandatory in the TS 9.2 PICS), brainpool curves; BLAKE2s | no |
 | IEC 62351-8 access tokens, certificate revocation lists | no |
@@ -294,6 +295,13 @@ compatible with it:
   cB-Sigma that carry no basic constraints.
 
 Where the two differ in what a controlled station permits:
+
+- Over TCP/IP our controlled station refuses the 8-octet MACs (MAL and DPA
+  3 and 7) unless configured to accept them (TS 9.3.3, 9.5.3); the
+  differential tests that run DPA 3 against cB-Sigma over TCP set
+  `AcceptDataProtection` explicitly. The key usage defaults (24 h / 65535
+  messages) are longer than cB-Sigma's; the differential tests do not
+  depend on them.
 
 - The acknowledgement of a download (F_AF_NA_1 from the controlling
   station) needs the file read permission, so a VIEWER downloads a file to

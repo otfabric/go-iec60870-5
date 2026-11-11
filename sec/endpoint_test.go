@@ -221,7 +221,12 @@ func TestAssociation(t *testing.T) {
 	for _, dpa := range []uint8{HMACSHA256.Code, HMACSHA256Serial.Code, AES256GCM} {
 		dp, _ := DataProtectionByCode(dpa)
 		t.Run(dp.String(), func(t *testing.T) {
-			p := newPair(t, func(a, b *Config) { a.DataProtection = dpa })
+			p := newPair(t, func(a, b *Config) {
+				a.DataProtection = dpa
+				if dpa == HMACSHA256Serial.Code {
+					b.AcceptDataProtection = []uint8{dpa} // not of TCP/IP by default
+				}
+			})
 			p.up()
 			p.mustReady()
 			p.exchange()
@@ -811,7 +816,7 @@ func TestCertificates(t *testing.T) {
 		{"public key", func(a, b *Config) {
 			b.Trust = Trust{PublicKeys: [][]byte{subjectPublicKey(idA.Certificate)}}
 		}, ok},
-		{"expired", func(a, b *Config) { a.Identity, b.Trust = expired, expired.Pin(); a.IgnoreValidity = true }, refusedBy(ctl, StatRemoteCertificateFailures)},
+		{"expired", func(a, b *Config) { a.Identity, b.Trust = expired, expired.Pin(); a.IgnoreValidity = true }, refusedBy(ctl, StatRemoteCertificateExpirations)},
 		{"expired ignored", func(a, b *Config) {
 			a.Identity, b.Trust = expired, expired.Pin()
 			a.IgnoreValidity, b.IgnoreValidity = true, true
@@ -869,9 +874,7 @@ func TestAlgorithms(t *testing.T) {
 			}
 		})
 	}
-	p := newPair(t, func(a, b *Config) {
-		a.MAC, b.AcceptMAC = HMACSHA256Serial.Code, []uint8{HMACSHA256Serial.Code}
-	})
+	p := newPair(t, func(a, b *Config) { a.Serial, b.Serial = true, true })
 	p.up()
 	p.mustReady()
 	p.exchange()

@@ -51,4 +51,8 @@ var (
 
 	// ErrConfig reports a [Config] an Endpoint cannot run with.
 	ErrConfig = errors.New("sec: invalid configuration")
+	// ErrNotPermitted reports monitor-direction data that a controlled
+	// station does not send: the roles of the controlling station lack
+	// MONITOR DATA (IEC TS 60870-5-7:2025 8.2).
+	ErrNotPermitted = errors.New("sec: not permitted by the roles of the controlling station")
 )

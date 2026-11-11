@@ -147,7 +147,7 @@ func (s *Session) onASDU(raw []byte) {
 		s.log.Warn("dropping undecodable ASDU", "error", err)
 		return
 	}
-	if ep := s.Security(); ep != nil && !ep.Permits(a.Type) {
+	if ep := s.Security(); ep != nil && !ep.PermitsASDU(a) {
 		ep.Refused(a.Type)
 		s.log.Warn("request not permitted by the roles of the controlling station", "asdu", a.String())
 		_ = s.Reply(a, asdu.CauseNotAuthorized, true)

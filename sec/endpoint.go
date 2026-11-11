@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sync"
 	"time"
 
@@ -88,19 +89,25 @@ type Status struct {
 //
 // An Endpoint is safe for concurrent use.
 type Endpoint struct {
-	mu      sync.Mutex
-	cfg     Config
-	priv    *ecdh.PrivateKey
-	curve   Curve
-	reasm   reassembler
-	seq     uint8 // ASC sequence number of the next segment sent
-	up      bool
-	owner   any
-	clock   time.Time // the latest time the caller passed
-	stats   Statistics
-	events  []Event
-	changed chan struct{}
-	err     error
+	mu     sync.Mutex
+	cfg    Config
+	priv   *ecdh.PrivateKey
+	curve  Curve
+	reasm  reassembler
+	seq    uint8 // ASC sequence number of the next segment sent
+	up     bool
+	owner  any
+	clock  time.Time // the latest time the caller passed
+	stats  Statistics
+	events []Event
+
+	// statistic reports (controlled station)
+	reported  Statistics // the value last reported
+	due       [NumStats]bool
+	reportSeq [NumStats]uint8
+	reporting bool // sending reports: their own counting makes none due
+	changed   chan struct{}
+	err       error
 
 	// the association
 	st       State
@@ -236,7 +243,11 @@ func (e *Endpoint) unlock() {
 }
 
 func (e *Endpoint) inc(s Stat, err error) {
-	e.stats[s]++
+	e.stats[s] = (e.stats[s] + 1) & StatMax
+	if r, ok := e.cfg.Reports[s]; ok && !e.reporting && !e.due[s] &&
+		(e.stats[s]-e.reported[s])&StatMax >= r.Threshold {
+		e.due[s] = true
+	}
 	if name, sev, ok := s.Event(); ok {
 		e.events = append(e.events, Event{Stat: s, Mnemonic: name, Severity: sev, Count: e.stats[s], Err: err})
 	}
@@ -299,12 +310,73 @@ func (e *Endpoint) Permits(t asdu.TypeID) bool {
 	return Authorized(e.cfg.Roles, t)
 }
 
+// PermitsASDU is [Endpoint.Permits] for a decoded request, which also
+// tells file deletion (FILEMNGT) from the other file calls; see
+// [RequiredPermissionOf].
+func (e *Endpoint) PermitsASDU(a *asdu.ASDU) bool {
+	if e.cfg.Roles == nil {
+		return true
+	}
+	return AuthorizedASDU(e.cfg.Roles, a)
+}
+
 // Refused counts a request refused by role-based access control.
 func (e *Endpoint) Refused(t asdu.TypeID) {
 	e.mu.Lock()
 	defer e.unlock()
 	e.inc(StatOperationAuthorizationFailures, fmt.Errorf("sec: %s not permitted by the roles of the controlling station", t))
 	e.inc(StatDiscardedMessages, nil)
+	if e.reportsDue() {
+		e.notify() // the caller's link asks Tick for the reports
+	}
+}
+
+// reportsDue reports statistic reports waiting that a session can protect
+// now.
+func (e *Endpoint) reportsDue() bool {
+	return slices.Contains(e.due[:], true) && e.canProtect(e.clock)
+}
+
+// canProtect reports whether Secure Data can be sent now.
+func (e *Endpoint) canProtect(now time.Time) bool {
+	if !e.ready() || e.txSeq == 0xffffffff {
+		return false
+	}
+	return e.cfg.Role != Controlled || (!e.keysExpired(now) && e.keyUses < e.cfg.Settings.KeyUses)
+}
+
+// flushReports appends the statistic reports that are due to out
+// (IEC TS 60870-5-7:2025 5.4.2.3: M_IT_TB_1, cause spontaneous, at the
+// configured IOA). They wait while no session can protect them.
+func (e *Endpoint) flushReports(now time.Time, out [][]byte) [][]byte {
+	if !slices.Contains(e.due[:], true) {
+		return out
+	}
+	e.reporting = true
+	defer func() { e.reporting = false }()
+	for s := range NumStats {
+		if !e.due[s] {
+			continue
+		}
+		v := e.stats[s]
+		obj := asdu.IntegratedTotal{IOA: e.cfg.Reports[s].IOA, Value: int32(v), Sequence: e.reportSeq[s] & 0x1F,
+			Carry: v < e.reported[s], Time: asdu.Timestamp{Time: now}}
+		a := asdu.New(asdu.CauseSpontaneous, e.cfg.CommonAddr, obj)
+		a.Originator = e.cfg.Originator
+		raw, err := a.Encode(e.cfg.Params)
+		if err != nil {
+			e.due[s] = false // cannot be reported with these parameters
+			continue
+		}
+		frames, err := e.protectLocked(now, raw)
+		if err != nil {
+			return out // not ready: later
+		}
+		out = append(out, frames...)
+		e.due[s], e.reported[s] = false, v
+		e.reportSeq[s]++
+	}
+	return out
 }
 
 // Reassociate asks a controlling station to run the Station Association
@@ -477,6 +549,9 @@ func (e *Endpoint) Deadline() time.Time {
 		if e.session {
 			consider(e.keySince.Add(e.cfg.Settings.KeyLifetime))
 		}
+		if e.reportsDue() {
+			consider(e.clock)
+		}
 	}
 	return next
 }
@@ -492,7 +567,7 @@ func (e *Endpoint) Tick(now time.Time) [][]byte {
 	if e.cfg.Role == Controlling {
 		return e.tickControlling(now)
 	}
-	return e.tickControlled(now)
+	return e.flushReports(now, e.tickControlled(now))
 }
 
 func (e *Endpoint) keysWornOut() bool {
@@ -672,10 +747,7 @@ func (e *Endpoint) receiveControlling(now time.Time, out *[][]byte, whole []byte
 		cert, pub, notAuth, err := e.cfg.Trust.verify(v.Certificate, e.curve, now, e.cfg.IgnoreValidity)
 		if err != nil {
 			e.err = err
-			if notAuth {
-				return e.discard(StatRemoteAuthorizationFailures, err)
-			}
-			return e.discard(StatRemoteCertificateFailures, err)
+			return e.discard(certStat(notAuth, err), err)
 		}
 		mal, _ := MACByCode(e.cfg.MAC)
 		random := e.random(32)
@@ -862,10 +934,7 @@ func (e *Endpoint) receiveControlled(now time.Time, out *[][]byte, whole []byte,
 		}
 		cert, pub, notAuth, err := e.cfg.Trust.verify(v.Certificate, e.curve, now, e.cfg.IgnoreValidity)
 		if err != nil {
-			if notAuth {
-				return e.discard(StatRemoteAuthorizationFailures, err)
-			}
-			return e.discard(StatRemoteCertificateFailures, err)
+			return e.discard(certStat(notAuth, err), err)
 		}
 		e.remote, e.remoteDH = cert, pub
 		if e.waitUH && e.apSent != nil {
@@ -1018,6 +1087,17 @@ func (e *Endpoint) save() {
 	}
 }
 
+// certStat is the statistic of a refused remote certificate.
+func certStat(notAuthorized bool, err error) Stat {
+	switch {
+	case notAuthorized:
+		return StatRemoteAuthorizationFailures
+	case errors.Is(err, errExpired):
+		return StatRemoteCertificateExpirations
+	}
+	return StatRemoteCertificateFailures
+}
+
 func (e *Endpoint) discard(s Stat, err error) ([]byte, error) {
 	e.inc(s, err)
 	e.inc(StatDiscardedMessages, nil)
@@ -1036,6 +1116,11 @@ func (e *Endpoint) Receive(now time.Time, raw []byte) (data []byte, out [][]byte
 	e.mu.Lock()
 	defer e.unlock()
 	e.clock = now
+	data, out, err = e.receive(now, raw)
+	return data, e.flushReports(now, out), err
+}
+
+func (e *Endpoint) receive(now time.Time, raw []byte) (data []byte, out [][]byte, err error) {
 	h, _, err := parseHeader(raw, e.cfg.Params)
 	if err != nil {
 		e.inc(StatDiscardedMessages, nil)
@@ -1097,14 +1182,29 @@ func (e *Endpoint) receiveData(h Header, whole []byte, v SecureData) ([]byte, er
 // waits for [Endpoint.Changed]. The segments must be sent in order and
 // before anything else this Endpoint returns later: the receiver accepts
 // only increasing sequence numbers.
+//
+// A controlled station whose [Config.Roles] lack MONITOR DATA refuses
+// monitor-direction data ([IsMonitorData]) with [ErrNotPermitted]
+// (IEC TS 60870-5-7:2025 8.2). The statistic reports of [Config.Reports]
+// that are due follow the protected data in the result.
 func (e *Endpoint) Protect(now time.Time, data []byte) ([][]byte, error) {
 	e.mu.Lock()
 	defer e.unlock()
 	e.clock = now
-	if !e.ready() || e.txSeq == 0xffffffff {
-		return nil, ErrNotReady
+	if e.cfg.Role == Controlled && e.cfg.Roles != nil && len(data) > 0 && IsMonitorData(asdu.TypeID(data[0])) &&
+		!granted(e.cfg.Roles, PermMonitorData) {
+		return nil, fmt.Errorf("%w: %s needs MONITOR DATA", ErrNotPermitted, asdu.TypeID(data[0]))
 	}
-	if e.cfg.Role == Controlled && (e.keysExpired(now) || e.keyUses >= e.cfg.Settings.KeyUses) {
+	out, err := e.protectLocked(now, data)
+	if err != nil {
+		return nil, err
+	}
+	return e.flushReports(now, out), nil
+}
+
+// protectLocked wraps data in Secure Data; the caller holds e.mu.
+func (e *Endpoint) protectLocked(now time.Time, data []byte) ([][]byte, error) {
+	if !e.canProtect(now) {
 		return nil, ErrNotReady
 	}
 	h, _, err := parseHeader(data, e.cfg.Params)

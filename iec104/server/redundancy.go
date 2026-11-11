@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/otfabric/go-iec60870-5/asdu"
 	iec104 "github.com/otfabric/go-iec60870-5/iec104"
+	"github.com/otfabric/go-iec60870-5/sec"
 )
 
 // DefaultEventQueue is the number of events a redundancy group buffers when
@@ -353,6 +355,14 @@ func (g *group) pump() {
 		g.sending, g.cancelSend = nil, nil
 		g.mu.Unlock()
 		cancel()
+		if errors.Is(err, sec.ErrNotPermitted) {
+			// The roles of the controlling station exclude the event
+			// (IEC TS 60870-5-7:2025 8.2, MONITOR DATA): it is not for
+			// this association, and would be refused again.
+			g.srv.log.Debug("event not sent: the controlling station's roles lack MONITOR DATA", "group", g.name)
+			g.acked(item)
+			continue
+		}
 		if err != nil {
 			g.mu.Lock()
 			if item.owner == s {

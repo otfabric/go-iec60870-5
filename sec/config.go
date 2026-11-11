@@ -33,9 +33,15 @@ type Config struct {
 	// for devices without a reliable clock.
 	IgnoreValidity bool
 
+	// Serial says that the association runs over a serial link
+	// (IEC 60870-5-101) rather than TCP/IP (IEC 60870-5-104, the default).
+	// It selects the MAC lengths of IEC TS 60870-5-7:2025 9.3 and 9.5: 8
+	// octets on serial links, 16 on TCP/IP.
+	Serial bool
+
 	// MAC is the MAC algorithm a controlling station selects for the key
 	// management messages and the key derivation; default
-	// [HMACSHA256].Code.
+	// [HMACSHA256].Code, or [HMACSHA256Serial].Code when Serial.
 	MAC uint8
 
 	// DataProtection is the algorithm a controlling station selects for
@@ -43,7 +49,11 @@ type Config struct {
 	DataProtection uint8
 
 	// AcceptMAC and AcceptDataProtection limit what a controlled station
-	// accepts. Empty accepts every algorithm this package implements.
+	// accepts. Empty accepts the algorithms of the link
+	// (IEC TS 60870-5-7:2025 9.3.2, 9.3.3, 9.5.2, 9.5.3) this package
+	// implements: over TCP/IP HMAC-SHA-256 and HMAC-SHA3-256 truncated to
+	// 16 octets (and AES-256-GCM for data), over a serial link the same
+	// truncated to 8 octets. List codes to accept others.
 	AcceptMAC            []uint8
 	AcceptDataProtection []uint8
 
@@ -63,9 +73,18 @@ type Config struct {
 	Originator uint8
 
 	// Roles are the roles of the controlling station at a controlled
-	// station, for [Endpoint.Permits]. Nil applies no role-based access
-	// control: every request is permitted.
+	// station, for [Endpoint.Permits] and [Endpoint.PermitsASDU]; without
+	// MONITOR DATA, [Endpoint.Protect] also refuses monitor-direction
+	// data. Nil applies no role-based access control: every request is
+	// permitted.
 	Roles []AccessRole
+
+	// Reports are the statistics a controlled station reports on the wire
+	// and where (IEC TS 60870-5-7:2025 5.4.2.3, 9.7): see
+	// [StatisticReport]. The reports are Secure Data, sent with the output
+	// of the call that made them due. Empty reports nothing. Only for a
+	// controlled station.
+	Reports map[Stat]StatisticReport
 
 	// OnEvent is called for every security event (a statistic with an
 	// event mnemonic was incremented). It is called without locks held,
@@ -94,11 +113,23 @@ type Settings struct {
 	// KeyLifetime and KeyUses limit how long and for how many messages a
 	// pair of session keys is used: a controlling station changes them when
 	// either is reached, a controlled station stops accepting them.
-	// Defaults 15 minutes and 1000 messages at a controlling station,
-	// twice that at a controlled one, which must allow more than its peer.
+	// Defaults 24 hours and 65535 messages at a controlling station, the
+	// lower ends of the ranges IEC TS 60870-5-7:2025 Table 9 recommends,
+	// and twice that at a controlled one, which must allow more than its
+	// peer (Table 9, notes 2 and 3).
 	KeyLifetime time.Duration
 	KeyUses     uint32
 }
+
+// Defaults of [Settings] at a controlling station; a controlled station
+// doubles the key usage limits.
+const (
+	DefaultReplyTimeout     = 2 * time.Second
+	DefaultMaxReplyTimeouts = 3
+	DefaultRequestTimeout   = 6 * time.Second
+	DefaultKeyLifetime      = 24 * time.Hour
+	DefaultKeyUses          = 1<<16 - 1
+)
 
 func (s Settings) withDefaults(r Role) Settings {
 	f := time.Duration(1)
@@ -106,19 +137,19 @@ func (s Settings) withDefaults(r Role) Settings {
 		f = 2
 	}
 	if s.ReplyTimeout == 0 {
-		s.ReplyTimeout = 2 * time.Second
+		s.ReplyTimeout = DefaultReplyTimeout
 	}
 	if s.MaxReplyTimeouts == 0 {
-		s.MaxReplyTimeouts = 3
+		s.MaxReplyTimeouts = DefaultMaxReplyTimeouts
 	}
 	if s.RequestTimeout == 0 {
-		s.RequestTimeout = 6 * time.Second
+		s.RequestTimeout = DefaultRequestTimeout
 	}
 	if s.KeyLifetime == 0 {
-		s.KeyLifetime = f * 15 * time.Minute
+		s.KeyLifetime = f * DefaultKeyLifetime
 	}
 	if s.KeyUses == 0 {
-		s.KeyUses = uint32(f) * 1000
+		s.KeyUses = uint32(f) * DefaultKeyUses
 	}
 	return s
 }
@@ -158,6 +189,9 @@ func (c *Config) check() error {
 	c.Settings = c.Settings.withDefaults(c.Role)
 	if c.MAC == 0 {
 		c.MAC = HMACSHA256.Code
+		if c.Serial {
+			c.MAC = HMACSHA256Serial.Code
+		}
 	}
 	if c.DataProtection == 0 {
 		c.DataProtection = c.MAC
@@ -178,8 +212,39 @@ func (c *Config) check() error {
 	}
 	c.AcceptMAC = slices.Clone(c.AcceptMAC)
 	c.AcceptDataProtection = slices.Clone(c.AcceptDataProtection)
+	if len(c.AcceptMAC) == 0 {
+		c.AcceptMAC = linkMACs(c.Serial)
+	}
+	if len(c.AcceptDataProtection) == 0 {
+		c.AcceptDataProtection = append(linkMACs(c.Serial), AES256GCM)
+	}
 	c.Roles = slices.Clone(c.Roles)
+	if len(c.Reports) > 0 {
+		if c.Role != Controlled {
+			return fmt.Errorf("%w: statistics are reported by the controlled station", ErrConfig)
+		}
+		r := make(map[Stat]StatisticReport, len(c.Reports))
+		for s, v := range c.Reports {
+			if s >= NumStats {
+				return fmt.Errorf("%w: statistic %d", ErrConfig, s)
+			}
+			if v.Threshold == 0 {
+				v.Threshold = s.DefaultThreshold()
+			}
+			r[s] = v
+		}
+		c.Reports = r
+	}
 	return nil
+}
+
+// linkMACs are the MAC algorithms of IEC TS 60870-5-7:2025 9.3 for the
+// link: 8-octet MACs on serial links, 16-octet ones on TCP/IP.
+func linkMACs(serial bool) []uint8 {
+	if serial {
+		return []uint8{HMACSHA256Serial.Code, HMACSHA3_256Serial.Code}
+	}
+	return []uint8{HMACSHA256.Code, HMACSHA3_256.Code}
 }
 
 // accepts reports whether code is implemented and, when the list is not

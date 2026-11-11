@@ -30,9 +30,22 @@ contract's defaults (1-octet link address, COT 1, CA 1, IOA 2):
   this module's server, unbalanced and balanced: 124 of 124 match the
   harness's expected result exactly.
 
+The run was repeated on 2026-11-11 after the link-state changes below
+(not-reset state, DFC handling, response filtering, FCB repetition by
+function and content, receiver address in balanced responses): all pass,
+20 of 20 client scenarios and 124 of 124 reference-client cases.
+
+Balanced mode with distinct addresses (station 1 and 2) was run once by
+hand against the lib60870-C image (`server --link-address 2
+--remote-link-address 1`): lib60870-C answers with its own address and
+accepts responses carrying either address, so the default of
+IEC 60870-5-101:2003 6.2.1.2 (the receiver's address) interworks with it.
+cB-Sigma's adapter takes one link address for both directions and cannot
+show the difference. The harness itself runs equal addresses only.
+
 Not covered by independent runs: other field sizes, 2-octet and 0-octet
-link addresses, balanced mode with distinct addresses, single character
-acknowledgement, multidrop. cB-Sigma's IEC 101 was debugged against
+link addresses, single character acknowledgement, multidrop, DFC set by
+the peer. cB-Sigma's IEC 101 was debugged against
 lib60870, so the two references are not fully independent of each other.
 
 The implementation was checked clause by clause on 2026-11-11 against
@@ -54,11 +67,20 @@ The deviations found and still open are listed in
 | Link address size 0, 1, 2 octets | yes (0 only balanced) | unit, e2e (1 and 2), unit balanced 0 |
 | Unbalanced: request status of link, reset of remote link, reset of user process | yes | unit, e2e, independent (status, reset of remote link) |
 | Unbalanced: send/confirm, send/no reply (broadcast), request class 1/2 | yes | unit, e2e, independent (send/confirm, class 1/2) |
+| Request for access demand (8) answered with status of link (11), table 3 | yes | unit (`TestAccessDemand`) |
+| Reset of FCB (7): not in table 3, answered 15 unless the handler opts in (`link.FCBResetHandler`, IEC 60870-5-103) | yes | unit (`TestResetFCBOptIn`) |
+| "Secondary link not reset" (figures 6, 9): only functions 9 and 0 answered until the first reset of remote link | yes | unit (`TestNotResetState`), independent |
 | ACD-driven class 1 polling, DFC holds back user data | yes | unit, e2e, independent (ACD) |
-| FCB/FCV, repetition answered with the stored response | yes | unit (`TestRepetitionNotProcessedTwice`) |
+| Primary waits for DFC = 0 before reset (figures 5, 8); balanced primary requests status while the peer's DFC is set | yes | unit (`TestInitWaitsForDFC`, `TestBalancedSendWaitsForDFC`) |
+| "Secondary link busy" (figures 6, 9): DFC in every response while the input queue is more than half full, user data refused with NACK | yes | unit (`TestBusyRefusesUserData`), e2e (`TestServerBusySetsDFC`) |
+| Balanced server sends a refused ASDU again (NACK or DFC) | yes | e2e (`TestServerBalancedResendsAfterNack`) |
+| Responses that cannot answer the request (a late repetition) discarded, not taken as the answer | yes | unit (`TestLateResponseDiscarded`) |
+| FCB/FCV, repetition answered with the stored response; a repetition is the same function and data with the FCB not toggled | yes | unit (`TestRepetitionNotProcessedTwice`, `TestSameFCBOtherRequest`) |
 | Single character E5h as ACK / no-data NACK (configurable) | yes | unit |
 | NACK (1), not functioning (14), not implemented (15) | yes | unit |
+| Empty user data refused (`link.ErrNoData`): without an ASDU a frame is fixed-length (6.1) | yes | unit (`TestEmptyUserData`) |
 | Balanced: both directions initialized, test function for link, DIR bit | yes | unit, e2e, independent |
+| Balanced address field: responses carry the receiver's address (6.2.1.2); `link.Config.SenderAddr` for the own address; either accepted | yes | unit (`TestBalancedReceiverAddr`), independent (lib60870-C, by hand) |
 | Multiple secondaries on one line (multidrop) polled by one client | link layer yes, `iec101/client` **no** (one link address per client) | unit (address filtering) |
 
 ## Application layer
@@ -69,7 +91,14 @@ identification of the `asdu` package encodes under any of them. The codec
 does not restrict itself to the 101 profile: the IEC 104 types 58..64
 (CP56Time2a commands), C_TS_TA_1 and 127 are reserved in IEC 60870-5-101:2003
 (7.2.1.1) and must not be sent on a 101 link; the 101-only C_TS_NA_1 and
-C_CD_NA_1 are supported.
+C_CD_NA_1 are supported. `iec101.Params.Strict` (off by default) applies
+`iec101.Validate` to every ASDU sent and received: reserved types
+(7.2.1.1), cause 0 (7.2.3), common address 0 and the global address
+outside C_IC/C_CI/C_CS/C_RP (7.2.4), one object at IOA 0 with SQ = 0 for
+M_EI_NA_1 and the system commands except read (7.3.3, 7.3.4), and time
+tags on interrogated information (7.3.1). The strict client drops and logs
+what fails; the strict server mirrors a control-direction ASDU negatively
+with the fitting "unknown ..." cause (7.2.3) or drops it.
 
 | Function | Client | Server | Evidence |
 |---|---|---|---|
@@ -84,5 +113,6 @@ C_CD_NA_1 are supported.
 | Process commands, direct and select-before-operate, deactivation | `Command`, `Deactivate` | handler | e2e, independent (C_SC, C_DC, C_RC, C_SE_NA/NB/NC) |
 | Spontaneous (class 1) and cyclic (class 2) data | handler | `Send`, `SendClass` | e2e, independent (class 1 reports) |
 | Negative confirmations and "unknown ..." causes | `*telecontrol.NegativeError` | `Negative`, `Reject` | e2e, independent |
+| 101 profile checks (`Params.Strict`) | drops and logs | mirrors with 44..47, or drops | unit (`TestValidate`), e2e (`TestStrictProfile`) |
 | File transfer | **no** | **no** | - |
 | IEC 62351-5 / IEC TS 60870-5-7 security | **no** | **no** | - |

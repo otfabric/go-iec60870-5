@@ -100,10 +100,11 @@ func TestBalancedNegativeAnswers(t *testing.T) {
 	}
 	defer func() { _ = bal.Close() }()
 	ctx := context.Background()
-	if _, err := bal.RequestStatus(ctx); !errors.Is(err, ErrNack) {
+	// NACK does not answer request status of link (IEC 60870-5-101:2003 table 4).
+	if _, err := bal.RequestStatus(ctx); !errors.Is(err, ErrUnexpected) {
 		t.Error(err)
 	}
-	if err := bal.Init(ctx); !errors.Is(err, ErrNack) {
+	if err := bal.Init(ctx); !errors.Is(err, ErrUnexpected) {
 		t.Error(err)
 	}
 	if err := bal.ResetLink(ctx); !errors.Is(err, ErrUnexpected) {
@@ -112,7 +113,7 @@ func TestBalancedNegativeAnswers(t *testing.T) {
 	if err := bal.Test(ctx); err != nil {
 		t.Error(err)
 	}
-	if err := bal.Send(ctx, nil); !errors.Is(err, ErrNotImplemented) {
+	if err := bal.Send(ctx, []byte{1}); !errors.Is(err, ErrNotImplemented) {
 		t.Error(err)
 	}
 	answers[FuncRequestStatus] = fixed(FuncAck, 2)
@@ -153,8 +154,11 @@ func TestSecondaryOddMessages(t *testing.T) {
 		}
 		send(ft12.Frame{Kind: ft12.KindSingle})              // ignored
 		send(fixed(FuncAck, 1))                              // a secondary frame: ignored (or an orphan response)
+		send(prim(13, false, ft12.KindFixed))                // before reset: no answer
 		send(prim(FuncRequestStatus, false, ft12.KindFixed)) // to address 1
 		expect(FuncStatus)
+		send(prim(FuncResetLink, false, ft12.KindFixed))
+		expect(FuncAck)
 		send(prim(13, false, ft12.KindFixed)) // undefined function
 		expect(FuncNotImplemented)
 		send(prim(FuncUserDataConf, true, ft12.KindFixed)) // user data without data

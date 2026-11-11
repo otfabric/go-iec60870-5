@@ -239,6 +239,11 @@ func TestAssociation(t *testing.T) {
 				}
 				oc := s.oursConfig(t, role)
 				oc.DataProtection = dpa
+				if dpa == 3 {
+					// The 8-octet MAC is of serial links (IEC TS 60870-5-7:2025
+					// 9.5.2); over TCP/IP it has to be accepted explicitly.
+					oc.AcceptDataProtection = []uint8{dpa}
+				}
 				tc := s.theirsConfig(!controlling)
 				tc.DPA = dpa
 				p := newPair(t, s, oc, tc)

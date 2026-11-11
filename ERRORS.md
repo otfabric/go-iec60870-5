@@ -141,6 +141,7 @@ Package `sec` (IEC 62351-5) has its own sentinels. They are usually wrapped with
 | `sec.ErrAlgorithm` | The remote station selected an algorithm this station does not support or accept |
 | `sec.ErrProcedure` | A Station Association or Session Key Change failed: the remote station repeatedly did not answer within the expected reply time |
 | `sec.ErrConfig` | A `Config` an `Endpoint` cannot run with |
+| `sec.ErrNotPermitted` | `Endpoint.Protect` at a controlled station refused monitor-direction data (types 1 to 44) because the roles of the controlling station lack MONITOR DATA (IEC TS 60870-5-7:2025 8.2). `Session.Send` returns it; `Server.Broadcast` skips the session, `Server.Enqueue` drops the event for it |
 
 ## File transfer errors
 
@@ -262,10 +263,11 @@ frame.
 |---|---|---|
 | `link.ErrTimeout` | no response after `Config.Retries` repetitions | the caller re-initializes it |
 | `link.ErrNack` | the secondary answered NACK (function 1): message not accepted | stays up |
-| `link.ErrDataFlow` | DFC is set: the secondary cannot take more user data now | stays up |
+| `link.ErrDataFlow` | DFC is set: the secondary cannot take more user data now, and kept it set while `Init` or a balanced `Send` requested the status of link `Config.Retries` + 1 times | stays up |
 | `link.ErrNotFunctioning` | function 14: link service not functioning | stays up |
 | `link.ErrNotImplemented` | function 15: link service not implemented | stays up |
-| `link.ErrUnexpected` | a response that does not answer the request | stays up |
+| `link.ErrUnexpected` | a response that does not answer the request (its function code cannot answer the function sent), and no fitting one came before the last time-out | stays up |
+| `link.ErrNoData` | `SendConfirm`, `SendNoReply` or a balanced `Send` with empty user data: without an ASDU a frame is fixed-length (IEC 60870-5-101:2003 6.1) | stays up |
 | `link.ErrClosed` | the station was closed, or the transport failed (wrapped with the transport error) | gone |
 | `link.ErrInvalidConfig` | a `Config` a station cannot be built with | - |
 
@@ -277,6 +279,7 @@ frame.
 | `iec101.ErrClosed` | an operation on a closed client or server |
 | `iec101.ErrInvalidConfig` | invalid parameters (wraps the `ft12`, `asdu` or `link` error) |
 | `server.ErrQueueFull` | a class 1 or class 2 queue (or the balanced send queue) is full |
+| `iec101.ErrProfile` | with `Params.Strict`: an ASDU the IEC 60870-5-101 profile does not allow (`*iec101.ProfileError` says why); it was not sent |
 
 Requests of `iec101/client` return `*telecontrol.NegativeError` for a
 negative confirmation or an "unknown ..." cause, `telecontrol.ErrBusy` for a
