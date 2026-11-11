@@ -102,7 +102,7 @@ var specs = []spec{
 		Operations: "time synchronization (ASDU 6), general interrogation (ASDU 7) answered with ASDU 1 and its termination (ASDU 8), cyclic measurands (ASDU 9)",
 		Privacy:    "serial line only", Missing: "the protection equipment, the RTAC model and firmware"},
 		tshark:     []string{"-d", "rtacser.data,iec60870_5_103"},
-		asduErrors: map[int]string{3: measurands16, 5: measurands16, 8: measurands16},
+		asduErrors: nil, // ASDU 9 with 16 measurands is carried (MaxMeasurandsWire)
 		findingsAt: map[int]string{
 			8: excerpt + " (149 s between frames 7 and 8): the answer to a poll that is not in the file",
 			9: excerpt + ": FCB as after the left-out polls",
@@ -115,7 +115,7 @@ var specs = []spec{
 		Operations: "reset of the frame count bit to five link addresses, class 2 polls answered with measurands (ASDU 9) and the private ASDU 205 (function types 133 and 134)",
 		Privacy:    "serial line only", Missing: "the protection equipment, the meaning of ASDU 205"},
 		tshark:     []string{"-d", "rtacser.data,iec60870_5_103"},
-		asduErrors: map[int]string{8: "ASDU 9 with 14 measurands; clause 7.3.1.8 allows one to nine: the equipment's deviation, the codec refuses the ASDU"}},
+		asduErrors: nil}, // ASDU 9 with 14 measurands is carried (MaxMeasurandsWire)
 	with(hexSpec("class1-event-type1", "class1-event-type1.hex", "ASDU 1 with cause spontaneous, FUN 192, INF 36, DPI 2, 14:34:12.345"),
 		map[int]string{3: vsq01}, nil),
 	hexSpec("class2-measurand-type9", "class2-measurand-type9.hex", "ASDU 9, first value 1234"),

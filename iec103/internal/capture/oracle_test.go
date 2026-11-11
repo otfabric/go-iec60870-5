@@ -124,8 +124,8 @@ var oracleExpected = map[string]struct {
 	diffs          map[string]int
 }{
 	"wireshark-mr2917/sel-rtac_sel-ied_asdu1-5-20-45-46.pcap":                                 {21, 204, nil},
-	"wireshark-mr2917/sel-rtac_unknown_asdu1-6-7-8-9.pcap":                                    {40, 337, map[string]int{classRefused: 18}},
-	"wireshark-mr2917/sel-rtac_unknown_private-asdu205.pcap":                                  {88, 644, map[string]int{classRefused: 6}},
+	"wireshark-mr2917/sel-rtac_unknown_asdu1-6-7-8-9.pcap":                                    {40, 355, map[string]int{}},
+	"wireshark-mr2917/sel-rtac_unknown_private-asdu205.pcap":                                  {88, 650, map[string]int{}},
 	"../../../iec104/testdata/captures/wireshark/synthetic_synthetic_iec104-coverage.pcap.gz": {23, 191, map[string]int{classRefused: 11}},
 }
 

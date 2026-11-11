@@ -322,9 +322,9 @@ func TestDecodeErrors(t *testing.T) {
 		{[]byte{1, 0x81, 1, 3, 128}, ErrShort},
 		{[]byte{1, 0x81, 1, 3, 128, 16, 2, 0, 0, 0}, ErrShort},
 		{[]byte{1, 0x81, 1, 3, 128, 16, 2, 0, 0, 0, 0, 0, 9}, ErrTrailing},
-		{[]byte{3, 0x05, 2, 3, 128, 144, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, ErrInvalid},
+		{[]byte{3, 0x05, 2, 3, 128, 144, 0, 0, 0, 0, 0, 0, 0, 0, 0}, ErrShort},
 		{[]byte{3, 0x00, 2, 3, 128, 144}, ErrInvalid},
-		{[]byte{9, 0x0A, 2, 3, 128, 148}, ErrInvalid},
+		{[]byte{9, 0x0A, 2, 3, 128, 148}, ErrShort},
 		{append([]byte{23, 0x09, 31, 3, 128, 0}, make([]byte, 90)...), ErrInvalid},
 		{[]byte{29, 0x81, 31, 3, 128, 0, 0, 0, 26, 0, 0}, ErrInvalid},
 		{[]byte{30, 0x81, 31, 3, 128, 0, 0, 1, 0, 0, 1, 26, 0, 0}, ErrInvalid},
@@ -342,7 +342,7 @@ func TestDecodeErrors(t *testing.T) {
 }
 
 func TestEncodeErrors(t *testing.T) {
-	big := make([]MEA, 10)
+	big := make([]MEA, MaxMeasurandsWire+1)
 	sets := make([]DataSet, 64)
 	for i := range sets {
 		sets[i].Value = Reply(GRCAck)
@@ -350,7 +350,6 @@ func TestEncodeErrors(t *testing.T) {
 	cases := []*ASDU{
 		{Cause: 1},
 		New(2, 1, 128, 144, Measurands{}),
-		New(2, 1, 128, 144, Measurands{Values: big[:5]}),
 		New(2, 1, 128, 148, Measurands{Set2: true, Values: big}),
 		New(42, 1, 254, 244, GenericData{Sets: sets}),
 		New(42, 1, 254, 244, GenericData{Sets: []DataSet{{Value: Value{GDD: GDD{Type: DataUint, Size: 2, Number: 1}}}}}),
@@ -504,3 +503,19 @@ func FuzzDecode(f *testing.F) {
 		roundTrip(t, b)
 	})
 }
+
+// TestMeasurandsBeyondStandard: equipment sends ASDU 9 with more than the
+// nine measurands of clause 7.3.1.8 (recorded: 14 and 16); the codec
+// carries up to MaxMeasurandsWire both ways.
+func TestMeasurandsBeyondStandard(t *testing.T) {
+	a := New(CauseCyclic, 1, FunDistance, 148, Measurands{Set2: true, Values: make([]MEA, 16)})
+	b, err := a.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := Decode(b)
+	if err != nil || len(back.Body.(Measurands).Values) != 16 {
+		t.Fatalf("%v %v", back, err)
+	}
+}
+

@@ -435,8 +435,8 @@
         "single_characters": 0,
         "fixed_frames": 21,
         "variable_frames": 19,
-        "asdu_errors": 3,
-        "reencoded_exactly": 37,
+        "asdu_errors": 0,
+        "reencoded_exactly": 40,
         "raw_bodies": 0,
         "exchanges": 19,
         "responses_before_first_request": 1,
@@ -458,7 +458,8 @@
           "controlling system ASDU 7 cause 9 FUN 255": 1,
           "protection equipment ASDU 1 cause 9 FUN 250": 12,
           "protection equipment ASDU 6 cause 8 FUN 255": 1,
-          "protection equipment ASDU 8 cause 10 FUN 255": 1
+          "protection equipment ASDU 8 cause 10 FUN 255": 1,
+          "protection equipment ASDU 9 cause 2 FUN 250": 3
         },
         "link_findings": [
           "rtac: frame 8: response fn=8 without an outstanding request",
@@ -490,8 +491,8 @@
         "single_characters": 0,
         "fixed_frames": 46,
         "variable_frames": 42,
-        "asdu_errors": 1,
-        "reencoded_exactly": 87,
+        "asdu_errors": 0,
+        "reencoded_exactly": 88,
         "raw_bodies": 20,
         "exchanges": 42,
         "responses_before_first_request": 0,
@@ -511,7 +512,7 @@
         ],
         "asdus": {
           "protection equipment ASDU 205 cause 1 FUN 133": 20,
-          "protection equipment ASDU 9 cause 2 FUN 134": 21
+          "protection equipment ASDU 9 cause 2 FUN 134": 22
         }
       }
     }

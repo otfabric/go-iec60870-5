@@ -11,11 +11,18 @@ import (
 
 // Element limits of the compatible ASDUs.
 const (
-	MaxMeasurands1  = 4  // ASDU 3: up to four MEA (clause 7.3.1.3)
-	MaxMeasurands2  = 9  // ASDU 9: up to nine MEA (clause 7.3.1.8)
-	MaxDisturbances = 8  // ASDU 23: at most eight recorded disturbances (clause 7.3.1.11)
-	MaxTags         = 25 // ASDU 29: at most 25 tags (clause 7.3.1.15)
-	MaxValues       = 25 // ASDU 30: at most 25 values (clause 7.2.6.14, 7.3.1.16)
+	MaxMeasurands1 = 4 // ASDU 3: up to four MEA (clause 7.3.1.3)
+	MaxMeasurands2 = 9 // ASDU 9: up to nine MEA (clause 7.3.1.8)
+
+	// MaxMeasurandsWire is how many MEA the codec accepts in ASDU 3 and 9,
+	// encoding and decoding: the VSQ number allows 127. Equipment sends
+	// more than the standard's four or nine (recorded: ASDU 9 with 14 and
+	// 16 measurands), so they are carried; the standard limits are
+	// MaxMeasurands1 and MaxMeasurands2.
+	MaxMeasurandsWire = 127
+	MaxDisturbances   = 8  // ASDU 23: at most eight recorded disturbances (clause 7.3.1.11)
+	MaxTags           = 25 // ASDU 29: at most 25 tags (clause 7.3.1.15)
+	MaxValues         = 25 // ASDU 30: at most 25 values (clause 7.2.6.14, 7.3.1.16)
 )
 
 // TimeTagged is ASDU 1, the time-tagged message (clause 7.3.1.1): DPI,
@@ -81,8 +88,8 @@ func (m Measurands) max() int {
 }
 
 func (m Measurands) append(b []byte, _ *time.Location) ([]byte, error) {
-	if len(m.Values) == 0 || len(m.Values) > m.max() {
-		return nil, fmt.Errorf("%w: %d measurands, %s carries 1..%d", ErrInvalid, len(m.Values), m.Type(), m.max())
+	if len(m.Values) == 0 || len(m.Values) > MaxMeasurandsWire {
+		return nil, fmt.Errorf("%w: %d measurands, %s carries 1..%d (the standard: 1..%d)", ErrInvalid, len(m.Values), m.Type(), MaxMeasurandsWire, m.max())
 	}
 	for _, v := range m.Values {
 		b = appendU16(b, v.word())
@@ -473,8 +480,8 @@ func decodeBody(t TypeID, vsq VSQ, r *reader) (Body, error) {
 	case TypeMeasurands1, TypeMeasurands2:
 		m := Measurands{Set2: t == TypeMeasurands2}
 		n := vsq.Number()
-		if n == 0 || n > m.max() {
-			return nil, fmt.Errorf("%w: VSQ announces %d measurands, 1..%d allowed", ErrInvalid, n, m.max())
+		if n == 0 { // above the standard's limit is accepted: MaxMeasurandsWire
+			return nil, fmt.Errorf("%w: VSQ announces no measurands", ErrInvalid)
 		}
 		for range n {
 			m.Values = append(m.Values, meaOf(r.u16()))
