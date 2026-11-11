@@ -195,9 +195,10 @@ func sortIndications(s []indication) {
 
 // The values and sessions of scripts/interop-iec103.sh: the interrogation
 // returns the fixture's indications with the scan number, the
-// identification after the reset, a command confirmed with the new state
-// and the RII and visible to the next interrogation, the measurands as
-// class 2 data, an idle line and the next connection.
+// identification after the reset, a command acknowledged with the RII, its
+// change of state with cause 12, and the new state visible to the next
+// interrogation, the measurands as class 2 data, an idle line and the next
+// connection.
 func TestReferenceClientValues(t *testing.T) {
 	for _, a := range clients(t) {
 		f := loadFixture(t, a)
@@ -250,19 +251,36 @@ func TestReferenceClientValues(t *testing.T) {
 					t.Skip("client feature generalCommand not declared")
 				}
 				h.restart()
-				r, _ := h.run(t, a, "command", "--fun", "160", "--inf", "17", "--dco", "on", "--rii", "9")
+				r, _ := h.run(t, a, "command", "--fun", "160", "--inf", "17", "--dco", "on", "--rii", "9", "--collect-ms", "500")
+				// Clause 7.4.4: the acknowledgement (cause 20, SIN the RII;
+				// its DPI is not significant), then the change of state
+				// (cause 12, the new DPI; its SIN is not significant).
 				type conf struct {
 					Cot int `json:"cot"`
-					indication
+					Fun int `json:"fun"`
+					Inf int `json:"inf"`
+					SIN int `json:"sin"`
 				}
-				got := []conf{}
+				type report struct {
+					Fun int `json:"fun"`
+					Inf int `json:"inf"`
+					DPI int `json:"dpi"`
+				}
+				got, reports := []conf{}, []report{}
 				for _, x := range r.ASDUs {
-					if (x.TypeID == 1 || x.TypeID == 2) && (x.Cot == 20 || x.Cot == 21) && len(x.Objects) > 0 {
-						o := x.Objects[0]
-						got = append(got, conf{20, indication{o.Fun, o.Inf, intOf(o.DPI), intOf(o.SIN)}})
+					if (x.TypeID != 1 && x.TypeID != 2) || len(x.Objects) == 0 {
+						continue
+					}
+					o := x.Objects[0]
+					switch x.Cot {
+					case 20, 21:
+						got = append(got, conf{x.Cot, o.Fun, o.Inf, intOf(o.SIN)})
+					case 12:
+						reports = append(reports, report{o.Fun, o.Inf, intOf(o.DPI)})
 					}
 				}
-				valueCheck(t, a, "command --fun 160 --inf 17", got, []conf{{20, indication{160, 17, 2, 9}}})
+				valueCheck(t, a, "command --fun 160 --inf 17", got, []conf{{20, 160, 17, 9}})
+				valueCheck(t, a, "command --fun 160 --inf 17", reports, []report{{160, 17, 2}})
 				r, _ = h.run(t, a, "interrogate")
 				after := []int{}
 				for _, x := range r.ASDUs {

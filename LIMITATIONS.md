@@ -58,14 +58,14 @@ own list: [docs/iec104/LIMITATIONS.md](docs/iec104/LIMITATIONS.md).
 
 - Independent evidence is mostly for the server: the clients of
   vitusdong/iec103-dotnet, ARIEC103, Open103 and riclolsen/go-iecp5 replay
-  the harness cases against it (51 pass, 0 fail, 8 known client
+  the harness cases against it (53 pass, 0 fail, 6 known client
   differences). The client has only vitusdong's server to run against,
   which deviates from the standard in its GI answers, command
   acknowledgements and identification: link start-up, clock
   synchronization and the GI termination pass, the rest is unverified
-  against an independent server. Generic services, disturbance data,
-  broadcast synchronization and the cause 12 report after a command are
-  exercised by no reference. The images are not yet published
+  against an independent server. Generic services, disturbance data and
+  broadcast synchronization are exercised by no reference; the cause 12
+  report after a command only towards the reference clients. The images are not yet published
   (`make interop-iec103` uses local builds until the harness v0.2.0
   release); see docs/iec103/INTEROPERABILITY.md.
 - One controlling system polls one protection device per client (no shared

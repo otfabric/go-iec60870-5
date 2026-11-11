@@ -1,5 +1,5 @@
 # Copied from otfabric/iec60870-5-interop tests/iec103/cases.tsv at commit
-# 42164d2707ebbfa6d13e477a4225f18c205084e8 (branch feat/iec103, contract 2.1).
+# 8c84ea8caedee4af5f55b01e598df10d58312d85 (branch feat/iec103, contract 2.1).
 # Refresh it with the harness version pinned in harness.go.
 # Self-test cases of IEC 60870-5-103 for scripts/interop.sh, against the
 # baseline fixture (fixtures/iec103/baseline), unbalanced, every client with
@@ -19,12 +19,20 @@
 #
 # The general interrogation answers with the eight indications of the fixture
 # that take part in it (160/16..19, 23, 24, 27, 36; not 160/68), cause 9.
+#
+# The commands use pairs of table 17 that are typical for the device's function
+# type (160: INF 16..19), with the values of its COM column (INF 19: ON only),
+# so that a client that follows the table sends every one. 160/18 is a valid
+# pair the fixture does not take: the station refuses it with cause 21, as it
+# refuses DCO 3. A positive command is acknowledged with cause 20 and its
+# change of state follows with cause 12 (clause 7.4.4, figure 7); the client
+# collects for 500 ms after the acknowledgement to receive it.
 case.connect	ro	0	ok=true error=- conf= term=false asdus=	-	connect
 case.interrogate	ro	0	ok=true error=- conf= term=true asdus=time-tagged-message/9,time-tagged-message/9,time-tagged-message/9,time-tagged-message/9,time-tagged-message/9,time-tagged-message/9,time-tagged-message/9,time-tagged-message/9,general-interrogation-termination/10	-	interrogate
 case.interrogate-scn-200	ro	0	ok=true error=- conf= term=true asdus=time-tagged-message/9,time-tagged-message/9,time-tagged-message/9,time-tagged-message/9,time-tagged-message/9,time-tagged-message/9,time-tagged-message/9,time-tagged-message/9,general-interrogation-termination/10	-	interrogate --scn 200
 case.clock-sync	ro	0	ok=true error=- conf=8 term=false asdus=time-synchronization/8	-	clock-sync --time 2026-10-09T15:35:12.345Z
 case.monitor	ro	0	ok=true error=- conf= term=false asdus=	-	monitor --duration-ms 500
-case.command-160-99-unknown	ro	1	ok=false error=negative-confirmation conf=21n term=false asdus=time-tagged-message/21	server:generalCommand,client:generalCommand	command --fun 160 --inf 99 --dco on --rii 4
-case.command-160-16-dco-3	ro	1	ok=false error=negative-confirmation conf=21n term=false asdus=time-tagged-message/21	server:generalCommand,client:generalCommand	command --fun 160 --inf 16 --dco 3 --rii 6
-case.command-160-16-off	rw	0	ok=true error=- conf=20 term=false asdus=time-tagged-message/20	server:generalCommand,client:generalCommand	command --fun 160 --inf 16 --dco off --rii 42
-case.command-160-23-on	rw	0	ok=true error=- conf=20 term=false asdus=time-tagged-message/20	server:generalCommand,client:generalCommand	command --fun 160 --inf 23 --dco on --rii 77
+case.command-160-18-not-taken	ro	1	ok=false error=negative-confirmation conf=21n term=false asdus=time-tagged-message/21	server:generalCommand,client:generalCommand	command --fun 160 --inf 18 --dco on --rii 4 --collect-ms 500
+case.command-160-16-dco-3	ro	1	ok=false error=negative-confirmation conf=21n term=false asdus=time-tagged-message/21	server:generalCommand,client:generalCommand	command --fun 160 --inf 16 --dco 3 --rii 6 --collect-ms 500
+case.command-160-16-off	rw	0	ok=true error=- conf=20 term=false asdus=time-tagged-message/20,time-tagged-message/12	server:generalCommand,client:generalCommand	command --fun 160 --inf 16 --dco off --rii 42 --collect-ms 500
+case.command-160-19-on	rw	0	ok=true error=- conf=20 term=false asdus=time-tagged-message/20,time-tagged-message/12	server:generalCommand,client:generalCommand	command --fun 160 --inf 19 --dco on --rii 77 --collect-ms 500

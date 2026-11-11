@@ -91,7 +91,9 @@ func TestVSQChecked(t *testing.T) {
 }
 
 // TestCommandAllowed: DCO 0 and 3 are not used (clause 7.2.6.4); the COM
-// column of table 17 allows only ON for INF 19 and 23..26.
+// column of table 17 allows only ON for INF 19 and 23..26; a compatible
+// function type takes no other INF of the control direction with ASDU 20
+// (clause 7.2.5.2: 20..22 and 27..31 are in no table, 32..239 not used).
 func TestCommandAllowed(t *testing.T) {
 	cases := []struct {
 		fun  FunctionType
@@ -107,7 +109,15 @@ func TestCommandAllowed(t *testing.T) {
 		{FunDistance, InfLEDReset, DPIOn, true},
 		{FunDistance, 23, DPIOff, false},
 		{FunDistance, 26, DPIOff, false},
-		{FunDistance, 27, DPIOff, true},
+		{FunDistance, 27, DPIOff, false},
+		{FunDistance, 20, DPIOn, false},
+		{FunDistance, 31, DPIOn, false},
+		{FunDistance, 15, DPIOn, false},
+		{160, 99, DPIOn, false},
+		{160, 18, DPIOff, true},
+		{160, 23, DPIOn, true}, // FUN in table 17 is typical, not mandatory
+		{160, 240, DPIOn, false},
+		{17, 99, DPIOn, true},           // private function type
 		{17, InfLEDReset, DPIOff, true}, // private function type
 		{17, InfLEDReset, 3, false},
 	}

@@ -253,25 +253,26 @@ func clientScenario(t *testing.T, a adapter, f *fixture) {
 
 	t.Run("refused command", func(t *testing.T) {
 		// Clause 7.4.4: a command that cannot be executed is refused: ASDU
-		// 1, cause 21, SIN the RII. 160/99 is no command of the fixture.
+		// 1, cause 21, SIN the RII. 160/18 is a pair of table 17 that is
+		// no command of the fixture.
 		n := w.count()
 		cctx, ccancel := context.WithTimeout(ctx, 5*time.Second)
 		defer ccancel()
-		err := c.Command(cctx, 160, 99, iec103.DPIOn)
+		err := c.Command(cctx, 160, 18, iec103.DPIOn)
 		if errors.Is(err, iec103.ErrNegative) {
 			return
 		}
 		if err == nil {
-			t.Fatal("160/99 acknowledged positively")
+			t.Fatal("160/18 acknowledged positively")
 		}
 		asdus, _ := w.since(n)
 		raw := find(asdus, iec103.TypeTimeTagged, 0)
-		// vitusdong: ASDU 1 cause 139 (11 with the P/N bit, a private cause
-		// in IEC 103) with the 12-octet elements, never cause 21.
-		if !errors.Is(err, context.DeadlineExceeded) || raw == nil || raw[2] != 0x80|byte(iec103.CauseLocalOperation) || len(raw) != 6+12 {
+		// vitusdong: it takes a command for every indication and answers
+		// with ASDU 1 cause 11 and the 12-octet elements, never cause 21.
+		if !errors.Is(err, context.DeadlineExceeded) || raw == nil || raw[2] != byte(iec103.CauseLocalOperation) || raw[4] != 160 || raw[5] != 18 || len(raw) != 6+12 {
 			t.Fatalf("not refused with cause 21 and not the recorded deviation: %v; wire %X", err, asdus)
 		}
-		knownDifference(t, serverBug(t, a, "command --fun 160 --inf 99"), fmt.Sprintf("% X", raw))
+		knownDifference(t, serverBug(t, a, "command --fun 160 --inf 18"), fmt.Sprintf("% X", raw))
 	})
 
 	t.Run("idle line", func(t *testing.T) {

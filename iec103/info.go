@@ -292,9 +292,12 @@ func (c *Catalog) Lookup(dir Direction, typ TypeID, fun FunctionType, inf InfoNu
 
 // CommandAllowed reports whether a general command (ASDU 20) with double
 // command dco may be sent with (fun, inf): DCO is OFF or ON (clause
-// 7.2.6.4: 0 and 3 are not used), and for a compatible function type the
-// COM column of table 17 allows only ON for INF 19 (LED reset) and 23 to
-// 26 (activate characteristic 1 to 4).
+// 7.2.6.4: 0 and 3 are not used), and for a compatible function type INF
+// is one of table 17 (16 to 19, 23 to 26: clause 7.2.5.2 leaves no other
+// information number of the control direction usable with ASDU 20) and
+// the COM column allows only ON for INF 19 (LED reset) and 23 to 26
+// (activate characteristic 1 to 4). The FUN column of table 17 is typical,
+// not mandatory, so any compatible function type may carry these INF.
 func CommandAllowed(fun FunctionType, inf InfoNumber, dco DPI) bool {
 	if dco != DPIOff && dco != DPIOn {
 		return false
@@ -303,9 +306,11 @@ func CommandAllowed(fun FunctionType, inf InfoNumber, dco DPI) bool {
 		return true
 	}
 	switch inf {
+	case 16, 17, 18:
+		return true
 	case InfLEDReset, 23, 24, 25, 26:
 		return dco == DPIOn
 	default:
-		return true
+		return false
 	}
 }

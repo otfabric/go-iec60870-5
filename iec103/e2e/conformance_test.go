@@ -425,14 +425,16 @@ func TestDisturbanceClientAcks(t *testing.T) {
 }
 
 // TestCommandDCO: the double command is OFF or ON (clause 7.2.6.4), and
-// only ON for INF 19 and 23 to 26 (table 17, column COM). The client
-// refuses other values; the server acknowledges them negatively.
+// only ON for INF 19 and 23 to 26 (table 17, column COM); a compatible
+// function type takes only the INF of table 17 (clause 7.2.5.2: 27 is in
+// no table, 32..239 are not used in the control direction). The client
+// refuses the others; the server acknowledges them negatively.
 func TestCommandDCO(t *testing.T) {
 	r := start(t, options{noInit: true, handler: true})
 	for _, x := range []struct {
 		inf iec103.InfoNumber
 		dco iec103.DPI
-	}{{iec103.InfLEDReset, iec103.DPIOff}, {16, 0}, {16, 3}, {23, iec103.DPIOff}} {
+	}{{iec103.InfLEDReset, iec103.DPIOff}, {16, 0}, {16, 3}, {23, iec103.DPIOff}, {27, iec103.DPIOn}, {99, iec103.DPIOn}} {
 		if err := r.c.Command(ctx(t), fun, x.inf, x.dco); !errors.Is(err, iec103.ErrInvalid) {
 			t.Errorf("INF %d DCO %d: %v", x.inf, x.dco, err)
 		}

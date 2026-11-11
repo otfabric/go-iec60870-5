@@ -710,8 +710,9 @@ func (c *Client) BroadcastClockSync(t time.Time) error {
 // wrapping [iec103.ErrNegative]. The change of state the command causes
 // follows with cause 12 and reaches the Handler. Clause 7.4.4 allows one
 // command procedure at a time: a second concurrent call returns
-// [iec103.ErrBusy]. A DCO that [iec103.CommandAllowed] refuses (0 or 3,
-// or OFF where table 17 defines only ON) returns [iec103.ErrInvalid].
+// [iec103.ErrBusy]. A command that [iec103.CommandAllowed] refuses (DCO 0
+// or 3, OFF where table 17 defines only ON, or an INF outside table 17
+// with a compatible function type) returns [iec103.ErrInvalid].
 func (c *Client) Command(ctx context.Context, fun iec103.FunctionType, inf iec103.InfoNumber, dco iec103.DPI) error {
 	if !iec103.CommandAllowed(fun, inf, dco) {
 		return fmt.Errorf("%w: DCO %d for FUN %d INF %d (clause 7.2.6.4, table 17)", iec103.ErrInvalid, dco, fun, inf)

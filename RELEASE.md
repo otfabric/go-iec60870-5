@@ -51,7 +51,9 @@ behaviours change; see "Behaviour changes".
   frame time at `Config.BitRate` (default 9600; negative `SyncDelay`
   disables); a broadcast time sync is not answered unless
   `AnswerBroadcastSync`; DCO 0/3, and OFF for INF 19 and 23-26, are
-  acknowledged negatively; `Config.Fun` is required.
+  acknowledged negatively, and so is, for a compatible function type, an
+  INF outside table 17 (clause 7.2.5.2), which the client refuses to send;
+  `Config.Fun` is required.
 - Client: a write with execution over several ASDUs sends INF 248 ... 250
   with one RII; staged writes with `BeginWrite`; every ASDU 31 of a
   disturbance transfer is acknowledged (TOO 37/40 negatively and the
@@ -63,8 +65,8 @@ behaviours change; see "Behaviour changes".
   and nine).
 - Interop suite `iec103/interop` (`make interop-iec103`): the clients of
   vitusdong/iec103-dotnet, ARIEC103, Open103 and go-iecp5 replay the
-  iec60870-5-interop cases against the server (51 pass, 0 fail, 8 known
-  client differences); the client runs against the vitusdong server, whose
+  iec60870-5-interop cases against the server (53 pass, 0 fail, 6 known
+  client differences, all ARIEC103's); the client runs against the vitusdong server, whose
   deviations are asserted as known differences.
 
 ### Application-layer security (checked against IEC TS 60870-5-7:2025)

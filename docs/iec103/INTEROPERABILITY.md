@@ -20,7 +20,7 @@ IEC 60870-5-103-2005.
 
 `iec103/interop` (build tag `interop`, `make interop-iec103`) runs this
 module against the IEC 103 images of otfabric/iec60870-5-interop
-(contract 2.1; local `:dev` builds of branch feat/iec103 at 42164d2, to be
+(contract 2.1; local `:dev` builds of branch feat/iec103 at 8c84ea8, to be
 pinned by digest at the harness v0.2.0 release). Expected outcomes are the
 harness's own: its case table (`testdata/cases.tsv`), its value and
 session checks (`scripts/interop-iec103.sh`) and the fixture the images
@@ -29,7 +29,7 @@ counted as passes.
 
 | Direction | References | Result (2026-11-11, linux/arm64 images) |
 |---|---|---|
-| reference client against `iec103/server` | vitusdong/iec103-dotnet v0.1.0, masarray/ARIEC103 v1.2.31-3-gec08dd7, XVincentX/Open103 887ff5a5, riclolsen/go-iecp5 v0.4.7 | 9 cases × 4 clients and 6 value/session checks × 4: 51 pass, 0 fail, 9 skipped (8 known client differences, 1 feature the client does not declare: vitusdong measurands) |
+| reference client against `iec103/server` | vitusdong/iec103-dotnet v0.1.0, masarray/ARIEC103 v1.2.31-3-gec08dd7, XVincentX/Open103 887ff5a5, riclolsen/go-iecp5 v0.4.7 | 9 cases × 4 clients and 6 value/session checks × 4: 53 pass, 0 fail, 7 skipped (6 known client differences, all ARIEC103: 5 `ariec103-command-no-rii`, 1 `ariec103-clock-sync-cp32`; 1 feature the client does not declare: vitusdong measurands). Per client: goiecp5 15/15, Open103 15/15, vitusdong 14 + 1 undeclared, ARIEC103 9 + 6 known |
 | `iec103/client` against a reference server | vitusdong/iec103-dotnet v0.1.0 (the only reference server) | 4 pass (link start-up, clock synchronization, GI termination with the scan number, an idle line of 3 s and a second synchronization), 4 skipped as known server bugs (identification, GI answers, command, refused command) |
 
 The server side has the real evidence: four independent clients (three
@@ -39,16 +39,18 @@ Open103 a status of link), decode the identification with COL and
 software, run the GI and get every indication with the scan number,
 synchronize the clock, poll the class 2 measurands (ARIEC103, Open103,
 go-iecp5 decode ASDU 3 and 9 with OV and ER) and get general commands
-acknowledged with cause 20/21 and the RII, and the new state in the next GI.
+acknowledged with cause 20/21 and the RII, followed by the change of state
+with cause 12 (goiecp5, Open103, vitusdong), and the new state in the next GI.
 
 Known differences of the clients, seen on the wire against this server:
 ARIEC103 sends ASDU 6 with a CP32Time2a (harness bug
 `ariec103-clock-sync-cp32`) and ASDU 20 without the RII (`14 81 14 01 A0
-63 02`, `ariec103-command-no-rii`, not yet in the harness); Open103 sends
-a general command only for the typical function types of table 17, so
-nothing for FUN 160 INF 23 or 99 (`open103-command-typical-fun`, not yet
-in the harness). This server drops the short ASDU 6 and ASDU 20 (no
-acknowledgement), as their length is not the standard's.
+63 02`, harness bug `ariec103-command-no-rii`). This server drops the
+short ASDU 6 and ASDU 20 (no acknowledgement), as their length is not the
+standard's. Open103 sends a general command only for an INF that table 17
+lists as typical for the identified function type (harness bug
+`open103-command-typical-fun`); the harness cases now use only such pairs
+(160/16..19), so it no longer shows here.
 
 The client side has no conformant reference server: vitusdong answers the
 GI with cause 11 and a 12-octet ASDU 1, acknowledges commands with cause
@@ -60,9 +62,9 @@ client shows against vitusdong: link start-up, addressed clock
 synchronization, the GI termination with the scan number, an idle line.
 
 Not exercised by any reference: ASDU 2, 4, 10, 11, 21, 23 to 31 (generic
-services, disturbance data), broadcast synchronization, the cause 12 report
-after a command (the harness fixture has the station send none), test mode,
-DFC.
+services, disturbance data), broadcast synchronization, test mode, DFC.
+The client's reception of the cause 12 report has no reference server that
+sends it (vitusdong does not).
 
 ## Clause 6: link layer
 
@@ -92,6 +94,7 @@ DFC.
 | 7.2.5.2 | information numbers, tables 8 to 18 | `StandardInfo`, `Catalog` (extensible for private FUN/INF) | unit |
 | 7.2.6.1 to 7.2.6.37 | information elements | all, as fields or types (`MEA`, `GDD`, `Counted` for NGD/NDE, `SOF`, `TOO`, `GIN`, `KOD`, `GRC`, CP32/CP56 via `cp`) | unit, annex |
 | 7.2.6.4, table 17 | DCO 1 or 2; COM column: only ON for INF 19, 23 to 26 | `CommandAllowed`; client refuses, server acknowledges negatively | unit (`TestCommandAllowed`), e2e (`TestCommandDCO`), independent (server refuses DCO 3 with cause 21: vitusdong, Open103, go-iecp5) |
+| 7.2.5.2, table 17 | ASDU 20 with a compatible function type: only INF 16 to 19, 23 to 26 (32..239 not used in the control direction; the FUN column is typical) | `CommandAllowed`; client refuses (`ErrInvalid`), server acknowledges negatively | unit (`TestCommandAllowed`), e2e (`TestCommandDCO`: INF 27, 99) |
 | 7.2.6.28, 7.2.6.29 | the bit after the minutes is RES1 | ignored on decode, written as 0 (`cp` keeps its 101/104 GEN meaning) | unit (`TestTimeRES1`) |
 | 7.2.6.32 | GDD: DATASIZE 1..255, NUMBER 1..127; data types 1 to 24 | ranges checked on encode and decode; every data type round-trips | unit (`TestGDDRanges`; `TestGenericDataTypes` for types 5, 6, 8 to 12, 15 to 20), annex (types 1, 3, 7, 14, 21 to 24) |
 | 7.2.6.35 | NDE 1..63 | checked on encode and decode; `PackGenericIdent` refuses no elements | unit (`TestNDERange`) |
@@ -112,7 +115,7 @@ DFC.
 | 7.4.2 | IV until the first synchronization and after 23 h without | - | `Now`, `SyncTimeout` | e2e (`TestInitializationResetFCB` before the first; `TestSyncTimeout` with a shortened `SyncTimeout`; the 23 h default itself is not run) |
 | 7.4.3 | GI with SCN, answers cause 9 with SIN = SCN, end ASDU 8 with SCN | `Interrogate` (drops answers of another SCN) | `AnswerGI` | e2e (`TestGeneralInterrogation`, `TestStaleGIAnswers`), independent (server: all 4 clients, with the scan number and the fixture's DPIs; client: termination with the scan number from vitusdong, its answers are a known bug) |
 | 7.4.3 | a GI during a cycle aborts it without termination and starts again | - | a new ASDU 7 drops the queued rest of the cycle | e2e (`TestNewGIAbortsCycle`) |
-| 7.4.4 | general command with RII; acknowledgement ASDU 1 cause 20/21 with SIN = RII; change of state with cause 12; one command at a time | `Command` (`ErrBusy`) | `AckCommand`, `Event`; refuses a second command before the first is acknowledged | e2e (`TestCommands`), independent (server: acknowledgement 20/21 with SIN = RII for vitusdong, Open103, go-iecp5; cause 12 not exercised; client: none, vitusdong's acknowledgement is a known bug) |
+| 7.4.4 | general command with RII; acknowledgement ASDU 1 cause 20/21 with SIN = RII; change of state with cause 12; one command at a time | `Command` (`ErrBusy`) | `AckCommand`, `Event`; refuses a second command before the first is acknowledged | e2e (`TestCommands`), independent (server: acknowledgement 20/21 with SIN = RII for vitusdong, Open103, go-iecp5; cause 12 after the acknowledgement for vitusdong, Open103, go-iecp5; client: none, vitusdong's acknowledgement is a known bug) |
 | 7.4.5 | test mode (cause 7) | cause delivered to the handler | not a feature: the application sends INF 21 and cause 7 | e2e (`TestTestModeAndBlocking`, application-driven) |
 | 7.4.6 | monitor direction blocked | - | not a feature: the application sends INF 20 and answers a GI with its termination only | e2e (`TestTestModeAndBlocking`, application-driven) |
 | 7.4.7 | disturbance data: list, select, data, tags, channels, acknowledgements, end, updated list | `DisturbanceList`, `Disturbance` (NFE/NOE check, initial tags at position 0, NOC check, negative ack) | built in from a `DisturbanceSource` | e2e (`TestDisturbanceTransfer`, `TestDisturbanceIncomplete`, `TestDisturbanceOrders`, `TestDisturbanceClientAcks`, lossy line) |

@@ -78,9 +78,10 @@ case iec103.Raw: // private type or private cause: every octet kept
   implements the ranges of clause 7.2.5.1; `StandardInfo` returns the
   entries of tables 8 to 18; a `Catalog` adds private FUN/INF semantics and
   looks up both. INF 73 (fault location) is listed with types 2 and 4
-  (interpretation 7). `CommandAllowed` checks a double command against
-  clause 7.2.6.4 (DCO 1 or 2) and the COM column of table 17 (only ON for
-  INF 19 and 23 to 26).
+  (interpretation 7). `CommandAllowed` checks a general command against
+  clause 7.2.6.4 (DCO 1 or 2) and table 17: for a compatible function type
+  only its INF (16 to 19, 23 to 26; clause 7.2.5.2) and, by the COM
+  column, only ON for INF 19 and 23 to 26.
 
 ## Controlling system
 
@@ -110,7 +111,7 @@ rec, err := c.Disturbance(ctx, iec103.FunDistance, fan)
   `BroadcastClockSync` encode the ASDU 6 when it is transmitted, with the
   given time advanced by the time it waited for the link, so the command
   carries the time of its transmission.
-- `Command` refuses a DCO that `iec103.CommandAllowed` refuses with
+- `Command` refuses a DCO or INF that `iec103.CommandAllowed` refuses with
   `ErrInvalid`.
 - Generic writes (clause 7.4.8.6.3, figure 17): `GenericWrite` with INF
   250 or 251 sends every ASDU but the last with INF 248 and CONT = 1, the
@@ -175,7 +176,7 @@ s.Send(measurands, server.Class2)
   INF 245) drops the queued rest of the previous cycle, its termination
   included (clauses 7.4.3 and 7.4.8.7). A command received before the
   previous one was acknowledged is refused by the server (clause 7.4.4),
-  and so is one with a DCO that `iec103.CommandAllowed` refuses.
+  and so is one with a DCO or INF that `iec103.CommandAllowed` refuses.
 - With a `DisturbanceSource` the server runs the disturbance data transfer
   of clause 7.4.7 itself, including the list (ASDU 23 with the function
   type of the equipment, cause 31) after a GI and after a completed or
@@ -196,7 +197,7 @@ API and behaviour changes of the audit against IEC 60870-5-103:1997:
   `GenericWrite` with INF 250/251 over several ASDUs uses INF 248 for all
   but the last.
 - `iec103.CommandAllowed` (new); `client.Command` and the server refuse
-  other DCOs.
+  other DCOs and, for a compatible function type, an INF outside table 17.
 - Decoding is stricter: VSQ, GDD DATASIZE/NUMBER and NDE are checked;
   `PackGenericIdent` and `Structure` refuse empty input.
 - `client.Broadcast` and `BroadcastClockSync` are sent by the link loop

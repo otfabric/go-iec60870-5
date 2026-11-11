@@ -30,7 +30,7 @@ import (
 )
 
 // The references: otfabric/iec60870-5-interop, branch feat/iec103 at
-// 42164d2 (contract 2.1). The images are the local :dev builds of that
+// 8c84ea8 (contract 2.1). The images are the local :dev builds of that
 // commit; they get pinned by multi-arch index digest (the release's
 // manifest.json) at the harness v0.2.0 release.
 var stacks = []struct{ name, env, image string }{
@@ -251,16 +251,21 @@ func (st *station) HandleASDU(s *server.Server, a *iec103.ASDU) {
 		_ = s.AnswerGI(a, data...)
 	case iec103.GeneralCommand:
 		// A command of the fixture with DCO 1 or 2 sets the indication of
-		// the same FUN/INF and is confirmed with cause 20; anything else is
-		// refused with cause 21 (DCO 0 and 3 the server refuses itself).
-		// No cause 12 report follows: FIXTURES.md has the station send none.
+		// the same FUN/INF and is confirmed with cause 20; when the state
+		// changed, the change follows with cause 12 (clause 7.4.4, figure
+		// 7). Anything else is refused with cause 21 (DCO 0 and 3, and OFF
+		// where table 17 allows only ON, the server refuses itself).
 		k := funInf{int(a.Fun), int(a.Inf)}
 		if !slices.Contains(st.f.Commands, command{k.fun, k.inf}) {
 			_ = s.AckCommand(a, false)
 			return
 		}
+		changed := st.dpi[k] != b.DCO
 		st.dpi[k] = b.DCO
 		_ = s.AckCommand(a, true)
+		if changed {
+			_ = s.Event(iec103.CauseRemoteOperation, a.Fun, a.Inf, b.DCO)
+		}
 	}
 }
 
@@ -504,25 +509,6 @@ var clientBugs = map[string]bool{
 	"open103-command-typical-fun": true,
 }
 
-// localBugs are client differences seen on the wire against this module's
-// server that the harness's known-bugs.tsv does not list yet, because its
-// only reference server (vitusdong) accepts them or deviates first. They
-// are reported to the harness and go once its table has them.
-var localBugs = []knownBug{
-	{
-		adapter: "ariec103", version: "v1.2.31-3-gec08dd7", match: regexp.MustCompile(`^command`),
-		what: "Iec103AsduBuilder.GeneralCommand sends ASDU 20 without the return information identifier (14 81 14 01 A0 63 02: FUN, INF, DCO; clause 7.3.2.4 has DCO and RII), which a station that checks the length drops, so no acknowledgement comes",
-		id:   "ariec103-command-no-rii",
-		url:  "https://github.com/masarray/ARIEC103/blob/ec08dd73991be646864aef55e6a5538b78129db8/src/ArIEC103.Master/Protocol/Iec103AsduBuilder.cs",
-	},
-	{
-		adapter: "open103", version: "887ff5a5", match: regexp.MustCompile(`^command --fun 160 --inf (23|99) `),
-		what: "Open103 sends a general command only with the typical function types of table 17 (INF 23..26: distance protection, FUN 128) and never an INF outside it, so it sends nothing for FUN 160 INF 23 or 99 (error failed)",
-		id:   "open103-command-typical-fun",
-		url:  "https://github.com/XVincentX/Open103/tree/887ff5a5d909e9a23f94dafa2a5c4bdbb20f30ee",
-	},
-}
-
 func knownBugs(t *testing.T) []knownBug {
 	t.Helper()
 	f, err := os.Open("testdata/known-bugs.tsv")
@@ -547,7 +533,7 @@ func knownBugs(t *testing.T) []knownBug {
 		}
 		bugs = append(bugs, knownBug{adapter: col[0], version: col[1], match: re, what: col[3], id: col[4], url: col[5]})
 	}
-	return append(bugs, localBugs...)
+	return bugs
 }
 
 // knownBugOf returns the entry of known-bugs.tsv for the reference a in
