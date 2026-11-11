@@ -44,10 +44,10 @@ const (
 // DATASIZE, NUMBER, CONT}.
 type GDD struct {
 	Type DataType
-	// Size is DATASIZE: octets of one element, or bits for
+	// Size is DATASIZE, 1..255: octets of one element, or bits for
 	// [DataBitString].
 	Size uint8
-	// Number is NUMBER, 0..127: the elements in this ASDU.
+	// Number is NUMBER, 1..127: the elements in this ASDU.
 	Number uint8
 	// Cont is CONT: the data continue in the next ASDU with the same RII.
 	Cont bool
@@ -77,6 +77,15 @@ func (g GDD) append(b []byte) []byte {
 
 func gddOf(b []byte) GDD {
 	return GDD{Type: DataType(b[0]), Size: b[1], Number: b[2] & 0x7F, Cont: b[2]&0x80 != 0}
+}
+
+// check reports a description outside the ranges of clause 7.2.6.32:
+// DATASIZE 1..255, NUMBER 1..127.
+func (g GDD) check() error {
+	if g.Size == 0 || g.Number == 0 || g.Number > 127 {
+		return fmt.Errorf("%w: GDD DATASIZE %d NUMBER %d, clause 7.2.6.32 requires 1..255 and 1..127", ErrInvalid, g.Size, g.Number)
+	}
+	return nil
 }
 
 // Value is generic data: a description and the data it describes (GDD and
@@ -143,13 +152,13 @@ func Reply(c GRC) Value {
 func Structure(fields ...Value) (Value, error) {
 	var d []byte
 	for _, f := range fields {
-		if len(f.Data) != f.DataLen() {
-			return Value{}, fmt.Errorf("%w: structure field of %d octets, description announces %d", ErrInvalid, len(f.Data), f.DataLen())
+		var err error
+		if d, err = appendValue(d, f); err != nil {
+			return Value{}, fmt.Errorf("structure field: %w", err)
 		}
-		d = append(f.append(d), f.Data...)
 	}
-	if len(d) > 255 {
-		return Value{}, fmt.Errorf("%w: structure of %d octets exceeds DATASIZE", ErrInvalid, len(d))
+	if len(d) == 0 || len(d) > 255 {
+		return Value{}, fmt.Errorf("%w: structure of %d octets, DATASIZE is 1..255", ErrInvalid, len(d))
 	}
 	return Value{GDD: GDD{Type: DataStructure, Size: uint8(len(d)), Number: 1}, Data: d}, nil
 }
@@ -252,8 +261,8 @@ func appendValue(b []byte, v Value) ([]byte, error) {
 	if len(v.Data) != v.DataLen() {
 		return nil, fmt.Errorf("%w: GID of %d octets, GDD announces %d", ErrInvalid, len(v.Data), v.DataLen())
 	}
-	if v.Number > 127 {
-		return nil, fmt.Errorf("%w: NUMBER %d", ErrInvalid, v.Number)
+	if err := v.check(); err != nil {
+		return nil, err
 	}
 	return append(v.append(b), v.Data...), nil
 }

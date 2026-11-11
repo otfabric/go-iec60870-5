@@ -292,7 +292,7 @@ and wrap `context.DeadlineExceeded` when no answer arrives within
 |---|---|
 | `iec103.ErrShort` | the ASDU ends before its last field, or a GID is shorter than its GDD announces |
 | `iec103.ErrTrailing` | octets after the information object of a compatible type identification |
-| `iec103.ErrInvalid` | a field out of range: more elements than the ASDU may carry (ASDU 3: 4, ASDU 9: 9, ASDU 23: 8, ASDU 29 and 30: 25, NGD/NDE: 63), GID length different from its GDD, NUMBER above 127, an accessor of `iec103.Value` used on the wrong data type; also a client request with an information number that is not a generic read or write |
+| `iec103.ErrInvalid` | a field out of range: more elements than the ASDU may carry (ASDU 3: 4, ASDU 9: 9, ASDU 23: 8, ASDU 29 and 30: 25, NGD/NDE: 63), GID length different from its GDD, a GDD with DATASIZE 0 or NUMBER outside 1..127 (7.2.6.32), an ASDU 11 with NDE 0 (7.2.6.35), a VSQ other than 81H for a single information object or with SQ = 1 for ASDUs 3, 9 and 23 (7.2.2), an accessor of `iec103.Value` used on the wrong data type; also a client request with an information number that is not a generic read or write, or a general command with a DCO that `iec103.CommandAllowed` refuses |
 | `iec103.ErrTooLong` | an ASDU longer than 253 octets (one FT 1.2 frame with a one-octet link address), or a data set or description element too large for one ASDU |
 
 A type identification outside tables 3 and 4, or a private cause of
@@ -303,11 +303,11 @@ transmission, is not an error: it decodes as `iec103.Raw`.
 | Sentinel | Meaning |
 |---|---|
 | `iec103.ErrLinkDown` | a request while the link is not initialized; a pending request fails with it when the link is lost |
-| `iec103.ErrClosed` | an operation on a closed client or server |
-| `iec103.ErrInvalidConfig` | invalid configuration: link address 255, a start cause other than 5 or 6, an invalid `link.Config` |
+| `iec103.ErrClosed` | an operation on a closed client or server, or on a `client.StagedWrite` that was already executed or aborted |
+| `iec103.ErrInvalidConfig` | invalid configuration: link address 255, a server without function type (`Config.Fun` 0), a negative `Config.BitRate`, a start cause other than 5 or 6, an invalid `link.Config` |
 | `iec103.ErrBusy` | a request while another of the same kind is pending (command, GI, generic read, generic write, generic GI, disturbance transfer) |
-| `iec103.ErrNegative` | negative acknowledgement of a command (cause 21), of a generic write (cause 41; the result is returned too), or a disturbance transfer with a channel acknowledged negatively (the record is returned too) |
-| `iec103.ErrAborted` | the protection equipment ended a disturbance transfer with TOO 34, 37 or 40 |
+| `iec103.ErrNegative` | negative acknowledgement of a command (cause 21), of a generic write (cause 41; the result is returned too), or a disturbance transfer the client acknowledged negatively: tags or a channel aborted by the equipment (TOO 40, 37), incomplete, initial tag states not at position 0, fewer channels than NOC (the record is returned too) |
+| `iec103.ErrAborted` | the protection equipment ended a disturbance transfer with TOO 34 (acknowledged with TOO 65 first) |
 | `server.ErrQueueFull` (`iec103/server`) | a class 1 or class 2 queue is full |
 
 Requests wrap `context.DeadlineExceeded` when no answer arrives within the

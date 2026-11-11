@@ -29,10 +29,10 @@ func TestInvalidConfig(t *testing.T) {
 	if _, err := server.New(b, server.Config{LinkAddr: 255}); !errors.Is(err, iec103.ErrInvalidConfig) {
 		t.Fatal(err)
 	}
-	if _, err := server.New(b, server.Config{StartCause: iec103.CauseCyclic}); !errors.Is(err, iec103.ErrInvalidConfig) {
+	if _, err := server.New(b, server.Config{Fun: fun, StartCause: iec103.CauseCyclic}); !errors.Is(err, iec103.ErrInvalidConfig) {
 		t.Fatal(err)
 	}
-	if _, err := server.New(b, server.Config{Link: link.Config{Timeout: -1}}); !errors.Is(err, iec103.ErrInvalidConfig) {
+	if _, err := server.New(b, server.Config{Fun: fun, Link: link.Config{Timeout: -1}}); !errors.Is(err, iec103.ErrInvalidConfig) {
 		t.Fatal(err)
 	}
 }
@@ -44,7 +44,7 @@ func TestInvalidConfig(t *testing.T) {
 func TestServerLink(t *testing.T) {
 	a, b := net.Pipe()
 	release := make(chan struct{})
-	s, err := server.New(b, server.Config{LinkAddr: 4, CommonAddr: 9, StartCause: iec103.CauseStartRestart, QueueSize: 3,
+	s, err := server.New(b, server.Config{LinkAddr: 4, CommonAddr: 9, Fun: fun, StartCause: iec103.CauseStartRestart, QueueSize: 3,
 		Handler: server.HandlerFunc(func(*server.Server, *iec103.ASDU) { <-release })})
 	if err != nil {
 		t.Fatal(err)
@@ -141,12 +141,18 @@ func TestDisturbanceOrders(t *testing.T) {
 		{iec103.DisturbanceOrder{TOO: iec103.TOOAbortTags, FAN: 7}, iec103.TOOEndTagsAbortCtrl},
 		{iec103.DisturbanceOrder{TOO: iec103.TOOAbortChannel, FAN: 7, ACC: 1}, iec103.TOOEndChannelAbortCtl},
 		{iec103.DisturbanceOrder{TOO: iec103.TOORequestChannel, FAN: 7, ACC: 9}, iec103.TOOEndChannelAbortPrt},
-		{iec103.DisturbanceOrder{TOO: 5, FAN: 7}, iec103.TOOEndDataAbortProt},
-		{iec103.DisturbanceOrder{Ack: true, TOO: 70, FAN: 7}, iec103.TOOEndDataAbortProt},
 		{iec103.DisturbanceOrder{TOO: iec103.TOOAbortData, FAN: 7}, iec103.TOOEndDataAbortCtrl},
 	} {
 		if e := r.order(t, c.o); e.TOO != c.want {
 			t.Fatalf("%+v: %+v", c.o, e)
+		}
+	}
+	// Implausible orders end the transfer with TOO 34 (each after a new
+	// selection, as the abort ends the transfer).
+	for _, o := range []iec103.DisturbanceOrder{{TOO: 5, FAN: 7}, {Ack: true, TOO: 70, FAN: 7}} {
+		sel()
+		if e := r.order(t, o); e.TOO != iec103.TOOEndDataAbortProt {
+			t.Fatalf("%+v: %+v", o, e)
 		}
 	}
 	// A record without channels ends right after the tags.
@@ -166,10 +172,10 @@ func TestDisturbanceIncomplete(t *testing.T) {
 	if !errors.Is(err, iec103.ErrNegative) || rec == nil || len(rec.Channels) != 2 {
 		t.Fatal(rec, err)
 	}
-	r.rec.mu.Lock()
-	defer r.rec.mu.Unlock()
-	if len(r.rec.acks) != 1 || r.rec.acks[0] {
-		t.Fatal(r.rec.acks)
+	// The final acknowledgement reaches the source on the server's
+	// goroutine after the link confirmed it.
+	if acks := r.rec.waitAcks(t); len(acks) != 1 || acks[0] {
+		t.Fatal(acks)
 	}
 }
 

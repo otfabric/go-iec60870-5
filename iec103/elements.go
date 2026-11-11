@@ -83,7 +83,8 @@ func (d DPI) String() string {
 // MEA is a measurand with quality descriptor (clause 7.2.6.8): CP16{OV,
 // ER, RES, MVAL}. MVAL is a 13-bit two's complement fraction F13 in
 // -1..+1-2^-12, held here as the integer Raw in -4096..4095 (the value is
-// Raw/4096). The rated value is 1.2 or 2.4 times the full scale.
+// Raw/4096). Full scale (the largest MVAL) stands for 1.2 or 2.4 times the
+// rated value, so the rated value is Raw 3413 or 1707.
 type MEA struct {
 	Raw      int16 // MVAL, -4096..4095
 	Overflow bool  // OV

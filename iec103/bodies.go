@@ -33,7 +33,7 @@ func (TimeTagged) Type() TypeID { return TypeTimeTagged }
 func (TimeTagged) vsq() VSQ     { return VSQSingle }
 func (m TimeTagged) append(b []byte, loc *time.Location) ([]byte, error) {
 	b = append(b, byte(m.DPI&3))
-	return append(cp.AppendCP32(b, m.Time, loc), m.SIN), nil
+	return append(appendCP32(b, m.Time, loc), m.SIN), nil
 }
 
 // RelTimeTagged is ASDU 2, the time-tagged message with relative time
@@ -51,7 +51,7 @@ func (RelTimeTagged) Type() TypeID { return TypeRelTimeTagged }
 func (RelTimeTagged) vsq() VSQ     { return VSQSingle }
 func (m RelTimeTagged) append(b []byte, loc *time.Location) ([]byte, error) {
 	b = appendU16(appendU16(append(b, byte(m.DPI&3)), m.RET), m.FAN)
-	return append(cp.AppendCP32(b, m.Time, loc), m.SIN), nil
+	return append(appendCP32(b, m.Time, loc), m.SIN), nil
 }
 
 // Measurands is ASDU 3 (measurands I, clause 7.3.1.3; Set2 false) or ASDU 9
@@ -104,7 +104,7 @@ func (RelTimeMeasurand) Type() TypeID { return TypeRelTimeMeasurand }
 func (RelTimeMeasurand) vsq() VSQ     { return VSQSingle }
 func (m RelTimeMeasurand) append(b []byte, loc *time.Location) ([]byte, error) {
 	b = appendU16(appendU16(appendF32(b, m.SCL), m.RET), m.FAN)
-	return cp.AppendCP32(b, m.Time, loc), nil
+	return appendCP32(b, m.Time, loc), nil
 }
 
 // Identification is ASDU 5 (clause 7.3.1.5): the compatibility level, eight
@@ -147,7 +147,7 @@ type TimeSync struct{ Time cp.Timestamp }
 func (TimeSync) Type() TypeID { return TypeTimeSync }
 func (TimeSync) vsq() VSQ     { return VSQSingle }
 func (m TimeSync) append(b []byte, loc *time.Location) ([]byte, error) {
-	return cp.AppendCP56(b, m.Time, loc), nil
+	return appendCP56(b, m.Time, loc), nil
 }
 
 // GIInit is ASDU 7, the initiation of general interrogation (clause
@@ -200,7 +200,7 @@ func (m GenericData) append(b []byte, _ *time.Location) ([]byte, error) {
 
 // GenericIdent is ASDU 11, generic identification (clause 7.3.1.10): RII,
 // GIN, NDE and the description elements of that GIN. NDE's number is
-// len(Elements).
+// len(Elements), 1..[MaxCounted] (clause 7.2.6.35).
 type GenericIdent struct {
 	RII      uint8
 	GIN      GIN
@@ -212,8 +212,8 @@ type GenericIdent struct {
 func (GenericIdent) Type() TypeID { return TypeGenericIdent }
 func (GenericIdent) vsq() VSQ     { return VSQSingle }
 func (m GenericIdent) append(b []byte, _ *time.Location) ([]byte, error) {
-	if len(m.Elements) > MaxCounted {
-		return nil, fmt.Errorf("%w: %d description elements, NDE carries at most %d", ErrInvalid, len(m.Elements), MaxCounted)
+	if len(m.Elements) == 0 || len(m.Elements) > MaxCounted {
+		return nil, fmt.Errorf("%w: %d description elements, NDE carries 1..%d (clause 7.2.6.35)", ErrInvalid, len(m.Elements), MaxCounted)
 	}
 	b = append(b, m.RII, m.GIN.Group, m.GIN.Entry, m.NDE.octet(len(m.Elements)))
 	var err error
@@ -282,7 +282,7 @@ func (m DisturbanceList) append(b []byte, loc *time.Location) ([]byte, error) {
 		return nil, fmt.Errorf("%w: %d recorded disturbances, at most %d", ErrInvalid, len(m.Faults), MaxDisturbances)
 	}
 	for _, f := range m.Faults {
-		b = cp.AppendCP56(append(appendU16(b, f.FAN), byte(f.SOF)), f.Time, loc)
+		b = appendCP56(append(appendU16(b, f.FAN), byte(f.SOF)), f.Time, loc)
 	}
 	return b, nil
 }
@@ -330,7 +330,7 @@ func (DisturbanceReady) vsq() VSQ     { return VSQSingle }
 func (m DisturbanceReady) append(b []byte, loc *time.Location) ([]byte, error) {
 	b = append(b, 0, m.TOV) // not used
 	b = appendU16(append(appendU16(appendU16(b, m.FAN), m.NOF), m.NOC), m.NOE)
-	return cp.AppendCP32(appendU16(b, m.INT), m.Time, loc), nil
+	return appendCP32(appendU16(b, m.INT), m.Time, loc), nil
 }
 
 // ChannelReady is ASDU 27, ready for transmission of a channel (clause
@@ -436,9 +436,30 @@ func (m EndOfTransmission) append(b []byte, _ *time.Location) ([]byte, error) {
 	return append(appendU16(append(b, byte(m.TOO), m.TOV), m.FAN), m.ACC), nil
 }
 
+// checkVSQ checks the variable structure qualifier against clause 7.2.2
+// and the structures of clause 7.3: the ASDUs with a sequence of elements
+// (3, 9 and 23) have SQ = 0 and the number of elements, every other
+// compatible ASDU has SQ = 1 and number 1 (VSQ = 81H).
+func checkVSQ(t TypeID, vsq VSQ) error {
+	switch t {
+	case TypeMeasurands1, TypeMeasurands2, TypeDisturbanceList:
+		if vsq.SQ() {
+			return fmt.Errorf("%w: VSQ %02XH: %s has SQ = 0 (clause 7.3)", ErrInvalid, uint8(vsq), t)
+		}
+	default:
+		if vsq != VSQSingle {
+			return fmt.Errorf("%w: VSQ %02XH: %s has VSQ 81H (clause 7.3)", ErrInvalid, uint8(vsq), t)
+		}
+	}
+	return nil
+}
+
 // decodeBody reads the body of a type identification of tables 3 and 4.
 // The "not used" octets of ASDUs 26..30 are skipped whatever their value.
 func decodeBody(t TypeID, vsq VSQ, r *reader) (Body, error) {
+	if err := checkVSQ(t, vsq); err != nil {
+		return nil, err
+	}
 	switch t {
 	case TypeTimeTagged:
 		return TimeTagged{DPI: r.dpi(), Time: r.cp32(), SIN: r.u8()}, nil
@@ -486,6 +507,9 @@ func decodeBody(t TypeID, vsq VSQ, r *reader) (Body, error) {
 		m := GenericIdent{RII: r.u8(), GIN: r.gin()}
 		nde, n := countedOf(r.u8())
 		m.NDE = nde
+		if r.err == nil && n == 0 {
+			return nil, fmt.Errorf("%w: NDE 0, clause 7.2.6.35 requires 1..%d", ErrInvalid, MaxCounted)
+		}
 		for range n {
 			e := DescElement{KOD: KOD(r.u8())}
 			v, err := r.value()

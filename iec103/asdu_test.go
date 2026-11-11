@@ -173,6 +173,15 @@ var annexB = []struct {
 		{GIN{2, 0x11}, KODNone, mustStructure(Reply(GRCErrorDescription), ASCII("Setting to invalid position"))},
 	}}), cat([]byte{10, 0x81, 41, 1, 254, 250, 5, 2, 2, 1, 0, 22, 1, 1, 0, 2, 0x11, 0}, gdd(DataStructure, 34, 1),
 		gdd(DataGRC, 1, 1), []byte{11}, gdd(DataASCII, 27, 1), ascii("Setting to invalid position"))},
+	// The control-direction examples B.3.1, B.5.1 and B.6.1 (B.6.1 labels
+	// KOD <2> "actual value"; code 2 is the default value the example text
+	// asks for).
+	{"B.3.1 read group values", New(CauseGenericRead, 1, FunGeneric, InfReadGroup, GenericCommand{RII: 5, Items: []Item{{GIN{1, 0}, KODActualValue}}}),
+		[]byte{21, 0x81, 42, 1, 254, 241, 5, 1, 1, 0, 1}},
+	{"B.5.1 read entry value", New(CauseGenericRead, 1, FunGeneric, InfReadEntry, GenericCommand{RII: 5, Items: []Item{{GIN{3, 1}, KODActualValue}}}),
+		[]byte{21, 0x81, 42, 1, 254, 244, 5, 1, 3, 1, 1}},
+	{"B.6.1 read entry default value", New(CauseGenericRead, 1, FunGeneric, InfReadEntry, GenericCommand{RII: 5, Items: []Item{{GIN{3, 1}, KODDefaultValue}}}),
+		[]byte{21, 0x81, 42, 1, 254, 244, 5, 1, 3, 1, 2}},
 }
 
 func mustStructure(f ...Value) Value {

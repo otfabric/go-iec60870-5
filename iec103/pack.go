@@ -41,8 +41,12 @@ func PackGenericData(rii uint8, sets []DataSet) ([]GenericData, error) {
 
 // PackGenericIdent splits the description elements of one GIN over as
 // many ASDU 11 bodies as they need, like [PackGenericData] with NDE
-// (clause 7.2.6.35).
+// (clause 7.2.6.35). NDE counts 1..63 elements, so no elements fail with
+// [ErrInvalid].
 func PackGenericIdent(rii uint8, gin GIN, elems []DescElement) ([]GenericIdent, error) {
+	if len(elems) == 0 {
+		return nil, fmt.Errorf("%w: no description elements, NDE counts 1..%d (clause 7.2.6.35)", ErrInvalid, MaxCounted)
+	}
 	var out []GenericIdent
 	cur := GenericIdent{RII: rii, GIN: gin}
 	size := 0

@@ -173,14 +173,30 @@ func (r *reader) u16() uint16  { return binary.LittleEndian.Uint16(r.take(2)) }
 func (r *reader) f32() float32 { return math.Float32frombits(binary.LittleEndian.Uint32(r.take(4))) }
 func (r *reader) dpi() DPI     { return DPI(r.u8() & 0x03) }
 
+// The time tags of IEC 60870-5-103 have RES1 where IEC 60870-5-101 and
+// -104 stations put the GEN (substituted) flag (clauses 7.2.6.28 and
+// 7.2.6.29): it is ignored on receive and written as 0.
+
 func (r *reader) cp32() cp.Timestamp {
 	t, _ := cp.ParseCP32(r.take(cp.Size32), r.loc) // length guaranteed by take
+	t.Substituted = false
 	return t
 }
 
 func (r *reader) cp56() cp.Timestamp {
 	t, _ := cp.ParseCP56(r.take(cp.Size56), r.loc)
+	t.Substituted = false
 	return t
+}
+
+func appendCP32(b []byte, t cp.Timestamp, loc *time.Location) []byte {
+	t.Substituted = false
+	return cp.AppendCP32(b, t, loc)
+}
+
+func appendCP56(b []byte, t cp.Timestamp, loc *time.Location) []byte {
+	t.Substituted = false
+	return cp.AppendCP56(b, t, loc)
 }
 
 // value reads a GDD and its GID.
@@ -188,6 +204,9 @@ func (r *reader) value() (Value, error) {
 	g := gddOf(r.take(3))
 	if r.err != nil {
 		return Value{}, r.err
+	}
+	if err := g.check(); err != nil {
+		return Value{}, err
 	}
 	n := g.DataLen()
 	if n > r.len() {
