@@ -335,7 +335,7 @@ func TestServerEventQueue(t *testing.T) {
 }
 
 // featureCase is one operation of a reference client against a go-iec60870-5 station
-// with the fixture extended, as iec104-interop states it for its own stations in
+// with the fixture extended, as iec60870-5-interop states it for its own stations in
 // tests/feature-cases.tsv.
 type featureCase struct {
 	args string

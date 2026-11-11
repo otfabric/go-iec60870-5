@@ -4,7 +4,8 @@ Audit of the three existing IEC 104 repositories (read only; none was
 modified), made 2026-11-10/11 at go-iec104 `4a375b3` (v0.3.0),
 iec104-interop v0.6.0 and iec104ctl (on go-iec104 v0.3.0). It records what
 was reused in go-iec60870-5 and otfabric/iec60870-5-interop and what
-remains specific to IEC 104.
+remains specific to IEC 104. It is a dated record: where the module has
+moved on since, section 9 says so.
 
 ## 1. Inventory of go-iec104
 
@@ -13,7 +14,7 @@ remains specific to IEC 104.
 | root `iec104` | ~400 | sentinel errors, `NegativeError`, `State`, `Logger`/`FieldLogger`/`ContextLogger`, `Metrics` | released, documented |
 | `apci` | ~1,000 | APDU framing, I/S/U control fields, 15-bit sequence arithmetic, parameters k, w, t0..t3 | released, fuzzed |
 | `asdu` | ~3,300 | ASDU model and codec, 67 type identifications plus the 101-only C_TS_NA_1 and C_CD_NA_1, configurable COT/CA/IOA sizes, time tags | released, fuzzed, verified against recorded traffic and Wireshark |
-| `client` | ~6,000 | controlling station: STARTDT/STOPDT, requests, SBO, retries, reconnect, redundancy group, file transfer | released, interop with 5 stacks |
+| `client` | ~6,000 | controlling station: STARTDT/STOPDT, requests, SBO, retries, reconnect, redundancy group, file transfer | released, interop with 4 stacks (iec104-interop v0.5.0) |
 | `server` | ~4,700 | controlled station: sessions, Mux, redundancy groups and event queue, file server, security | released, interop |
 | `sec` | ~4,600 | IEC 62351-5:2023 / IEC TS 60870-5-7:2025 A-profile: association, session keys, HMAC/AES-GCM, RBAC, statistics | released, differential tests against cB-Sigma |
 | `internal/link` | ~3,100 | the APCI protocol machine for one TCP connection, security in the loop | released |
@@ -91,13 +92,16 @@ one is built, the import map in IEC104_PARITY.md is what changes.
 
 ## 9. Known limitations and technical debt carried over
 
-go-iec104's list is in [iec104/LIMITATIONS.md](iec104/LIMITATIONS.md).
-Debt noticed in this audit:
+The current list for the `iec104` packages (go-iec104's, less the five
+deviations fixed after the edition 1 check) is in
+[iec104/LIMITATIONS.md](iec104/LIMITATIONS.md). Debt noticed in this audit:
 
 - the IEC 104 client has its own request-matching code, duplicated in
   `telecontrol`;
-- the IEC 104 interop suite pins iec104-interop v0.5.0, while
-  iec104-interop v0.6.0 adds part5;
+- the IEC 104 interop suite pinned iec104-interop v0.5.0, while
+  iec104-interop v0.6.0 added part5. Resolved in v0.3.0: the suite runs
+  against the IEC 104 images of otfabric/iec60870-5-interop (v0.3.0), part5
+  included;
 - `asdu` names some 101-only behaviour in IEC 104 terms (for example
   `asdu.IEC104` params, `MaxSize` default 249).
 

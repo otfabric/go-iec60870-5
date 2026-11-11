@@ -1,5 +1,5 @@
 {
-  "description": "IEC 60870-5-102 frames kept for the coming IEC 102 work (testdata/captures/README.md). Files are byte-identical to their sources.",
+  "description": "Recorded IEC 60870-5-102 frames that iec102 is tested against (testdata/captures/README.md). Files are byte-identical to their sources.",
   "evidence_levels": {
     "A": "verified physical-device traffic",
     "B": "credibly documented physical-device traffic",

@@ -12,6 +12,7 @@ described in [docs/iec104/API.md](docs/iec104/API.md).
 - [Package `link`](#package-link)
 - [Package `telecontrol`](#package-telecontrol)
 - [Packages `iec101`, `iec101/client`, `iec101/server`](#packages-iec101-iec101client-iec101server)
+- [Packages `iec102` and `iec103`](#packages-iec102-and-iec103)
 - [IEC 104 interop suite](#iec-104-interop-suite)
 - [Concurrency](#concurrency)
 
@@ -42,20 +43,23 @@ f, err = d.Next()
 
 `Frame` (`Kind`, `Control`, `Addr`, `Data`), `Kind` (`KindSingle`,
 `KindFixed`, `KindVariable`), `Params` (`AddrSize`, `Validate`, `MaxAddr`,
-`MaxData`), `Decoder` (`Next`, `Buffered`, `Reset`, `OnDiscard`).
+`MaxData`), `Decoder` (`Next`, `Buffered`, `Reset`, `OnDiscard`, `Gap`:
+the octets of an unfinished frame followed by a longer pause are
+discarded).
 
 ## Package `link`
 
 `Config` holds the FT 1.2 parameters, `Timeout`, `Retries`,
 `SingleCharAck`, `SenderAddr` (balanced responses with the own address
-instead of the receiver's, IEC 60870-5-101:2003 6.2.1.2) and the
-`OnFrame`/`OnDiscard` hooks.
+instead of the receiver's, IEC 60870-5-101:2003 6.2.1.2), `FrameGap` (an
+unfinished frame followed by a longer pause is discarded; default
+`Timeout`, negative disables) and the `OnFrame`/`OnDiscard` hooks.
 
 | Type | Role | Methods |
 |---|---|---|
 | `Primary` | unbalanced primary (polling) | `Init`, `RequestStatus`, `ResetLink`, `ResetUser`, `ResetFCB`, `SendConfirm`, `SendNoReply`, `RequestData`, `Close`, `Done`, `Err` |
-| `Secondary` | unbalanced secondary | user data and polls go to a `SecondaryHandler` (`UserData`, `Class1`, `Class2`, `HasClass1`, `Reset`) |
-| `Balanced` | balanced station | `Init`, `RequestStatus`, `ResetLink`, `Send`, `Test`, `Close`; peer data goes to a `BalancedHandler` |
+| `Secondary` | unbalanced secondary | `Close`, `Done`, `Err`; user data and polls go to a `SecondaryHandler` (`UserData`, `Class1`, `Class2`, `HasClass1`, `Reset`) |
+| `Balanced` | balanced station | `Init`, `RequestStatus`, `ResetLink`, `Send`, `Test`, `Close`, `Done`, `Err`; peer data goes to a `BalancedHandler` |
 
 `Control` builds and reads the control field (`PrimaryControl`,
 `SecondaryControl`, `PRM`, `FCB`, `FCV`, `ACD`, `DFC`, `DIR`, `Func`).
@@ -72,17 +76,17 @@ answers only request status of link and reset of remote link until it is
 reset; `Init` repeats request status of link while DFC is set and fails
 with `ErrDataFlow` when it stays set; a balanced `Send` waits the same way
 after a response with DFC set. A response whose function code cannot
-answer the request is discarded (`ErrUnexpected` only when nothing else
-came). `SendConfirm`, `SendNoReply` and `Send` refuse empty data with
+answer the request is discarded; when only such responses came until the
+last time-out, the error wraps both `ErrUnexpected` and `ErrTimeout`. `SendConfirm`, `SendNoReply` and `Send` refuse empty data with
 `ErrNoData`.
 
 ## Package `telecontrol`
 
 `Requester` runs controlling-station requests over a `Send` function the
-companion standard supplies, and `Dispatch` routes received ASDUs to them:
-`Interrogate`, `CounterInterrogate`, `Read`, `Command`, `ClockSync`,
-`TestCommand`, `ResetProcess`, `DelayAcquisition`, and the building blocks
-`Confirmed` and `Collect`. `FailAll` ends outstanding requests.
+companion standard supplies, and its `Dispatch` routes received ASDUs to
+them: `Interrogate`, `CounterInterrogate`, `Read`, `Command`, `ClockSync`,
+`TestCommand`, `ResetProcess`, `MeasureDelay`, `SetDelay`, and the
+building blocks `Confirmed` and `Collect`. `FailAll` ends outstanding requests.
 `NegativeError` reports a refusal; `Mirrored`, `FromStation`, `Rejected`
 and `Confirmation` are the matching rules.
 
@@ -101,9 +105,12 @@ data, err := c.Interrogate(ctx, ca, asdu.QOIStation)
 err = c.Command(ctx, ca, asdu.SingleCommand{IOA: 500, Value: true, Select: true})
 ```
 
-Client methods: `WaitUp`, `State`, `Close`, `Send`, `Interrogate`,
-`CounterInterrogate`, `Read`, `Command`, `Deactivate`, `ClockSync`,
-`TestCommand` (C_TS_NA_1), `ResetProcess`, `DelayAcquisition`.
+Client methods: `WaitUp`, `State`, `Close`, `Done`, `Err`, `Send`,
+`Interrogate`, `CounterInterrogate`, `Read`, `Command`, `Deactivate`,
+`ClockSync`, `TestCommand` (C_TS_NA_1), `ResetProcess`, `MeasureDelay`,
+`SetDelay` (C_CD_NA_1). `WaitUp` returns after `Config.OnState` for the
+change to `StateUp` has returned; a request returns at its context
+deadline even while the link layer is still repeating it.
 
 ```go
 s, err := server.New(port, server.Config{Params: p, LinkAddr: 3, CommonAddr: 1,
@@ -112,7 +119,16 @@ err = s.Send(asdu.New(asdu.CauseSpontaneous, 1, asdu.SinglePoint{IOA: 100, Value
 ```
 
 Server methods: `Send` (class 1), `SendClass`, `Pending`, `Reply`,
-`Confirm`, `Negative`, `Terminate`, `Reject`, `State`, `Params`, `Close`.
+`Confirm`, `Negative`, `Terminate`, `Reject`, `State`, `Params`, `Close`,
+`Done`, `Err`.
+
+## Packages `iec102` and `iec103`
+
+IEC 60870-5-102 (`iec102`, `iec102/client`, `iec102/server`,
+`iec102/ree`) and IEC 60870-5-103 (`iec103`, `iec103/client`,
+`iec103/server`) have their own ASDU models; their guides are
+[docs/iec102/README.md](docs/iec102/README.md) and
+[docs/iec103/README.md](docs/iec103/README.md).
 
 ## IEC 104 interop suite
 

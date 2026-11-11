@@ -423,6 +423,9 @@ func TestProtocolViolations(t *testing.T) {
 		{"wrong N(S)", true, func(p *peer) { p.send(apci.NewI(5, 0, []byte{1})) }, iec104.ErrProtocol},
 		{"N(R) ahead in I frame", true, func(p *peer) { p.send(apci.NewI(0, 3, []byte{1})) }, iec104.ErrProtocol},
 		{"N(R) ahead in S frame", true, func(p *peer) { p.send(apci.NewS(7)) }, iec104.ErrProtocol},
+		// IEC 60870-5-104 ed. 1, clause 5: an I-format APDU always
+		// contains an ASDU.
+		{"I frame without ASDU", true, func(p *peer) { _, _ = p.conn.Write([]byte{0x68, 0x04, 0x00, 0, 0, 0}) }, iec104.ErrProtocol},
 		{"I frame while stopped", false, func(p *peer) { p.send(apci.NewI(0, 0, []byte{1})) }, iec104.ErrProtocol},
 		{"garbage", true, func(p *peer) { _, _ = p.conn.Write([]byte{0x00, 0x01, 0x02}) }, iec104.ErrProtocol},
 		{"bad U frame", true, func(p *peer) { _, _ = p.conn.Write([]byte{0x68, 0x04, 0xFF, 0, 0, 0}) }, iec104.ErrProtocol},
@@ -695,6 +698,19 @@ func TestWriteFailures(t *testing.T) {
 		if err := l.Send(context.Background(), make([]byte, apci.MaxASDULength+1)); !errors.Is(err, apci.ErrASDUTooLong) {
 			t.Fatalf("oversized ASDU: %v", err)
 		}
+	})
+	// IEC 60870-5-104 ed. 1, clause 5: an I-format APDU always contains
+	// an ASDU. An empty one is refused and the link carries on.
+	t.Run("empty", func(t *testing.T) {
+		l, p, _ := setup(t, Controlling, fastParams())
+		start(t, l, p)
+		if err := l.Send(context.Background(), nil); !errors.Is(err, apci.ErrInvalidLength) {
+			t.Fatalf("empty ASDU: %v", err)
+		}
+		if err := l.Send(context.Background(), []byte{1}); err != nil {
+			t.Fatalf("Send after the refusal: %v", err)
+		}
+		p.expectI(0, 0)
 	})
 }
 

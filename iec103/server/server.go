@@ -13,7 +13,9 @@
 //     answers with ASDU 6 and flags its time tags invalid until the first
 //     synchronization and when none came for [Config.SyncTimeout];
 //   - the disturbance data transfer of clause 7.4.7 from a
-//     [DisturbanceSource], when one is configured.
+//     [DisturbanceSource], when one is configured; the selection of a
+//     record whose number of channels (NOC) or of values per channel
+//     (NOE) does not fit its field is answered with TOO 34.
 //
 // The application answers general interrogations, general commands and
 // generic services through the helpers [Server.AnswerGI],
@@ -222,7 +224,7 @@ func New(rw io.ReadWriter, cfg Config) (*Server, error) {
 	s := &Server{
 		cfg: cfg,
 		ca:  cfg.CommonAddr,
-		log: logx.New(cfg.Logger, "iec103-server", "link", cfg.LinkAddr),
+		log: logx.New(cfg.Logger, "iec103.server", "link", cfg.LinkAddr),
 		in:  make(chan inbound, 64),
 	}
 	if s.ca == 0 {
@@ -267,7 +269,7 @@ func (s *Server) setState(st iec103.State, err error) {
 	}
 	s.state = st
 	s.mu.Unlock()
-	s.log.Info("link state", "state", st.String(), "err", err)
+	s.log.Info("link state", "state", st.String(), "error", err)
 	if s.cfg.OnState != nil {
 		s.cfg.OnState(st, err)
 	}
@@ -473,7 +475,7 @@ func (s *Server) receive(data []byte, broadcast bool) bool {
 	}
 	a, err := iec103.DecodeIn(data, s.cfg.Location)
 	if err != nil {
-		s.log.Warn("undecodable ASDU dropped", "err", err)
+		s.log.Warn("undecodable ASDU dropped", "error", err)
 		return true // the link layer accepted the frame
 	}
 	select {
@@ -579,7 +581,7 @@ func (s *Server) identify(cause iec103.Cause, front bool) {
 		err = s.queue(queued{raw: raw}, Class1, front)
 	}
 	if err != nil {
-		s.log.Warn("identification not queued", "err", err)
+		s.log.Warn("identification not queued", "error", err)
 	}
 }
 

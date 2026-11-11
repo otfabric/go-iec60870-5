@@ -1616,11 +1616,11 @@
         "conversations": 6,
         "conversations_from_start": 6,
         "apdus": 65,
-        "i_frames": 24,
+        "i_frames": 23,
         "s_frames": 12,
         "u_frames": 26,
-        "apci_errors": 3,
-        "asdu_errors": 5,
+        "apci_errors": 4,
+        "asdu_errors": 4,
         "reencoded_exactly": 57,
         "tcp_retransmitted": 0,
         "tcp_out_of_order": 0,
@@ -1628,7 +1628,7 @@
         "apdus_split_over_segments": 3,
         "segments_with_several_apdus": 6,
         "octets_skipped": 122,
-        "sequence_errors": 10,
+        "sequence_errors": 8,
         "i_frames_while_stopped": 0,
         "type_identifications": 8
       }

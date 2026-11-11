@@ -274,10 +274,10 @@ AppendTo appends the fields T carries.
 #### func (Request) Objects
 
 ```go
-func (Request) Objects() int
+func (b Request) Objects() int
 ```
 
-Objects returns 1.
+Objects returns 0 for the requests without information elements (C\_FS\_NA\_2, C\_TA\_VC\_2, C\_RM\_NA\_2, C\_PC\_NA\_2, C\_DF\_NA\_2) and 1 for those with a time range or an object.
 
 #### func (Request) Type
 

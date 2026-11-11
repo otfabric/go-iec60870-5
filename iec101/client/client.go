@@ -8,8 +8,14 @@
 // monitor-direction ASDUs to a handler.
 //
 // The link is initialized in the background and re-initialized when the
-// controlled station stops answering; [Client.WaitUp] waits for it.
-// Requests fail with [iec101.ErrLinkDown] while the link is down.
+// controlled station stops answering, or answers only with frames that
+// cannot answer the message until the last time-out (link.ErrUnexpected
+// wrapping link.ErrTimeout); [Client.WaitUp] waits for it and returns only
+// after Config.OnState for the change to StateUp has returned. Requests
+// fail with [iec101.ErrLinkDown] while the link is down, and return at
+// their context deadline even while the link layer is still repeating
+// their user data. After a failed poll the client waits PollInterval
+// before it polls again.
 package client
 
 import (
@@ -129,7 +135,7 @@ func New(rw io.ReadWriter, cfg Config) (*Client, error) {
 	}
 	c := &Client{
 		cfg:     cfg,
-		log:     logx.New(cfg.Logger, "iec101-client", "link", cfg.LinkAddr),
+		log:     logx.New(cfg.Logger, "iec101.client", "link", cfg.LinkAddr),
 		sends:   make(chan sendReq),
 		handled: make(chan *asdu.ASDU, 256),
 		upCh:    make(chan struct{}),
@@ -253,7 +259,7 @@ func (c *Client) setState(s iec101.State, err error) {
 	if s == iec101.StateDown {
 		c.req.FailAll(fmt.Errorf("%w: %w", iec101.ErrLinkDown, err))
 	}
-	c.log.Info("link state", "state", s.String(), "err", err)
+	c.log.Info("link state", "state", s.String(), "error", err)
 	if c.cfg.OnState != nil {
 		c.cfg.OnState(s, err)
 	}
@@ -273,14 +279,14 @@ func (c *Client) setState(s iec101.State, err error) {
 func (c *Client) receive(data []byte) {
 	a, err := asdu.Decode(data, c.cfg.ASDU)
 	if err != nil {
-		c.log.Warn("undecodable ASDU dropped", "err", err)
+		c.log.Warn("undecodable ASDU dropped", "error", err)
 		return
 	}
 	if c.cfg.Strict {
 		if err := iec101.Validate(a, c.cfg.ASDU); err != nil {
 			// IEC 60870-5-101:2003 7.2.3: the controlling station may log
 			// such ASDUs; they do not affect the following messages.
-			c.log.Warn("ASDU dropped by the IEC 60870-5-101 profile", "asdu", a.String(), "err", err)
+			c.log.Warn("ASDU dropped by the IEC 60870-5-101 profile", "asdu", a.String(), "error", err)
 			return
 		}
 	}
@@ -337,16 +343,25 @@ func (c *Client) send(ctx context.Context, a *asdu.ASDU) error {
 	case <-c.ctx.Done():
 		return iec101.ErrClosed
 	}
+	// The poller finishes the exchange it started (a primary repeats a
+	// message until it is answered or Config.Retries ran out; giving up
+	// half way would leave the FCB in doubt), but the request ends at its
+	// deadline.
 	select {
 	case err := <-r.done:
 		return err
+	case <-ctx.Done():
+		return ctx.Err()
 	case <-c.ctx.Done():
 		return iec101.ErrClosed
 	}
 }
 
 // Send transmits a in the control direction without waiting for an
-// application answer. Answers reach the Handler.
+// application answer. It returns when the link layer confirmed it, or at
+// the deadline of ctx: in unbalanced transmission the poller then still
+// finishes the exchange, repeating the frame until it is answered or
+// Link.Retries ran out. Answers reach the Handler.
 func (c *Client) Send(ctx context.Context, a *asdu.ASDU) error { return c.send(ctx, a) }
 
 func (c *Client) linkFailed(err error) {
@@ -378,7 +393,7 @@ func (c *Client) runUnbalanced() {
 		if c.State() != iec101.StateUp {
 			st, err := c.pri.Init(c.ctx, addr)
 			if err != nil {
-				c.log.Debug("link init failed", "err", err)
+				c.log.Debug("link init failed", "error", err)
 				if !c.sleep(c.cfg.RetryInterval) {
 					return
 				}
@@ -409,6 +424,12 @@ func (c *Client) runUnbalanced() {
 		data, st, err := c.pri.RequestData(c.ctx, addr, class)
 		if err != nil {
 			c.linkFailed(err)
+			// A station that answers every poll with an error (function
+			// 14 or 15, say) is polled at the poll interval, not as fast
+			// as it answers.
+			if !c.sleep(c.cfg.PollInterval) {
+				return
+			}
 			continue
 		}
 		acd, dfc = st.ACD, st.DFC
@@ -448,7 +469,7 @@ func (c *Client) runBalanced() {
 	for c.ctx.Err() == nil {
 		if c.State() != iec101.StateUp {
 			if err := c.bal.Init(c.ctx); err != nil {
-				c.log.Debug("link init failed", "err", err)
+				c.log.Debug("link init failed", "error", err)
 				if !c.sleep(c.cfg.RetryInterval) {
 					return
 				}

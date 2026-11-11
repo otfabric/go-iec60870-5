@@ -4,7 +4,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help all build examples fmt fmt-check lint lint-ci vet vuln test e2e coverage coverage-check coverage-pkg-check coverpkg-check cover bench fuzz chaos cross check clean interop interop-iec101 interop-iec103 test-interop docs-check captures-verify captures-fetch captures-extended captures-oracle captures-manifest
+.PHONY: help all build examples fmt fmt-check lint lint-ci vet vuln test e2e coverage coverage-check coverage-pkg-check coverpkg-check cover bench fuzz chaos cross check clean interop interop-iec101 interop-iec102 interop-iec103 test-interop docs-check captures-verify captures-fetch captures-extended captures-oracle captures-manifest test-cbsigma
 help: ## This help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -33,16 +33,18 @@ COVER_PKGS := $(shell go list ./... | grep -v -e '/examples' -e '/internal/testu
 # Build tag of the interop package (excluded from default ./... builds).
 INTEROP_TAGS := interop
 
-# Reference implementations for 'make interop': otfabric/iec104-interop v0.5.0
-# (lib60870-C v2.4.1, OpenMUC j60870 1.8.0, wendy512/iec104 v1.0.4 on
-# go-iecp5 v1.2.6, cB-Sigma/iec60870 v0.3.0 with IEC 62351-5), pinned by
-# multi-arch index digest.
-# Keep in step with interop/harness.go. Override to test other builds, e.g.
-#   make interop IEC104_INTEROP_OPENMUC_IMAGE=ghcr.io/otfabric/iec104-interop-openmuc:dev
-IEC104_INTEROP_LIB60870_IMAGE ?= ghcr.io/otfabric/iec104-interop-lib60870@sha256:c1f0cc95e39316df8c182b887b933e0488c92845fedade00605aedc816a0af9a
-IEC104_INTEROP_OPENMUC_IMAGE  ?= ghcr.io/otfabric/iec104-interop-openmuc@sha256:319061ebfddd5bd87893dc87d065ab091c8ac9f2a2f3ce57838b5b7c9663766f
-IEC104_INTEROP_WENDY512_IMAGE ?= ghcr.io/otfabric/iec104-interop-wendy512@sha256:8b8c9314ceef122d29ff1bd56b98a971c3dc0585522d8b81586d99119297c397
-IEC104_INTEROP_CBSIGMA_IMAGE  ?= ghcr.io/otfabric/iec104-interop-cbsigma@sha256:43e8e0db63fe3ab49ccca659e1ade8bcced43b916ba2fca161b03cc35aa779a8
+# Reference implementations for 'make interop': the IEC 104 images of
+# otfabric/iec60870-5-interop v0.3.0 (contract 2.2; lib60870-C v2.4.1,
+# OpenMUC j60870 1.8.0, wendy512/iec104 v1.0.4 on go-iecp5 v1.2.6,
+# cB-Sigma/iec60870 v0.3.0 with IEC 62351-5, pascaldekloe/part5 v0.3.0),
+# pinned by multi-arch index digest (manifest.json of the release).
+# Keep in step with iec104/interop/harness.go. Override to test other builds, e.g.
+#   make interop IEC104_INTEROP_OPENMUC_IMAGE=ghcr.io/otfabric/iec60870-5-interop-iec104-openmuc:dev
+IEC104_INTEROP_LIB60870_IMAGE ?= ghcr.io/otfabric/iec60870-5-interop-iec104-lib60870@sha256:2f518140646bd68f44b04ce63d5d614565f060ec2f1d23b3794a335826aa073e
+IEC104_INTEROP_OPENMUC_IMAGE  ?= ghcr.io/otfabric/iec60870-5-interop-iec104-openmuc@sha256:66d70899388076a56b3006d45951014421279bc5840e4da7b4ad31aa35d54a1e
+IEC104_INTEROP_WENDY512_IMAGE ?= ghcr.io/otfabric/iec60870-5-interop-iec104-wendy512@sha256:906b02db5f7e23eed1f761deb4927a9172d6c0b92ea882fe340844d03aab0d0d
+IEC104_INTEROP_CBSIGMA_IMAGE  ?= ghcr.io/otfabric/iec60870-5-interop-iec104-cbsigma@sha256:f231cc972e96f91a2ca49ef0f7eff0fd76f913b720ff891f1749c454791d88b6
+IEC104_INTEROP_PART5_IMAGE    ?= ghcr.io/otfabric/iec60870-5-interop-iec104-part5@sha256:2f14454a393c090090b0160694995b46ae7e48237e34f3f20a8ef609d5e57d35
 
 all: build ## Default target: build the examples
 
@@ -50,8 +52,8 @@ build: ## Build the example client and server into ./bin
 	@echo "Building examples"
 	@mkdir -p $(BIN_DIR)
 	@for dir in iec104/examples/*/ iec101/examples/*/ iec103/examples/*/ iec102/examples/*/; do \
-		name="$$(basename "$$dir")"; \
-		go build -o "$(BIN_DIR)/example-$$name" "./$$dir"; \
+		std="$$(echo "$$dir" | cut -d/ -f1)"; name="$$(basename "$$dir")"; \
+		go build -o "$(BIN_DIR)/example-$$std-$$name" "./$$dir"; \
 	done
 
 # The self-contained examples: each starts both sides and exits by itself.
@@ -78,7 +80,7 @@ fmt-check: ## Fail if the go.mod-version gofmt or the local gofmt would change a
 		exit 1; \
 	fi
 
-lint: ## Run staticcheck (includes -tags=interop for ./interop)
+lint: ## Run staticcheck (includes -tags=interop for the interop suites)
 	@echo "Running staticcheck"
 	@staticcheck -tags=$(INTEROP_TAGS) ./...
 
@@ -98,9 +100,9 @@ test: ## Run the library tests with the race detector
 	@echo "Running tests"
 	@go test -count=1 -race $(TEST_PKGS)
 
-e2e: ## Run the end-to-end suite: go-iec60870-5 client against go-iec60870-5 server on loopback
+e2e: ## Run the end-to-end suites of every companion standard (client against server, in memory and on loopback)
 	@echo "Running end-to-end tests"
-	@go test -count=1 -race ./iec104/e2e/...
+	@go test -count=1 -race ./iec101/e2e/... ./iec102/e2e/... ./iec103/e2e/... ./iec104/e2e/...
 
 coverage: ## Run tests with coverage on the library packages (writes coverage.out)
 	@echo "Running coverage"
@@ -130,7 +132,7 @@ cover: coverage ## Open coverage report in browser
 
 bench: ## Run the codec benchmarks
 	@echo "Running benchmarks"
-	@go test -count=1 -run='^$$' -bench=. -benchmem ./apci ./asdu
+	@go test -count=1 -run='^$$' -bench=. -benchmem ./iec104/apci ./asdu ./ft12 ./cp
 
 # Duration each fuzz target runs. Override with FUZZTIME=... (e.g. FUZZTIME=5m).
 FUZZTIME ?= 30s
@@ -146,8 +148,12 @@ fuzz: ## Run every Fuzz target for FUZZTIME (targets discovered, never listed)
 # Seconds of each chaos seed and number of seeds. The defaults are the nightly run's.
 CHAOS_SECONDS ?= 30
 CHAOS_SEEDS ?= 20
-chaos: ## Run the chaos test for CHAOS_SEEDS seeds of CHAOS_SECONDS each
-	@E2E_CHAOS_SECONDS=$(CHAOS_SECONDS) E2E_CHAOS_SEEDS=$(CHAOS_SEEDS) go test -count=1 -race -timeout=60m -run '^TestChaos$$' ./iec104/e2e/
+# The chaos suites: IEC 104 over TCP, the serial standards over a faulty
+# in-memory line (IEC 101 runs every seed unbalanced and balanced). Narrow
+# it with e.g. CHAOS_PKGS=./iec103/e2e/.
+CHAOS_PKGS ?= ./iec104/e2e/ ./iec101/e2e/ ./iec102/e2e/ ./iec103/e2e/
+chaos: ## Run the chaos tests of CHAOS_PKGS for CHAOS_SEEDS seeds of CHAOS_SECONDS each
+	@E2E_CHAOS_SECONDS=$(CHAOS_SECONDS) E2E_CHAOS_SEEDS=$(CHAOS_SEEDS) go test -count=1 -race -timeout=90m -run '^TestChaos$$' $(CHAOS_PKGS)
 
 cross: ## Cross-compile without cgo (build only, the tests do not run there)
 	@for p in linux/amd64 linux/arm64 linux/arm darwin/arm64 windows/amd64; do \
@@ -155,19 +161,24 @@ cross: ## Cross-compile without cgo (build only, the tests do not run there)
 		CGO_ENABLED=0 GOOS=$${p%/*} GOARCH=$${p#*/} go build ./... || exit 1; \
 	done
 
-test-interop: ## Run the interop suite against the lib60870, OpenMUC, wendy512 and cB-Sigma reference images (needs Docker)
-	@echo "Running interop tests against $(IEC104_INTEROP_LIB60870_IMAGE), $(IEC104_INTEROP_OPENMUC_IMAGE), $(IEC104_INTEROP_WENDY512_IMAGE) and $(IEC104_INTEROP_CBSIGMA_IMAGE)"
+test-interop: ## IEC 104 against the lib60870, OpenMUC, wendy512, cB-Sigma and part5 images of iec60870-5-interop (needs Docker; V=1 for -v)
+	@echo "Running interop tests against $(IEC104_INTEROP_LIB60870_IMAGE), $(IEC104_INTEROP_OPENMUC_IMAGE), $(IEC104_INTEROP_WENDY512_IMAGE), $(IEC104_INTEROP_CBSIGMA_IMAGE) and $(IEC104_INTEROP_PART5_IMAGE)"
 	@IEC104_INTEROP_LIB60870_IMAGE="$(IEC104_INTEROP_LIB60870_IMAGE)" \
 		IEC104_INTEROP_OPENMUC_IMAGE="$(IEC104_INTEROP_OPENMUC_IMAGE)" \
 		IEC104_INTEROP_WENDY512_IMAGE="$(IEC104_INTEROP_WENDY512_IMAGE)" \
 		IEC104_INTEROP_CBSIGMA_IMAGE="$(IEC104_INTEROP_CBSIGMA_IMAGE)" \
-		go test -tags=$(INTEROP_TAGS) -count=1 -timeout=20m ./iec104/interop/...
+		IEC104_INTEROP_PART5_IMAGE="$(IEC104_INTEROP_PART5_IMAGE)" \
+		go test -tags=$(INTEROP_TAGS) -count=1 -timeout=30m $(if $(V),-v,) ./iec104/interop/...
 
 interop: test-interop ## Alias for test-interop
 
 interop-iec101: ## IEC 101 against the lib60870-C and cB-Sigma images of iec60870-5-interop (needs Docker; images: iec101/interop/harness.go)
 	@echo "Running IEC 101 interop tests"
 	@IEC101_REQUIRE_INTEROP=$${IEC101_REQUIRE_INTEROP:-1} go test -tags=$(INTEROP_TAGS) -count=1 -timeout=40m ./iec101/interop/...
+
+interop-iec102: ## IEC 102: the gisce/iec870ree client of iec60870-5-interop against iec102/server (needs Docker; image: iec102/interop/harness.go; V=1 for -v)
+	@echo "Running IEC 102 interop tests"
+	@IEC102_REQUIRE_INTEROP=$${IEC102_REQUIRE_INTEROP:-1} go test -tags=$(INTEROP_TAGS) -count=1 -timeout=20m $(if $(V),-v,) ./iec102/interop/...
 
 interop-iec103: ## IEC 103 against the vitusdong, ARIEC103, Open103 and go-iecp5 images of iec60870-5-interop (needs Docker; images: iec103/interop/harness.go; V=1 for -v)
 	@echo "Running IEC 103 interop tests"

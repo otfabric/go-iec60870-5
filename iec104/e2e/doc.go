@@ -6,8 +6,8 @@
 // loopback.
 //
 // The station is the one the interop suite uses against third-party
-// clients (internal/station, serving the baseline fixture of
-// otfabric/iec104-interop), and the scenarios are the ones that suite runs
+// clients (iec104/internal/station, serving its baseline fixture,
+// baseline.json), and the scenarios are the ones that suite runs
 // against third-party servers. Where package interop shows that each side
 // agrees with other implementations, this package shows that the two sides
 // agree with each other, on every "go test" and without Docker.

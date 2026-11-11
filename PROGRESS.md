@@ -3,6 +3,25 @@
 Working log of the IEC 60870-5 program (go-iec60870-5 and
 otfabric/iec60870-5-interop). Newest first. Plan: [docs/ROADMAP.md](docs/ROADMAP.md).
 
+## v0.3.0 (prepared on release/v0.3.0, not released)
+
+- Hardening: SAST (gosec, opengrep) 44 findings to 0; hostile-peer, chaos
+  and fuzz suites for IEC 101, 102 and 103 and the defects they found
+  (link `FrameGap`, stray answers ending as a time-out, requests ending at
+  their deadline, `WaitUp` after `OnState`, IEC 103 broadcast
+  `ErrLinkDown`); the one-bit FCB limit documented.
+- IEC 104 checked clause by clause against edition 1 (2000), four fixes;
+  the interop suite moved to the IEC 104 images of iec60870-5-interop
+  with pascaldekloe/part5 as fifth reference. All suites pin the
+  iec60870-5-interop v0.3.0 images.
+- IEC 102: first independent evidence, gisce/iec870ree (REE profile)
+  against `iec102/server` (`make interop-iec102`, contract 2.2), on the
+  image of iec60870-5-interop v0.3.0 pinned by digest.
+- Next: IEC 101
+  digitalpetri and non-default field sizes; IEC 103 generic services and
+  disturbance data in the harness contract; the open deviations
+  ([LIMITATIONS.md](LIMITATIONS.md)).
+
 ## 2026-11-11 (v0.2.0)
 
 - v0.2.0: IEC 60870-5-102 (from vendor documentation and recorded meter

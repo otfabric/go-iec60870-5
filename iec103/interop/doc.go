@@ -4,7 +4,8 @@
 
 // Package interop runs the IEC 60870-5-103 stations of this module against
 // the independent implementations published by otfabric/iec60870-5-interop
-// (contract 2.1): every reference client against this module's server
+// (v0.3.0, contract 2.2; images pinned by digest in harness.go): every
+// reference client against this module's server
 // (iec103/server, serving the harness's baseline fixture), and this
 // module's client (iec103/client) against the one reference server.
 //

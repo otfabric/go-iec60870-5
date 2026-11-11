@@ -11,16 +11,16 @@ IEC 60870-5-103-2005.
 |---|---|
 | unit | tests of the package against octets written from the clause (`iec103/asdu_test.go`, `conformance_test.go`, `info_test.go`, `link/ext_test.go`) |
 | annex | the octet example of annex B, encoded and decoded |
-| e2e | `iec103/client` against `iec103/server` over `net.Pipe`, also over a line that drops frames, or one of the two against a bare `link.Primary` or a scripted handler (`iec103/e2e`) |
-| fuzz | `FuzzDecode` in `iec103`: decode, encode, decode, encode is stable |
-| independent | a passing run against an independent implementation: the reference images of otfabric/iec60870-5-interop (contract 2.1), `make interop-iec103` ([below](#independent-implementations)) |
+| e2e | `iec103/client` against `iec103/server` over `net.Pipe`, also over a line that drops frames, or one of the two against a bare `link.Primary`, a scripted handler or a hostile raw peer, and both over a faulty line (`iec103/e2e`) |
+| fuzz | `FuzzDecode` in `iec103`: decode, encode, decode, encode is stable; `server.FuzzDispatch` and `client.FuzzReceive` for the stations' receive paths |
+| independent | a passing run against an independent implementation: the reference images of otfabric/iec60870-5-interop (v0.3.0, contract 2.2), `make interop-iec103` ([below](#independent-implementations)) |
 | recorded | frames of other implementations captured by others ([iec103/testdata/captures](../../iec103/testdata/captures/README.md)): three SEL RTAC serial-line excerpts (level B) decoded, re-encoded byte for byte and compared with Wireshark; not replayed against the client or server |
 
 ## Independent implementations
 
 `iec103/interop` (build tag `interop`, `make interop-iec103`) runs this
 module against the IEC 103 images of otfabric/iec60870-5-interop
-(v0.2.1, contract 2.1; images pinned by digest in
+(v0.3.0, contract 2.2; images pinned by digest in
 `iec103/interop/harness.go`). Expected outcomes are the
 harness's own: its case table (`testdata/cases.tsv`), its value and
 session checks (`scripts/interop-iec103.sh`) and the fixture the images
@@ -62,7 +62,10 @@ client shows against vitusdong: link start-up, addressed clock
 synchronization, the GI termination with the scan number, an idle line.
 
 Not exercised by any reference: ASDU 2, 4, 10, 11, 21, 23 to 31 (generic
-services, disturbance data), broadcast synchronization, test mode, DFC.
+services, disturbance data: contract 2.2 lists them as capabilities but
+defines no client operation for them), broadcast synchronization (the
+contract has `clock-sync --broadcast`, the case table no case with it),
+test mode, DFC.
 The client's reception of the cause 12 report has no reference server that
 sends it (vitusdong does not).
 
@@ -80,6 +83,8 @@ sends it (vitusdong does not).
 | 6.3 | functions 14 and 15 toggle the FCB | the secondary advances its expected FCB before answering 15; the primary toggles for every new message | unit (`TestSecondaryExtensions`) |
 | 6.3 | DFC while the equipment cannot take commands; a command anyway is not processed and answered NACK (function 1); broadcast excepted | server sets DFC through `link.FlowControlHandler` while its handler queue is more than half full and answers user data NACK while DFC is set, broadcasts excepted; the client holds back queued ASDUs while DFC is set, broadcasts go out | unit, e2e (`TestServerLink`, `TestDFCRefusesUserData`, `TestDFCHeldBack`) |
 | 6.3 | DFC at most 15 s | not enforced by the server: the application must keep its handler moving | - |
+| - | hostile peer: noise, broken and foreign frames, other addresses and the broadcast address, unused functions before the reset, stuck FCB, malformed ASDUs of every length, command floods against a slow handler, half-open line, slow drip, reset CU in the middle of a GI; a hostile equipment against the client (silence, noise, wrong functions, DFC and ACD floods, GI answers without end, acknowledgements of other commands, disturbance data out of order) | the station stays silent or answers as clause 6 says, keeps its queues bounded and serves a peer that behaves afterwards; every request ends at its deadline; a broadcast ends with `iec103.ErrLinkDown` when the link goes down before it was sent | e2e (`iec103/e2e/hostile_test.go`) |
+| - | faulty line (drop, duplicate, corrupt, delay, split, truncate, reorder, noise) | no general command executed twice, every request ends, the link comes up again | e2e (`TestChaos`, `make chaos`), fuzz (`server.FuzzDispatch`, `client.FuzzReceive`) |
 
 ## Clause 7.1 to 7.3: ASDUs
 
@@ -98,7 +103,7 @@ sends it (vitusdong does not).
 | 7.2.6.28, 7.2.6.29 | the bit after the minutes is RES1 | ignored on decode, written as 0 (`cp` keeps its 101/104 GEN meaning) | unit (`TestTimeRES1`) |
 | 7.2.6.32 | GDD: DATASIZE 1..255, NUMBER 1..127; data types 1 to 24 | ranges checked on encode and decode; every data type round-trips | unit (`TestGDDRanges`; `TestGenericDataTypes` for types 5, 6, 8 to 12, 15 to 20), annex (types 1, 3, 7, 14, 21 to 24) |
 | 7.2.6.35 | NDE 1..63 | checked on encode and decode; `PackGenericIdent` refuses no elements | unit (`TestNDERange`) |
-| 7.3.1 | monitor direction ASDUs 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 23, 26, 27, 28, 29, 30, 31 | encode and decode; ASDU 9 with more than nine measurands (recorded: 14 and 16) is refused, 7.3.1.8 | unit, annex (10: B.1.2, B.2.2, B.3.2, B.5.2, B.6.2, B.7.2, B.8.2; 11: B.4.2), e2e, recorded, independent (server sends 1, 3, 5, 6, 8, 9, decoded by 4 clients; 3 and 9 by ARIEC103, Open103, go-iecp5) |
+| 7.3.1 | monitor direction ASDUs 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 23, 26, 27, 28, 29, 30, 31 | encode and decode; ASDU 3 and 9 with more measurands than 7.3.1.3 and 7.3.1.8 allow (four, nine) are carried up to `MaxMeasurandsWire` (127; recorded: ASDU 9 with 14 and 16), a deviation of the equipment the codec accepts | unit, annex (10: B.1.2, B.2.2, B.3.2, B.5.2, B.6.2, B.7.2, B.8.2; 11: B.4.2), e2e, recorded, independent (server sends 1, 3, 5, 6, 8, 9, decoded by 4 clients; 3 and 9 by ARIEC103, Open103, go-iecp5) |
 | 7.3.2 | control direction ASDUs 6, 7, 10, 20, 21, 24, 25 | encode and decode | unit, annex (21: B.1.1, B.2.1, B.3.1, B.4.1, B.5.1, B.6.1; 10: B.7.1, B.8.1), e2e, recorded (6, 7, 20), independent (server receives 6, 7, 20 from 4 clients; client sends 6, 7, 20 to vitusdong) |
 | 7.2 note | private combinations of compatible type and private cause | decoded as `Raw`; `DecodeTyped` to interpret them | unit |
 
@@ -108,7 +113,7 @@ sends it (vitusdong does not).
 |---|---|---|---|---|
 | 7.4.1 | initialization: reset CU or reset FCB, identification with cause 4 or 3 first, then power on (6) or start/restart (5) | `Config.ResetFCB`, `Identification` | built in; `StartCause` | e2e (`TestInitialization`, `TestInitializationResetFCB`, `TestServerLink`), independent (server: identification values checked by vitusdong, ARIEC103, Open103, go-iecp5; client: link start-up with vitusdong, whose identification is a known bug) |
 | 7.4.1 | reset CU clears the transmit buffer; reset FCB does not | - | built in | e2e |
-| 7.4.1 | re-initialization after no answer | yes (link time-out) | - | e2e (`TestLinkLoss`) |
+| 7.4.1 | re-initialization after no answer | yes (link time-out, also when only answers to something else came until the last time-out: `link.ErrUnexpected` wrapping `link.ErrTimeout`); `WaitUp` returns after `OnState` for the change to up returned | - | unit (`link` `TestStrayAnswersAreATimeOut`), e2e (`TestLinkLoss`, `TestWaitUpAfterOnState`) |
 | 7.4.1 | time synchronization and GI after initialization | yes, unless disabled | - | e2e |
 | 7.4.2 | time synchronization, addressed (send/confirm) and broadcast (send/no reply) | `ClockSync`, `BroadcastClockSync` | built in: offset, ASDU 6 answer to an addressed one (to a broadcast only with `AnswerBroadcastSync`) | e2e (`TestTimeSync`, `TestBroadcastSyncAnswer`), independent (addressed: server with vitusdong, Open103, go-iecp5; client with vitusdong) |
 | 7.4.2 | the command carries the time its first bit is sent; the equipment corrects by length times bit time | the ASDU 6 is encoded when it is transmitted | `SyncDelay`, default 21 x 11 bits at `BitRate` (9600) | e2e (`TestClockSyncStampedAtSend`, `TestSyncDelay`) |
@@ -121,7 +126,7 @@ sends it (vitusdong does not).
 | 7.4.7 | disturbance data: list, select, data, tags, channels, acknowledgements, end, updated list | `DisturbanceList`, `Disturbance` (NFE/NOE check, initial tags at position 0, NOC check, negative ack) | built in from a `DisturbanceSource` | e2e (`TestDisturbanceTransfer`, `TestDisturbanceIncomplete`, `TestDisturbanceOrders`, `TestDisturbanceClientAcks`, lossy line) |
 | 7.4.7 | ASDU 23 after the start of a GI (cause 31) and after a completed or aborted transfer | - | list with the function type of the equipment after the GI termination, after the final acknowledgement and after TOO 33/34 | e2e (`TestListAfterGIHasEquipmentFun`, `TestDisturbanceAbortByEquipment`) |
 | 7.4.7 | abortion by the control system (TOO 3, 9, 17) | not sent | answered with TOO 33, 36, 39 | e2e (`TestDisturbanceOrders`) |
-| 7.4.7 | abortion by the equipment (TOO 34, 37, 40); every ASDU 31 acknowledged | ASDU 25 TOO 65, 67, 69; after 37 and 40 the transfer goes on, 34 ends it (`ErrAborted`) | TOO 34 for implausible orders ends the transfer and the list follows; TOO 37 for an unknown channel | e2e (`TestDisturbanceClientAcks`, `TestDisturbanceAbortByEquipment`) |
+| 7.4.7 | abortion by the equipment (TOO 34, 37, 40); every ASDU 31 acknowledged | ASDU 25 TOO 65, 67, 69; after 37 and 40 the transfer goes on, 34 ends it (`ErrAborted`) | TOO 34 for implausible orders ends the transfer and the list follows; the selection of a record whose NOC (> 255) or NOE (> 65535) does not fit its field is answered with TOO 34; TOO 37 for an unknown channel | e2e (`TestDisturbanceClientAcks`, `TestDisturbanceAbortByEquipment`, `TestDisturbanceTooLarge`) |
 | 7.4.8.5 | read headings (240), read group (241) | `ReadHeadings`, `ReadGroup` | `GenericAnswer` | annex, e2e |
 | 7.4.8.6 | read directory (243, ASDU 11), read entry (244), write entry 248/249/250/251 | `ReadDirectory`, `ReadEntry`, `GenericWrite` | `GenericIdentAnswer`, `GenericAnswer` | annex, e2e (`TestGenericServices`) |
 | 7.4.8.6.3 | write over several ASDUs: INF 248 with CONT = 1, the last INF 250 with CONT = 0, one RII, COUNT toggling (figure 17) | `GenericWrite` (250, 251), `BeginWrite` / `StagedWrite` | application (`GenericAnswer`) | e2e (`TestGenericWriteExecuteSplit`) |

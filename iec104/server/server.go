@@ -96,7 +96,7 @@ func New(h Handler, opts ...Option) (*Server, error) {
 	srv := &Server{
 		handler:   h,
 		opts:      o,
-		log:       logx.New(o.logger, "server"),
+		log:       logx.New(o.logger, "iec104.server"),
 		listeners: make(map[net.Listener]struct{}),
 		sessions:  make(map[*Session]struct{}),
 		live:      make(map[*Session]struct{}),

@@ -108,7 +108,9 @@ func MEAOf(v float64) MEA {
 func (m MEA) Value() float64 { return float64(m.Raw) / 4096 }
 
 func (m MEA) word() uint16 {
-	w := uint16(m.Raw) << 3
+	// MVAL is 13 bits two's complement in bits 4..16 of the word (clause
+	// 7.2.6.8); the mask keeps the low 16 bits of the shifted value.
+	w := uint16(int32(m.Raw) << 3 & 0xFFFF)
 	if m.Overflow {
 		w |= 1
 	}
@@ -119,7 +121,8 @@ func (m MEA) word() uint16 {
 }
 
 func meaOf(w uint16) MEA {
-	return MEA{Raw: int16(w) >> 3, Overflow: w&1 != 0, Error: w&2 != 0}
+	v := w >> 3 // the 13 bits of MVAL; bit 12 is the sign
+	return MEA{Raw: int16(v&0x0FFF) - int16(v&0x1000), Overflow: w&1 != 0, Error: w&2 != 0}
 }
 
 // GIN is a generic identification number (clause 7.2.6.31): the group in

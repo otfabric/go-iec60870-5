@@ -10,7 +10,8 @@ function type (FUN) and information number (INF).
 | [`iec103`](../api/iec103.md) | ASDU model and codec, information elements, FUN/INF tables, shared errors and link state |
 | [`iec103/client`](../api/iec103-client.md) | the controlling system (link primary) |
 | [`iec103/server`](../api/iec103-server.md) | the protection equipment (link secondary) |
-| `iec103/e2e` | client against server over in-memory and lossy lines (tests only) |
+| `iec103/e2e` | client against server over in-memory and lossy lines, hostile-peer and chaos tests (tests only) |
+| `iec103/interop` | the reference stacks of iec60870-5-interop against this module (build tag `interop`, `make interop-iec103`) |
 | `iec103/examples/quickstart` | both sides in one program; `make examples` runs it |
 
 What is implemented, clause by clause, and how it is verified:
@@ -103,10 +104,18 @@ rec, err := c.Disturbance(ctx, iec103.FunDistance, fan)
 
 - The link: one-octet address, request status of link then reset CU
   (function 0) or, with `Config.ResetFCB`, reset FCB (function 7); class 1
-  is polled while the equipment sets ACD, class 2 otherwise. While the
+  is polled while the equipment sets ACD, class 2 otherwise. The link is
+  initialized again after `RetryInterval` (2 s) when the equipment stops
+  answering, or sends only frames that answer something else until the
+  last time-out (`link.ErrUnexpected` wrapping `link.ErrTimeout`). After a
+  failed poll the client waits `PollInterval` (100 ms) before the next.
+  `WaitUp` returns only after `Config.OnState` for the change to
+  `StateUp` has returned. While the
   equipment sets DFC, control-direction ASDUs stay queued (clause 6.3);
   broadcasts are sent anyway. Broadcasts go through the same loop as
-  every other message, between two link exchanges.
+  every other message, between two link exchanges; `Broadcast` and
+  `BroadcastClockSync` return `iec103.ErrLinkDown` when the link goes down
+  before the loop sent them.
 - Time synchronization (clause 7.4.2): `ClockSync` and
   `BroadcastClockSync` encode the ASDU 6 when it is transmitted, with the
   given time advanced by the time it waited for the link, so the command
@@ -135,7 +144,8 @@ rec, err := c.Disturbance(ctx, iec103.FunDistance, fan)
 - Every received ASDU reaches `Handler`, the answers to requests included.
 - One request of each kind at a time (`ErrBusy`), as clauses 7.4.4, 7.4.7
   and 7.4.8.4 require. `RequestTimeout` (10 s) applies to a context without
-  deadline; give a disturbance transfer a longer one.
+  deadline; give a disturbance transfer a longer one. A request returns at
+  its deadline even while the link layer is still repeating its frame.
 
 ## Protection equipment
 
@@ -181,27 +191,16 @@ s.Send(measurands, server.Class2)
   of clause 7.4.7 itself, including the list (ASDU 23 with the function
   type of the equipment, cause 31) after a GI and after a completed or
   aborted transfer. An implausible order ends the transfer in progress
-  with TOO 34, then the list follows.
+  with TOO 34, then the list follows. The selection of a record with more
+  than 255 channels or more than 65535 values per channel, which NOC and
+  NOE cannot announce, is answered with TOO 34 and no transfer starts
+  (`TestDisturbanceTooLarge`).
 
-## Changes for v0.2.0
+## Changes between releases
 
-API and behaviour changes of the audit against IEC 60870-5-103:1997:
-
-- `server.Config.Fun` is required (zero is `ErrInvalidConfig`).
-- `server.Config.SyncDelay` zero now means the frame transmission time at
-  the new `server.Config.BitRate` (default `server.DefaultBitRate`, 9600);
-  negative means no correction (zero meant that before).
-- `server.Config.AnswerBroadcastSync` (new, default off): the server no
-  longer answers a broadcast synchronization with ASDU 6 unless set.
-- `client.Client.BeginWrite` and `client.StagedWrite` (new);
-  `GenericWrite` with INF 250/251 over several ASDUs uses INF 248 for all
-  but the last.
-- `iec103.CommandAllowed` (new); `client.Command` and the server refuse
-  other DCOs and, for a compatible function type, an INF outside table 17.
-- Decoding is stricter: VSQ, GDD DATASIZE/NUMBER and NDE are checked;
-  `PackGenericIdent` and `Structure` refuse empty input.
-- `client.Broadcast` and `BroadcastClockSync` are sent by the link loop
-  and wait for it.
+API and behaviour changes, including those of the v0.2.0 audit against
+IEC 60870-5-103:1997, are listed per release in
+[RELEASE.md](../../RELEASE.md).
 
 ## Not implemented
 

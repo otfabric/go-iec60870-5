@@ -60,13 +60,16 @@ type TimeA struct {
 // time at t. A time outside 2000..2099 is flagged invalid.
 func TimeAOf(t time.Time, loc *time.Location) TimeA {
 	t = t.In(zone(loc))
-	wd := uint8(t.Weekday())
+	// Each field is masked to its width in the octets of TimeA (minute 6,
+	// hour 5, day 5, day of week 3, month 4, year 7 bits); the values of
+	// time.Time are within them, so no mask changes a value.
+	wd := uint8(t.Weekday() & 0x07)
 	if wd == 0 {
 		wd = 7
 	}
 	return TimeA{
-		Minute: uint8(t.Minute()), Hour: uint8(t.Hour()), Day: uint8(t.Day()), Weekday: wd,
-		Month: uint8(t.Month()), Year: uint8(((t.Year() % 100) + 100) % 100),
+		Minute: uint8(t.Minute() & 0x3F), Hour: uint8(t.Hour() & 0x1F), Day: uint8(t.Day() & 0x1F), Weekday: wd,
+		Month: uint8(t.Month() & 0x0F), Year: uint8(((t.Year() % 100) + 100) % 100 & 0x7F),
 		Invalid: t.Year() < 2000 || t.Year() > 2099, SummerTime: t.IsDST(),
 	}
 }
@@ -179,7 +182,8 @@ type TimeB struct {
 // TimeBOf returns the TimeB of t in loc (nil means UTC).
 func TimeBOf(t time.Time, loc *time.Location) TimeB {
 	t = t.In(zone(loc))
-	return TimeB{Millisecond: uint16(t.Nanosecond() / int(time.Millisecond)), Second: uint8(t.Second()), TimeA: TimeAOf(t, loc)}
+	// Millisecond 10 bits (0..999), second 6 bits (0..59), as AppendTo.
+	return TimeB{Millisecond: uint16(t.Nanosecond() / int(time.Millisecond) & 0x3FF), Second: uint8(t.Second() & 0x3F), TimeA: TimeAOf(t, loc)}
 }
 
 // Time returns the time in loc (nil means UTC); ok as for [TimeA.Time].
@@ -195,7 +199,7 @@ func (t TimeB) String() string {
 // AppendTo appends the seven octets of t.
 func (t TimeB) AppendTo(b []byte) []byte {
 	w := t.Millisecond&0x3FF | uint16(t.Second&0x3F)<<10
-	return t.TimeA.AppendTo(append(b, byte(w), byte(w>>8)))
+	return t.TimeA.AppendTo(append(b, byte(w&0xFF), byte(w>>8&0xFF)))
 }
 
 // ParseTimeB decodes the seven octets of a TimeB.

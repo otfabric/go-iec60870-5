@@ -93,7 +93,7 @@ func New(addr string, opts ...Option) (*Client, error) {
 	c := &Client{
 		addr:      addr,
 		opts:      o,
-		log:       logx.New(o.logger, "client", "remote", addr),
+		log:       logx.New(o.logger, "iec104.client", "remote", addr),
 		closeCh:   make(chan struct{}),
 		closeDone: make(chan struct{}),
 	}

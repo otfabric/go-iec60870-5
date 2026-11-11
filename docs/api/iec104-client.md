@@ -240,7 +240,7 @@ StopDT stops data transfer (STOPDT act) and waits for the confirmation. The conn
 func (c *Client) TestCommand(ctx context.Context, ca asdu.CommonAddr) error
 ```
 
-TestCommand sends a test command with time tag (C\_TS\_TA\_1) and waits for the confirmation. Unlike [Client.TestLink](#func-client-testlink) it exercises the application layer of the station end to end.
+TestCommand sends a test command with time tag (C\_TS\_TA\_1) and waits for the confirmation. Unlike [Client.TestLink](#func-client-testlink) it exercises the application layer of the station end to end. The test sequence counter (TSC) of the first test command of a Client is 0 and counts up by one per command (IEC 60870-5-104 ed. 1, 8.8).
 
 #### func (Client) TestLink
 
@@ -569,9 +569,9 @@ func WithRetry(r Retry) Option
 
 WithRetry makes the client repeat requests that are safe to repeat when they fail for a transient reason. Zero fields of r take their defaults.
 
-Retried: [Client.Interrogate](#func-client-interrogate), [Client.CounterInterrogate](#func-client-counterinterrogate) with [asdu.FreezeRead](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#FreezeRead), [Client.Read](#func-client-read) and [Client.TestCommand](#func-client-testcommand). They only read from the station.
+Retried: [Client.Interrogate](#func-client-interrogate), [Client.CounterInterrogate](#func-client-counterinterrogate) with [asdu.FreezeRead](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#FreezeRead), [Client.Read](#func-client-read), [Client.TestCommand](#func-client-testcommand) and [Client.ListFiles](#func-client-listfiles). They only read from the station.
 
-Never retried: [Client.Command](#func-client-command), [Client.Deactivate](#func-client-deactivate), [Client.ClockSync](#func-client-clocksync), [Client.ResetProcess](#func-client-resetprocess) and [Client.Send](#func-client-send). A command whose confirmation was lost may already have operated the process, and IEC 60870-5-104 has no way to ask; repeating it is the application's decision.
+Never retried: [Client.Command](#func-client-command), [Client.Deactivate](#func-client-deactivate), [Client.ClockSync](#func-client-clocksync), [Client.ResetProcess](#func-client-resetprocess), [Client.GetFile](#func-client-getfile), [Client.PutFile](#func-client-putfile) and [Client.Send](#func-client-send). A command whose confirmation was lost may already have operated the process, and IEC 60870-5-104 has no way to ask; repeating it is the application's decision.
 
 A request is repeated when the connection was lost or is not established, or when the station did not answer within the request timeout. It is not repeated when the station refused it ([\*iec104.NegativeError](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#NegativeError)), when an identical request is pending or when the caller's context ended. Combine with [WithReconnect](#func-withreconnect): the backoff gives the client time to come back.
 

@@ -11,7 +11,8 @@ serial line or modem (FT 1.2, unbalanced IEC 60870-5-2 link).
 | [`iec102/ree`](../api/iec102-ree.md) | the Spanish REE profile: its type identifications, quality bits, session helpers; applied only when asked for |
 | [`iec102/client`](../api/iec102-client.md) | the controlling station (link primary) |
 | [`iec102/server`](../api/iec102-server.md) | the integrated total station (link secondary) with a store of records |
-| `iec102/e2e` | client against server over an in-memory line (tests only) |
+| `iec102/e2e` | client against server over an in-memory line, hostile-peer, chaos and fuzz tests (tests only) |
+| `iec102/interop` | gisce/iec870ree against `iec102/server` (build tag `interop`, `make interop-iec102`) |
 | `iec102/examples/quickstart` | both sides in one program; `make examples` runs it |
 
 **We do not hold the text of IEC 60870-5-102.** Every layout and procedure
@@ -20,8 +21,10 @@ commercial IEC 102 master), to recorded meter traffic and to independent
 implementations read for comparison. [INTEROPERABILITY.md](INTEROPERABILITY.md)
 classifies every type identification, cause, field and procedure as
 standard, REE profile, vendor-specific or unresolved, with its source and
-confidence, and lists where the sources disagree. There is no
-interoperability evidence against an independent implementation yet.
+confidence, and lists where the sources disagree. Independent evidence:
+the controlling station of gisce/iec870ree (REE profile) against
+`iec102/server` (`make interop-iec102`, 18 checks); the client has no
+independent peer.
 
 ## The ASDU model
 

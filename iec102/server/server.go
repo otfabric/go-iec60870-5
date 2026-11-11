@@ -134,7 +134,7 @@ func New(rw io.ReadWriter, cfg Config) (*Server, error) {
 	}
 	s := &Server{
 		cfg:    cfg,
-		log:    logx.New(cfg.Logger, "iec102-server", "link", cfg.LinkAddr),
+		log:    logx.New(cfg.Logger, "iec102.server", "link", cfg.LinkAddr),
 		budget: min(fp.MaxData(), iec102.MaxSize),
 		in:     make(chan []byte, 16),
 	}
@@ -196,7 +196,7 @@ func (s *Server) setState(st iec102.State, err error) {
 	}
 	s.state = st
 	s.mu.Unlock()
-	s.log.Info("link state", "state", st.String(), "err", err)
+	s.log.Info("link state", "state", st.String(), "error", err)
 	if s.cfg.OnState != nil {
 		s.cfg.OnState(st, err)
 	}
@@ -274,11 +274,11 @@ func (s *Server) work() {
 		case data := <-s.in:
 			a, err := iec102.Decode(data, s.cfg.Params)
 			if err != nil {
-				s.log.Warn("undecodable ASDU dropped", "err", err)
+				s.log.Warn("undecodable ASDU dropped", "error", err)
 				continue
 			}
 			if err := s.serve(a); err != nil {
-				s.log.Warn("answer not queued", "asdu", a.String(), "err", err)
+				s.log.Warn("answer not queued", "asdu", a.String(), "error", err)
 			}
 		case <-s.ctx.Done():
 			return

@@ -2,8 +2,8 @@ name: Interop
 run-name: "Interop (${{ github.event_name }}) on ${{ github.ref_name }} by @${{ github.actor }}"
 
 # Runs go-iec60870-5 against the reference implementations published by
-# otfabric/iec104-interop, as client and as server. The images are consumed as
-# published: nothing of iec104-interop is cloned or built here.
+# otfabric/iec60870-5-interop, as client and as server. The images are consumed
+# as published: nothing of iec60870-5-interop is cloned or built here.
 
 on:
   push:
@@ -26,6 +26,9 @@ on:
       cbsigma_image:
         description: "cB-Sigma/iec60870 reference image, with IEC 62351-5 (default: the pinned release)"
         required: false
+      part5_image:
+        description: "pascaldekloe/part5 reference image (default: the pinned release)"
+        required: false
 
 permissions:
   contents: read
@@ -35,19 +38,21 @@ env:
   # The full set of references runs here: a procedure that none of them declares
   # fails, it does not skip.
   IEC104_REQUIRE_INTEROP: "1"
-  # otfabric/iec104-interop v0.5.0: lib60870-C v2.4.1, OpenMUC j60870 1.8.0,
-  # wendy512/iec104 v1.0.4 on go-iecp5 v1.2.6, cB-Sigma/iec60870 v0.3.0.
-  # Keep in step with the Makefile and interop/harness.go.
-  IEC104_INTEROP_LIB60870_IMAGE: ${{ inputs.lib60870_image || 'ghcr.io/otfabric/iec104-interop-lib60870@sha256:c1f0cc95e39316df8c182b887b933e0488c92845fedade00605aedc816a0af9a' }}
-  IEC104_INTEROP_OPENMUC_IMAGE: ${{ inputs.openmuc_image || 'ghcr.io/otfabric/iec104-interop-openmuc@sha256:319061ebfddd5bd87893dc87d065ab091c8ac9f2a2f3ce57838b5b7c9663766f' }}
-  IEC104_INTEROP_WENDY512_IMAGE: ${{ inputs.wendy512_image || 'ghcr.io/otfabric/iec104-interop-wendy512@sha256:8b8c9314ceef122d29ff1bd56b98a971c3dc0585522d8b81586d99119297c397' }}
-  IEC104_INTEROP_CBSIGMA_IMAGE: ${{ inputs.cbsigma_image || 'ghcr.io/otfabric/iec104-interop-cbsigma@sha256:43e8e0db63fe3ab49ccca659e1ade8bcced43b916ba2fca161b03cc35aa779a8' }}
+  # The IEC 104 images of otfabric/iec60870-5-interop v0.3.0 (contract 2.2):
+  # lib60870-C v2.4.1, OpenMUC j60870 1.8.0, wendy512/iec104 v1.0.4 on
+  # go-iecp5 v1.2.6, cB-Sigma/iec60870 v0.3.0, pascaldekloe/part5 v0.3.0.
+  # Keep in step with the Makefile and iec104/interop/harness.go.
+  IEC104_INTEROP_LIB60870_IMAGE: ${{ inputs.lib60870_image || 'ghcr.io/otfabric/iec60870-5-interop-iec104-lib60870@sha256:2f518140646bd68f44b04ce63d5d614565f060ec2f1d23b3794a335826aa073e' }}
+  IEC104_INTEROP_OPENMUC_IMAGE: ${{ inputs.openmuc_image || 'ghcr.io/otfabric/iec60870-5-interop-iec104-openmuc@sha256:66d70899388076a56b3006d45951014421279bc5840e4da7b4ad31aa35d54a1e' }}
+  IEC104_INTEROP_WENDY512_IMAGE: ${{ inputs.wendy512_image || 'ghcr.io/otfabric/iec60870-5-interop-iec104-wendy512@sha256:906b02db5f7e23eed1f761deb4927a9172d6c0b92ea882fe340844d03aab0d0d' }}
+  IEC104_INTEROP_CBSIGMA_IMAGE: ${{ inputs.cbsigma_image || 'ghcr.io/otfabric/iec60870-5-interop-iec104-cbsigma@sha256:f231cc972e96f91a2ca49ef0f7eff0fd76f913b720ff891f1749c454791d88b6' }}
+  IEC104_INTEROP_PART5_IMAGE: ${{ inputs.part5_image || 'ghcr.io/otfabric/iec60870-5-interop-iec104-part5@sha256:2f14454a393c090090b0160694995b46ae7e48237e34f3f20a8ef609d5e57d35' }}
 
 jobs:
   interop:
-    name: lib60870 + OpenMUC + wendy512 + cB-Sigma, client and server
+    name: lib60870 + OpenMUC + wendy512 + cB-Sigma + part5, client and server
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -59,7 +64,7 @@ jobs:
 
       - name: Pull reference images
         run: |
-          images=("${IEC104_INTEROP_LIB60870_IMAGE}" "${IEC104_INTEROP_OPENMUC_IMAGE}" "${IEC104_INTEROP_WENDY512_IMAGE}" "${IEC104_INTEROP_CBSIGMA_IMAGE}")
+          images=("${IEC104_INTEROP_LIB60870_IMAGE}" "${IEC104_INTEROP_OPENMUC_IMAGE}" "${IEC104_INTEROP_WENDY512_IMAGE}" "${IEC104_INTEROP_CBSIGMA_IMAGE}" "${IEC104_INTEROP_PART5_IMAGE}")
           # GHCR is occasionally slow or rate limiting: try each pull a few times.
           for image in "${images[@]}"; do
             for attempt in 1 2 3 4 5; do
@@ -119,7 +124,7 @@ jobs:
 
   # IEC 60870-5-103: the clients of vitusdong/iec103-dotnet, ARIEC103,
   # Open103 and go-iecp5 against the server, and the client against the
-  # vitusdong server, of otfabric/iec60870-5-interop v0.2.1 (contract 2.1),
+  # vitusdong server, of otfabric/iec60870-5-interop v0.3.0 (contract 2.2),
   # pinned by digest in iec103/interop/harness.go.
   iec103:
     name: IEC 103 against vitusdong + ARIEC103 + Open103 + go-iecp5, both directions
@@ -136,6 +141,25 @@ jobs:
 
       - name: Run the IEC 103 interop suite
         run: make interop-iec103
+
+  # IEC 60870-5-102: the client of gisce/iec870ree (REE profile) of
+  # otfabric/iec60870-5-interop v0.3.0 (contract 2.2) against iec102/server.
+  # The image is pinned by digest in iec102/interop/harness.go.
+  iec102:
+    name: IEC 102 against gisce/iec870ree (server)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+
+      - name: Run the IEC 102 interop suite
+        run: make interop-iec102
 
   # The application-layer security (IEC 62351-5) against cB-Sigma/iec60870,
   # in process: interop/cbsigma is a module of its own, so that go-iec60870-5

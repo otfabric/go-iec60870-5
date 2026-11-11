@@ -58,9 +58,8 @@ var sources = []corpus.Source{
 }
 
 const (
-	excerpt      = "the excerpt leaves out frames"
-	measurands16 = "ASDU 9 with 16 measurands; clause 7.3.1.8 allows one to nine: the equipment's deviation, the codec refuses the ASDU"
-	vsq01        = "VSQ 01h where clause 7.2.2 has 81h for a single information object: the encoder writes 81h"
+	excerpt = "the excerpt leaves out frames"
+	vsq01   = "VSQ 01h where clause 7.2.2 has 81h for a single information object: the encoder writes 81h"
 )
 
 // with sets the expected inexact frames and ASDU errors of s.

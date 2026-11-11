@@ -207,11 +207,12 @@ type Retry struct {
 // they fail for a transient reason. Zero fields of r take their defaults.
 //
 // Retried: [Client.Interrogate], [Client.CounterInterrogate] with
-// [asdu.FreezeRead], [Client.Read] and [Client.TestCommand]. They only read
-// from the station.
+// [asdu.FreezeRead], [Client.Read], [Client.TestCommand] and
+// [Client.ListFiles]. They only read from the station.
 //
 // Never retried: [Client.Command], [Client.Deactivate], [Client.ClockSync],
-// [Client.ResetProcess] and [Client.Send]. A command whose confirmation was
+// [Client.ResetProcess], [Client.GetFile], [Client.PutFile] and
+// [Client.Send]. A command whose confirmation was
 // lost may already have operated the process, and IEC 60870-5-104 has no way
 // to ask; repeating it is the application's decision.
 //

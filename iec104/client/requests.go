@@ -475,11 +475,13 @@ func (c *Client) ClockSync(ctx context.Context, ca asdu.CommonAddr, t time.Time)
 
 // TestCommand sends a test command with time tag (C_TS_TA_1) and waits for
 // the confirmation. Unlike [Client.TestLink] it exercises the application
-// layer of the station end to end.
+// layer of the station end to end. The test sequence counter (TSC) of the
+// first test command of a Client is 0 and counts up by one per command
+// (IEC 60870-5-104 ed. 1, 8.8).
 func (c *Client) TestCommand(ctx context.Context, ca asdu.CommonAddr) error {
 	c.mu.Lock()
-	c.testSeq++
 	seq := c.testSeq
+	c.testSeq++
 	c.mu.Unlock()
 	return c.confirmed(ctx, asdu.New(asdu.CauseActivation, ca,
 		asdu.TestCommand{Counter: seq, Time: asdu.Now()}), true)

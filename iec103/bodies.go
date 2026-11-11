@@ -261,7 +261,7 @@ func (m GenericCommand) append(b []byte, _ *time.Location) ([]byte, error) {
 	if len(m.Items) > 255 {
 		return nil, fmt.Errorf("%w: %d generic identifiers, NOG carries at most 255", ErrInvalid, len(m.Items))
 	}
-	b = append(b, m.RII, byte(len(m.Items)))
+	b = append(b, m.RII, byte(len(m.Items)&0xFF)) // NOG, at most 255 as checked
 	for _, it := range m.Items {
 		b = append(b, it.GIN.Group, it.GIN.Entry, byte(it.KOD))
 	}
@@ -393,7 +393,7 @@ func (m Tags) append(b []byte, _ *time.Location) ([]byte, error) {
 	if len(m.Tags) > MaxTags {
 		return nil, fmt.Errorf("%w: %d tags, at most %d", ErrInvalid, len(m.Tags), MaxTags)
 	}
-	b = appendU16(append(appendU16(b, m.FAN), byte(len(m.Tags))), m.TAP)
+	b = appendU16(append(appendU16(b, m.FAN), byte(len(m.Tags)&0xFF)), m.TAP) // NOT, at most MaxTags
 	for _, t := range m.Tags {
 		b = append(b, byte(t.Fun), byte(t.Inf), byte(t.DPI&3))
 	}
@@ -419,10 +419,10 @@ func (m DisturbanceValues) append(b []byte, _ *time.Location) ([]byte, error) {
 	if len(m.Values) > MaxValues {
 		return nil, fmt.Errorf("%w: %d disturbance values, at most %d", ErrInvalid, len(m.Values), MaxValues)
 	}
-	b = append(appendU16(append(b, 0, m.TOV), m.FAN), m.ACC, byte(len(m.Values)))
+	b = append(appendU16(append(b, 0, m.TOV), m.FAN), m.ACC, byte(len(m.Values)&0xFF)) // NDV, at most MaxValues
 	b = appendU16(b, m.NFE)
 	for _, v := range m.Values {
-		b = appendU16(b, uint16(v))
+		b = appendI16(b, v)
 	}
 	return b, nil
 }
@@ -585,7 +585,7 @@ func decodeBody(t TypeID, vsq VSQ, r *reader) (Body, error) {
 			return nil, fmt.Errorf("%w: NDV %d, at most %d", ErrInvalid, n, MaxValues)
 		}
 		for range n {
-			m.Values = append(m.Values, int16(r.u16()))
+			m.Values = append(m.Values, r.i16())
 		}
 		return m, nil
 	case TypeEndOfTransmission:

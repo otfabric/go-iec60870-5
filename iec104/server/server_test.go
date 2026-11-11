@@ -11,6 +11,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -169,6 +170,77 @@ func TestMux(t *testing.T) {
 	mux.Handle(nil, asdu.C_SC_NA_1)
 	if got := cause(t, c.Command(ctx, 1, asdu.SingleCommand{IOA: 1})); got != asdu.CauseUnknownType {
 		t.Errorf("removed handler: cause %s", got)
+	}
+}
+
+// IEC 60870-5-104 ed. 1: clock synchronization (7.6), reset process (7.1,
+// figure 20), the test command (7.10; for C_TS_TA_1 the causes listed in
+// 8.8) and the parameters of measured values (7.9) are activated and
+// confirmed only. A deactivation of one of them is refused with "unknown
+// cause of transmission" before it reaches the handler; the deactivation
+// of a command, an interrogation or a parameter activation still does.
+func TestMuxActivationOnlyTypes(t *testing.T) {
+	var mux server.Mux
+	var handled atomic.Int32
+	h := server.HandlerFunc(func(s *server.Session, req *asdu.ASDU) {
+		handled.Add(1)
+		_ = s.Confirm(req)
+	})
+	mux.Handle(h, asdu.C_CS_NA_1, asdu.C_RP_NA_1, asdu.C_TS_TA_1, asdu.P_ME_NA_1, asdu.P_ME_NB_1,
+		asdu.P_ME_NC_1, asdu.C_IC_NA_1, asdu.C_CI_NA_1, asdu.P_AC_NA_1, asdu.C_SC_NA_1)
+	_, addr := serve(t, &mux)
+	got := make(chan *asdu.ASDU, 16)
+	c := connect(t, addr, client.WithHandler(client.HandlerFunc(func(a *asdu.ASDU) { got <- a })))
+	ctx := context.Background()
+	next := func() *asdu.ASDU {
+		t.Helper()
+		select {
+		case a := <-got:
+			return a
+		case <-time.After(3 * time.Second):
+			t.Fatal("no answer")
+			return nil
+		}
+	}
+	for _, obj := range []asdu.InformationObject{
+		asdu.ClockSync{Time: asdu.Now()},
+		asdu.ResetProcess{Qualifier: asdu.ResetProcessGeneral},
+		asdu.TestCommand{Counter: 0, Time: asdu.Now()},
+		asdu.ParameterNormalized{IOA: 1, Qualifier: asdu.ParameterThreshold},
+		asdu.ParameterScaled{IOA: 1, Qualifier: asdu.ParameterThreshold},
+		asdu.ParameterFloat{IOA: 1, Qualifier: asdu.ParameterThreshold},
+	} {
+		bad := asdu.New(asdu.CauseDeactivation, 1, obj)
+		if err := c.Send(ctx, bad); err != nil {
+			t.Fatal(err)
+		}
+		if a := next(); a.Cause != asdu.CauseUnknownCause || !a.Negative || a.Type != bad.Type {
+			t.Errorf("%s: answered with %s", bad, a)
+		}
+		good := asdu.New(asdu.CauseActivation, 1, obj)
+		if err := c.Send(ctx, good); err != nil {
+			t.Fatal(err)
+		}
+		if a := next(); a.Cause != asdu.CauseActivationCon || a.Negative || a.Type != good.Type {
+			t.Errorf("%s: answered with %s", good, a)
+		}
+	}
+	for _, obj := range []asdu.InformationObject{
+		asdu.Interrogation{Qualifier: asdu.QOIStation},
+		asdu.CounterInterrogation{Request: asdu.CounterGeneral},
+		asdu.ParameterActivation{IOA: 1, Qualifier: asdu.ActivateLoadedParameters},
+		asdu.SingleCommand{IOA: 1},
+	} {
+		deact := asdu.New(asdu.CauseDeactivation, 1, obj)
+		if err := c.Send(ctx, deact); err != nil {
+			t.Fatal(err)
+		}
+		if a := next(); a.Cause != asdu.CauseDeactivationCon || a.Negative {
+			t.Errorf("%s: answered with %s", deact, a)
+		}
+	}
+	if n := handled.Load(); n != 10 {
+		t.Errorf("handler saw %d requests, want 10", n)
 	}
 }
 
@@ -436,7 +508,7 @@ func TestUndecodableASDUIsDropped(t *testing.T) {
 }
 
 func TestServerLifecycle(t *testing.T) {
-	if _, err := server.New(nil, server.WithParams(apci.Params{K: 1, W: 2})); !errors.Is(err, apci.ErrInvalidParams) {
+	if _, err := server.New(nil, server.WithParams(apci.Params{K: 1, W: 0x8000})); !errors.Is(err, apci.ErrInvalidParams) {
 		t.Errorf("invalid params: %v", err)
 	}
 	if _, err := server.New(nil, server.WithASDUParams(asdu.Params{})); !errors.Is(err, asdu.ErrInvalidParams) {

@@ -28,7 +28,7 @@ func TestNilLoggerDiscards(t *testing.T) {
 
 func TestFormattedPath(t *testing.T) {
 	var buf bytes.Buffer
-	l := New(iec60870.NewStdLogger(log.New(&buf, "", 0)), "server").With("session", 3)
+	l := New(iec60870.NewStdLogger(log.New(&buf, "", 0)), "iec104.server").With("session", 3)
 	if !l.DebugEnabled() {
 		t.Error("a logger that cannot tell is assumed to take debug entries")
 	}
@@ -52,7 +52,7 @@ func TestFormattedPath(t *testing.T) {
 func TestStructuredPath(t *testing.T) {
 	var buf bytes.Buffer
 	base := iec60870.NewSlogLogger(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	l := New(base, "client", "remote", "10.0.0.5:2404").With("path", "a")
+	l := New(base, "iec104.client", "remote", "10.0.0.5:2404").With("path", "a")
 	if l.DebugEnabled() {
 		t.Error("DebugEnabled at info level")
 	}

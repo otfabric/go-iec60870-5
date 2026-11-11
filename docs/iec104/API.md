@@ -1,7 +1,9 @@
 # API Reference: IEC 60870-5-104 (iec104 packages)
 
-The public API by package. The godoc on [pkg.go.dev](https://pkg.go.dev/github.com/otfabric/go-iec104)
-is the authoritative text for each symbol; this document is the map.
+The public API by package. The godoc on [pkg.go.dev](https://pkg.go.dev/github.com/otfabric/go-iec60870-5)
+(generated copy in [docs/api](../api/README.md)) is the authoritative text
+for each symbol; this document is the map. `asdu` and `sec` are at the
+module root, the rest under `iec104/`.
 
 ## Table of contents
 
@@ -40,7 +42,7 @@ func (e *NegativeError) Error() string
 func (e *NegativeError) Cause() asdu.Cause
 ```
 
-See [ERRORS.md](../../ERRORS.md)).
+See [ERRORS.md](../../ERRORS.md).
 
 ### State
 
@@ -55,19 +57,14 @@ const (
 func (s State) String() string
 ```
 
-### Logger and Metrics
+### Metrics
+
+The `Logger` interfaces (`Logger`, `FieldLogger`, `ContextLogger` and their
+constructors) are in the module root package `iec60870`, shared with the
+other companion standards: see [API.md](../../API.md#package-iec60870).
+`WithLogger` of `client` and `server` takes an `iec60870.Logger`.
 
 ```go
-type Logger interface {
-	Debugf(format string, args ...any)
-	Infof(format string, args ...any)
-	Warnf(format string, args ...any)
-	Errorf(format string, args ...any)
-}
-func NewSlogLogger(h slog.Handler) Logger
-func NewStdLogger(l *log.Logger) Logger
-func NopLogger() Logger
-
 type Metrics interface {
 	OnConnect(remote net.Addr)
 	OnDisconnect(remote net.Addr, err error)
@@ -86,27 +83,9 @@ type RequestMetrics interface { // client
 type HandlerMetrics interface { // server
 	OnHandled(remote net.Addr, t asdu.TypeID, cause asdu.Cause, duration time.Duration)
 }
-
-// Optional extensions of Logger; NewSlogLogger returns both.
-type FieldLogger interface {
-	Logger
-	With(keysAndValues ...any) FieldLogger
-	DebugKV(msg string, keysAndValues ...any)
-	InfoKV(msg string, keysAndValues ...any)
-	WarnKV(msg string, keysAndValues ...any)
-	ErrorKV(msg string, keysAndValues ...any)
-}
-type ContextLogger interface {
-	Logger
-	DebugContext(ctx context.Context, msg string, keysAndValues ...any)
-	InfoContext(ctx context.Context, msg string, keysAndValues ...any)
-	WarnContext(ctx context.Context, msg string, keysAndValues ...any)
-	ErrorContext(ctx context.Context, msg string, keysAndValues ...any)
-}
-func NewSlogFieldLogger(h slog.Handler) FieldLogger
 ```
 
-See [OBSERVABILITY.md](../../OBSERVABILITY.md)).
+See [OBSERVABILITY.md](../../OBSERVABILITY.md).
 
 ## Package `client`
 
@@ -207,7 +186,7 @@ func (c *Client) ListFiles(ctx context.Context, ca asdu.CommonAddr, ioa asdu.IOA
 | `ClockSync` | `C_CS_NA_1` activation | activation confirmation |
 | `Command` | process command, activation | activation confirmation |
 | `Deactivate` | process command, deactivation | deactivation confirmation |
-| `TestCommand` | `C_TS_TA_1` activation | activation confirmation |
+| `TestCommand` | `C_TS_TA_1` activation, test sequence counter 0, 1, 2, … per client | activation confirmation |
 | `ResetProcess` | `C_RP_NA_1` activation | activation confirmation |
 | `GetFile` | `F_SC_NA_1` select, then the calls and acknowledgements of the procedure | the file is acknowledged; result is its content |
 | `PutFile` | `F_FR_NA_1` file ready, then the sections, segments and checksums the station calls for | the station acknowledged the file |
@@ -241,18 +220,11 @@ func (c *Client) ListFiles(ctx context.Context, ca asdu.CommonAddr, ioa asdu.IOA
 
 ### Retries
 
-With `WithRetry` a request that only reads is repeated when it failed for a
-transient reason:
-
-| | |
-|---|---|
-| Retried | `Interrogate`, `CounterInterrogate` with `asdu.FreezeRead`, `Read`, `TestCommand` |
-| Never retried | `Command`, `Deactivate`, `ClockSync`, `ResetProcess`, `CounterInterrogate` with a freeze or reset, `Send` |
-| Repeated on | `ErrNotConnected`, `ErrNotStarted`, `ErrConnectionLost`, `ErrTimeout`, `ErrProtocol`, an attempt that ran into the request timeout |
-| Not repeated on | `*NegativeError`, `ErrBusy`, `ErrInHandler`, `ErrClosed`, encode errors, the caller's context ending |
-
-Each attempt is bounded by the request timeout, the whole call by the
-caller's context. See [ERRORS.md](../../ERRORS.md)#retries).
+With `WithRetry` the requests that only read (`Interrogate`,
+`CounterInterrogate` with `asdu.FreezeRead`, `Read`, `TestCommand`,
+`ListFiles`) are repeated after a transient failure; commands, file
+transfers and `Send` never are. The rules are in
+[ERRORS.md](../../ERRORS.md#retries).
 
 ### Raw send
 
@@ -375,7 +347,11 @@ var ProcessCommands []asdu.TypeID // types 45..51 and 58..64
 `Mux` rejects a type without a handler ("unknown type identification") and,
 for system commands, process commands and parameters, a cause other than
 activation or deactivation ("unknown cause of transmission"; `C_RD_NA_1`
-requires "request"). File transfer and private types reach their handler
+requires "request"). Clock synchronization, reset process, the test
+commands and the parameters of measured values (`C_CS_NA_1`, `C_RP_NA_1`,
+`C_TS_NA_1`, `C_TS_TA_1`, `P_ME_NA_1`, `P_ME_NB_1`, `P_ME_NC_1`) accept
+activation only: a deactivation of them is refused with cause 45 (since
+v0.3.0). File transfer and private types reach their handler
 with any cause. An ASDU without information objects (VSQ of zero) never
 reaches a handler: it is rejected as an unknown type identification.
 `Handle(nil, t)` removes a registration.
@@ -708,7 +684,7 @@ Time tag rules:
 The A-Profile of IEC 62351-5:2023 as IEC TS 60870-5-7:2025 applies it to
 IEC 60870-5-104 and -101. Applications make an `Endpoint` and hand it to
 `client.WithSecurity` or `server.WithSecurity`; the codec is exported for
-tools and tests. See [SECURITY.md](../../SECURITY.md)#application-layer-security-iec-62351-5).
+tools and tests. See [SECURITY.md](../../SECURITY.md#application-layer-security-iec-62351-5).
 
 ### Endpoint
 
@@ -876,7 +852,8 @@ func AssociationOf(raw []byte, p asdu.Params) (aim uint16, ok bool) // the AIM o
 
 Errors, all wrapped with detail: `ErrMessage`, `ErrNotReady`,
 `ErrUnsecured`, `ErrAuthentication`, `ErrReplay`, `ErrUnexpected`,
-`ErrCertificate`, `ErrAlgorithm`, `ErrProcedure`, `ErrConfig`.
+`ErrCertificate`, `ErrAlgorithm`, `ErrProcedure`, `ErrConfig`,
+`ErrNotPermitted`. Their meaning: [ERRORS.md](../../ERRORS.md#application-layer-security-errors).
 
 ## Package `apci`
 
@@ -891,7 +868,7 @@ type Params struct {
 }
 func DefaultParams() Params            // 12, 8, 30s, 15s, 10s, 20s
 func (p Params) WithDefaults() Params  // fills zero K, W, T0, T1, T2
-func (p Params) Validate() error       // 1 ≤ W ≤ K ≤ 32767, T2 < T1, T3 ≥ 0
+func (p Params) Validate() error       // 1 ≤ K ≤ 32767, 1 ≤ W ≤ 32767 (independent of K), T2 < T1, timers positive, T3 ≥ 0
 
 const DefaultPort, DefaultTLSPort = 2404, 19998
 ```
@@ -913,7 +890,7 @@ type Frame struct {
 func NewI(sendSeq, recvSeq uint16, asdu []byte) Frame
 func NewS(recvSeq uint16) Frame
 func NewU(fn UFunction) Frame
-func Parse(b []byte) (Frame, error)       // one whole APDU; ASDU aliases b
+func Parse(b []byte) (Frame, error)       // one whole APDU; ASDU aliases b; an I frame without ASDU is ErrInvalidLength
 func ReadFrame(r io.Reader) (Frame, error) // reads exactly one APDU
 func (f Frame) MarshalBinary() ([]byte, error)
 func (f Frame) AppendBinary(b []byte) ([]byte, error)

@@ -10,7 +10,7 @@ Package server is the protection equipment of IEC 60870-5-103: the secondary sta
 
   - identification after reset CU and reset FCB, and once after start (clause 7.4.1, table 8);
   - time synchronization (clause 7.4.2): the server keeps the clock offset, answers with ASDU 6 and flags its time tags invalid until the first synchronization and when none came for [Config.SyncTimeout](#func-config-synctimeout);
-  - the disturbance data transfer of clause 7.4.7 from a [DisturbanceSource](#type-disturbancesource), when one is configured.
+  - the disturbance data transfer of clause 7.4.7 from a [DisturbanceSource](#type-disturbancesource), when one is configured; the selection of a record whose number of channels (NOC) or of values per channel (NOE) does not fit its field is answered with TOO 34.
 
 The application answers general interrogations, general commands and generic services through the helpers [Server.AnswerGI](#func-server-answergi), [Server.AckCommand](#func-server-ackcommand), [Server.GenericAnswer](#func-server-genericanswer) and [Server.GenericIdentAnswer](#func-server-genericidentanswer).
 

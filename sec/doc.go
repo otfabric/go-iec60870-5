@@ -34,6 +34,6 @@
 // open-source implementation github.com/cB-Sigma/iec60870 (Apache-2.0),
 // which states that it follows licensed copies of both standards; the code
 // is this module's own. Interoperability with that implementation is tested
-// (the module interop/cbsigma of this repository); conformance to the
+// (the module iec104/interop/cbsigma of this repository); conformance to the
 // standards is not established independently. See SECURITY.md.
 package sec

@@ -66,7 +66,9 @@ var (
 	ErrInvalidStart = errors.New("apci: invalid start byte")
 
 	// ErrInvalidLength reports a length octet outside 4..253, a buffer that
-	// does not match its length octet, or an S/U frame carrying a payload.
+	// does not match its length octet, an S/U frame carrying a payload, or
+	// an I frame without one (IEC 60870-5-104 clause 5: an I-format APDU
+	// always contains an ASDU).
 	ErrInvalidLength = errors.New("apci: invalid APDU length")
 
 	// ErrInvalidControl reports a control field that is not a valid I, S or
@@ -245,8 +247,10 @@ type Params struct {
 	K int
 
 	// W is the number of received I frames after which a station must send
-	// an acknowledgement at the latest. Range 1..32767, default 8. The
-	// standard recommends W <= 2K/3.
+	// an acknowledgement at the latest. Range 1..32767, default 8,
+	// independent of K (IEC 60870-5-104 ed. 1, 5.5 and the parameter table
+	// of clause 9), which only recommends W <= 2K/3. W relates to the K of
+	// the peer, not to the local one.
 	W int
 
 	// T0 is the connection establishment timeout. Default 30s.
@@ -284,7 +288,7 @@ DefaultParams returns the default values from IEC 60870-5-104 clause 9.
 func (p Params) Validate() error
 ```
 
-Validate reports whether p is usable. It enforces the hard limits of the standard (1 \<= W \<= K \<= 32767, positive timers, T2 \< T1) and not its recommendations.
+Validate reports whether p is usable. It enforces the hard limits of IEC 60870-5-104 ed. 1, 5.5 and clause 9 (1 \<= K \<= 32767, 1 \<= W \<= 32767, T2 \< T1) and not its recommendations (W \<= 2K/3). The timers only have to be positive: clause 9 gives 1..255 s in steps of 1 s, which the library does not enforce so that test set-ups can use shorter values; T3 = 0 disables the idle test, an extension.
 
 #### func (Params) WithDefaults
 

@@ -15,6 +15,10 @@ import (
 //     type identification"
 //   - a cause of transmission that is not valid for the type in control
 //     direction is mirrored with cause "unknown cause of transmission"
+//     (deactivation is valid only for the commands, interrogation,
+//     counter interrogation and parameter activation; C_CS_NA_1,
+//     C_RP_NA_1, C_TS_TA_1 and P_ME_NA_1..P_ME_NC_1 are activated only,
+//     IEC 60870-5-104 7.1, 7.6, 7.9, 7.10, 8.8)
 //
 // Handlers therefore only see requests they are expected to act on. A
 // handler that does not know the addressed object answers with
@@ -81,10 +85,19 @@ func (m *Mux) HandleASDU(s *Session, a *asdu.ASDU) {
 
 // validCause reports whether the cause of transmission of a is one a
 // controlling station may use for its type.
+//
+// Clock synchronization (IEC 60870-5-104 ed. 1, 7.6), reset process (7.1,
+// figure 20), test command (7.10, and for C_TS_TA_1 the causes listed in
+// 8.8) and the parameters of measured values (7.9) are activated only:
+// they have no deactivation.
 func validCause(a *asdu.ASDU) bool {
 	switch {
 	case a.Type == asdu.C_RD_NA_1:
 		return a.Cause == asdu.CauseRequest
+	case a.Type == asdu.C_CS_NA_1, a.Type == asdu.C_RP_NA_1,
+		a.Type == asdu.C_TS_NA_1, a.Type == asdu.C_TS_TA_1,
+		a.Type == asdu.P_ME_NA_1, a.Type == asdu.P_ME_NB_1, a.Type == asdu.P_ME_NC_1:
+		return a.Cause == asdu.CauseActivation
 	case a.Type >= asdu.F_FR_NA_1 || !a.Type.InControlDirection():
 		// File transfer and private types: left to the handler.
 		return true

@@ -16,7 +16,11 @@ The procedures implemented (IEC 60870-5-2 clause 4):
   - S2 send/confirm: [Primary.SendConfirm](#func-primary-sendconfirm), [Primary.ResetLink](#func-primary-resetlink), [Primary.ResetUser](#func-primary-resetuser), [Balanced.Send](#func-balanced-send), [Balanced.Test](#func-balanced-test)
   - S3 request/respond: [Primary.RequestStatus](#func-primary-requeststatus), [Primary.RequestData](#func-primary-requestdata)
 
-with the frame count bit (FCB/FCV) protocol: a primary toggles FCB for every new message with FCV set and repeats a message with the same FCB after a time-out; a secondary that receives a repeated FCB resends its previous response without processing the message again.
+with the frame count bit (FCB/FCV) protocol: a primary toggles FCB for every new message with FCV set and repeats a message with the same FCB after a time-out; a secondary that receives a repeated FCB resends its previous response without processing the message again. With one bit, a repetition that arrives after the next message cannot be told from a new message (TestRepetitionAfterTheNextMessage).
+
+A primary that receives only responses that cannot answer its message (a late answer to an earlier one, a wrong function code) until the last time-out returns an error wrapping both ErrUnexpected and ErrTimeout, so a caller that re-initializes the link after ErrTimeout does so in that case too.
+
+[Config.FrameGap](#func-config-framegap) (default [Config.Timeout](#func-config-timeout), negative disables) discards an unfinished frame when the line stays idle longer than that inside it (IEC 60870-5-1 6.2.4.2, rules R2 and R4), using [ft12.Decoder.Gap](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/ft12#Decoder.Gap).
 
 ## Constants
 
@@ -79,7 +83,9 @@ var (
 	// implemented.
 	ErrNotImplemented = errors.New("link: link service not implemented")
 	// ErrUnexpected reports a response that does not answer the request:
-	// a wrong function code or the address of another station.
+	// a wrong function code or the address of another station. When only
+	// such responses came until the last time-out, the error also wraps
+	// [ErrTimeout]: the secondary did not answer the message.
 	ErrUnexpected = errors.New("link: unexpected response")
 	// ErrInvalidConfig reports a Config a station cannot be built with.
 	ErrInvalidConfig = errors.New("link: invalid configuration")
@@ -273,6 +279,18 @@ type Config struct {
 	// own address and accepts either. Responses with either address are
 	// accepted whatever this says. Unbalanced stations ignore it.
 	SenderAddr bool
+
+	// FrameGap is how long the line may stay idle inside a frame: octets
+	// of a frame whose next octet comes later are discarded as a frame
+	// that never ended (IEC 60870-5-1 6.2.4.2, rules R2 and R4, which
+	// leave no idle interval between the characters of a frame). Without
+	// it a start character in line noise, or a peer that stopped in the
+	// middle of a frame, makes the station take the octets of the next
+	// frames as the rest of that one: with L = 255 the next 261 octets.
+	// Zero means Timeout; negative disables the check. Over a transport
+	// that splits frames with pauses (a terminal server on a congested
+	// network) choose it above the longest pause.
+	FrameGap time.Duration
 
 	// OnFrame, when set, is called for every frame sent (tx true) and
 	// received. It runs on the station's goroutines and must not block.
