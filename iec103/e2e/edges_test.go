@@ -166,10 +166,18 @@ func TestDisturbanceIncomplete(t *testing.T) {
 	if !errors.Is(err, iec103.ErrNegative) || rec == nil || len(rec.Channels) != 2 {
 		t.Fatal(rec, err)
 	}
-	r.rec.mu.Lock()
-	defer r.rec.mu.Unlock()
-	if len(r.rec.acks) != 1 || r.rec.acks[0] {
-		t.Fatal(r.rec.acks)
+	// The server records the acknowledgement when the next poll delivers it.
+	var acks []bool
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		r.rec.mu.Lock()
+		acks = append([]bool(nil), r.rec.acks...)
+		r.rec.mu.Unlock()
+		if len(acks) > 0 || time.Now().After(deadline) {
+			break
+		}
+	}
+	if len(acks) != 1 || acks[0] {
+		t.Fatal(acks)
 	}
 }
 
