@@ -14,8 +14,9 @@ function type (FUN) and information number (INF).
 | `iec103/examples/quickstart` | both sides in one program; `make examples` runs it |
 
 What is implemented, clause by clause, and how it is verified:
-[INTEROPERABILITY.md](INTEROPERABILITY.md). There is no interoperability
-evidence against an independent implementation yet.
+[INTEROPERABILITY.md](INTEROPERABILITY.md). The server is run against the
+clients of four independent stacks and the client against one server whose
+answers deviate from the standard (`make interop-iec103`, `iec103/interop`).
 
 The text we hold is IEC 60870-5-103:1997 in its identical Russian adoption
 GOST R IEC 60870-5-103-2005, which keeps the IEC clause numbering. Clause

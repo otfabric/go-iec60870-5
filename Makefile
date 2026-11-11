@@ -4,7 +4,7 @@
 
 .DEFAULT_GOAL := help
 
-.PHONY: help all build examples fmt fmt-check lint lint-ci vet vuln test e2e coverage coverage-check coverage-pkg-check coverpkg-check cover bench fuzz chaos cross check clean interop interop-iec101 test-interop docs-check captures-verify captures-fetch captures-extended captures-oracle captures-manifest
+.PHONY: help all build examples fmt fmt-check lint lint-ci vet vuln test e2e coverage coverage-check coverage-pkg-check coverpkg-check cover bench fuzz chaos cross check clean interop interop-iec101 interop-iec103 test-interop docs-check captures-verify captures-fetch captures-extended captures-oracle captures-manifest
 help: ## This help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -168,6 +168,10 @@ interop: test-interop ## Alias for test-interop
 interop-iec101: ## IEC 101 against the lib60870-C and cB-Sigma images of iec60870-5-interop (needs Docker; images: iec101/interop/harness.go)
 	@echo "Running IEC 101 interop tests"
 	@IEC101_REQUIRE_INTEROP=$${IEC101_REQUIRE_INTEROP:-1} go test -tags=$(INTEROP_TAGS) -count=1 -timeout=40m ./iec101/interop/...
+
+interop-iec103: ## IEC 103 against the vitusdong, ARIEC103, Open103 and go-iecp5 images of iec60870-5-interop (needs Docker; images: iec103/interop/harness.go; V=1 for -v)
+	@echo "Running IEC 103 interop tests"
+	@IEC103_REQUIRE_INTEROP=$${IEC103_REQUIRE_INTEROP:-1} go test -tags=$(INTEROP_TAGS) -count=1 -timeout=40m $(if $(V),-v,) ./iec103/interop/...
 
 test-cbsigma: ## Run the IEC 62351-5 differential tests against cB-Sigma/iec60870 (a module of its own, needs Go 1.26)
 	@echo "Running the application-layer security tests against cB-Sigma/iec60870"

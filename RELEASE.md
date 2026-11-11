@@ -61,6 +61,11 @@ behaviours change; see "Behaviour changes".
   is ignored; INF 73 is accepted with ASDU 4; ASDU 3 and 9 carry up to 127
   measurands (recorded equipment sends 14 and 16; the standard says four
   and nine).
+- Interop suite `iec103/interop` (`make interop-iec103`): the clients of
+  vitusdong/iec103-dotnet, ARIEC103, Open103 and go-iecp5 replay the
+  iec60870-5-interop cases against the server (51 pass, 0 fail, 8 known
+  client differences); the client runs against the vitusdong server, whose
+  deviations are asserted as known differences.
 
 ### Application-layer security (checked against IEC TS 60870-5-7:2025)
 
