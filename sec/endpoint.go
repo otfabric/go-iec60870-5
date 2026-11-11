@@ -359,7 +359,11 @@ func (e *Endpoint) flushReports(now time.Time, out [][]byte) [][]byte {
 			continue
 		}
 		v := e.stats[s]
-		obj := asdu.IntegratedTotal{IOA: e.cfg.Reports[s].IOA, Value: int32(v), Sequence: e.reportSeq[s] & 0x1F,
+		// The counter reading is I32 (IEC 60870-5-101 7.2.6.9) and the
+		// statistic counts modulo 2^32: send its bit pattern, the sign bit
+		// moved separately so no conversion changes a value.
+		reading := int32(v&0x7FFFFFFF) | int32(v>>31&1)<<31
+		obj := asdu.IntegratedTotal{IOA: e.cfg.Reports[s].IOA, Value: reading, Sequence: e.reportSeq[s] & 0x1F,
 			Carry: v < e.reported[s], Time: asdu.Timestamp{Time: now}}
 		a := asdu.New(asdu.CauseSpontaneous, e.cfg.CommonAddr, obj)
 		a.Originator = e.cfg.Originator

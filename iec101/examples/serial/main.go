@@ -15,6 +15,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"net"
 	"os"
 	"os/signal"
@@ -31,6 +32,7 @@ func main() {
 	ca := flag.Uint("ca", 1, "common address of the controlled station")
 	balanced := flag.Bool("balanced", false, "balanced transmission")
 	flag.Parse()
+	link16, ca16 := octets2("link", *linkAddr), octets2("ca", *ca)
 
 	conn, err := net.DialTimeout("tcp", *addr, 5*time.Second)
 	if err != nil {
@@ -41,7 +43,7 @@ func main() {
 		p.Mode = iec101.ModeBalanced
 	}
 	c, err := client.New(conn, client.Config{
-		Params: p, LinkAddr: uint16(*linkAddr),
+		Params: p, LinkAddr: link16,
 		Handler: func(a *asdu.ASDU) { fmt.Println(a) },
 		OnState: func(s iec101.State, err error) { log.Printf("link %s %v", s, err) },
 	})
@@ -55,8 +57,19 @@ func main() {
 	if err := c.WaitUp(ctx); err != nil {
 		log.Fatal(err)
 	}
-	if _, err := c.Interrogate(ctx, asdu.CommonAddr(*ca), asdu.QOIStation); err != nil {
+	if _, err := c.Interrogate(ctx, asdu.CommonAddr(ca16), asdu.QOIStation); err != nil {
 		log.Print(err)
 	}
 	<-ctx.Done()
+}
+
+// octets2 returns the value of flag name, which must fit two octets: the
+// link address and the common address of IEC 60870-5-101 are at most two
+// octets each.
+func octets2(name string, v uint) uint16 {
+	if v <= math.MaxUint16 {
+		return uint16(v)
+	}
+	log.Fatalf("-%s %d: at most %d", name, v, math.MaxUint16)
+	return 0
 }

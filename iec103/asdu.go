@@ -215,9 +215,17 @@ func (r *reader) value() (Value, error) {
 	return Value{GDD: g, Data: append([]byte{}, r.take(n)...)}, nil
 }
 
+// i16 decodes a little-endian two's complement integer octet by octet, so
+// no conversion between signed and unsigned types can change a value.
+func (r *reader) i16() int16 { b := r.take(2); return int16(b[0]) | int16(b[1])<<8 }
+
 func (r *reader) gin() GIN { v := r.take(2); return GIN{Group: v[0], Entry: v[1]} }
 
 func appendU16(b []byte, v uint16) []byte { return binary.LittleEndian.AppendUint16(b, v) }
+
+// appendI16 appends v as a little-endian two's complement integer.
+func appendI16(b []byte, v int16) []byte { return append(b, byte(v&0xFF), byte(v>>8&0xFF)) }
+
 func appendF32(b []byte, v float32) []byte {
 	return binary.LittleEndian.AppendUint32(b, math.Float32bits(v))
 }

@@ -160,14 +160,14 @@ func (a *ASDU) AppendTo(b []byte, p Params) ([]byte, error) {
 	}
 	if s, ok := a.Body.(Sequence); ok {
 		n := s.Objects()
-		if n > 0x7F {
+		if n < 0 || n > 0x7F {
 			return nil, fmt.Errorf("%w: %d information objects, the VSQ counts at most 127", ErrInvalid, n)
 		}
 		vsq = vsq&0x80 | VSQ(n)
 	}
-	b = append(b, byte(t), byte(vsq), byte(a.Cause), byte(a.CommonAddr))
+	b = append(b, byte(t), byte(vsq), byte(a.Cause), byte(a.CommonAddr&0xFF))
 	if p.caSize() == 2 {
-		b = append(b, byte(a.CommonAddr>>8))
+		b = append(b, byte(a.CommonAddr>>8&0xFF))
 	} else if a.CommonAddr > 0xFF {
 		return nil, fmt.Errorf("%w: common address %d does not fit one octet", ErrInvalid, a.CommonAddr)
 	}
@@ -287,7 +287,7 @@ func (r *Reader) Done() error {
 // AppendUint appends v as a little-endian unsigned integer of n octets.
 func AppendUint(b []byte, v uint32, n int) []byte {
 	for i := 0; i < n; i++ {
-		b = append(b, byte(v>>(8*i)))
+		b = append(b, byte(v>>(8*i)&0xFF))
 	}
 	return b
 }

@@ -180,7 +180,9 @@ func (f Frame) Append(b []byte, p Params) ([]byte, error) {
 		if len(f.Data) > p.MaxData() {
 			return b, fmt.Errorf("%w: %d octets of user data, at most %d", ErrTooLong, len(f.Data), p.MaxData())
 		}
-		l := byte(1 + p.AddrSize + len(f.Data))
+		// L is one octet (IEC 60870-5-1 6.2.4.2, at most 255); MaxData
+		// keeps 1+AddrSize+len(Data) within it.
+		l := byte((1 + p.AddrSize + len(f.Data)) & 0xFF)
 		b = append(b, StartVariable, l, l, StartVariable)
 	} else {
 		b = append(b, StartFixed)
@@ -189,9 +191,9 @@ func (f Frame) Append(b []byte, p Params) ([]byte, error) {
 	b = append(b, f.Control)
 	switch p.AddrSize {
 	case 1:
-		b = append(b, byte(f.Addr))
+		b = append(b, byte(f.Addr&0xFF))
 	case 2:
-		b = append(b, byte(f.Addr), byte(f.Addr>>8))
+		b = append(b, byte(f.Addr&0xFF), byte(f.Addr>>8&0xFF))
 	}
 	if f.Kind == KindVariable {
 		b = append(b, f.Data...)
