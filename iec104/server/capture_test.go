@@ -59,6 +59,7 @@ const (
 	diffAckBeforeStop    = "the server confirms STOPDT once its I frames are acknowledged (IEC 60870-5-104 ed. 2, 5.3); the recorded station confirmed with frames outstanding, so the scripted controlling station acknowledges them first"
 	diffMirrorQualifier  = "the recorded station mirrored single commands with another qualifier (SCO 0x28 answered with 0x08); Session.Confirm and Session.Terminate mirror the command as received"
 	diffMalformedRequest = "a request whose length does not match its type (the attacker's C_RD_NA_1 with an extra octet, C_SE_NA_1 two octets short): the server drops it without an answer and serves on (LIMITATIONS.md); the recorded station answered some of them with a negative confirmation"
+	diffClockConfirm     = "the recorded station (the MIO8 RTU) confirms clock synchronization with a time other than the one it received (2.8 s earlier: its clock before the correction, it appears); Session.Confirm mirrors the request. Which time the confirmation carries is not checked against a text we hold"
 	diffSegments         = "FileServer sends segments of up to 236 octets (the most an ASDU of 249 octets holds); the recorded station cut them at 233: the section content is compared instead"
 )
 
@@ -365,6 +366,11 @@ func replayServer(t *testing.T, a *capture.Analysis, checkMalformed bool) server
 					segGot[[2]int{int(gs.Name), int(gs.Section)}] = append(segGot[[2]int{int(gs.Name), int(gs.Section)}], gs.Data...)
 					out.diffs[diffSegments]++
 					return ""
+				case asdu.ClockSync:
+					if w.Cause == asdu.CauseActivationCon && g.Cause == w.Cause && w.CommonAddr == g.CommonAddr && wo.IOA == g.First().Address() {
+						out.diffs[diffClockConfirm]++
+						return ""
+					}
 				case asdu.SingleCommand:
 					gc := g.First().(asdu.SingleCommand)
 					if wo.IOA == gc.IOA && wo.Value == gc.Value && wo.Qualifier != gc.Qualifier && w.Cause == g.Cause {
