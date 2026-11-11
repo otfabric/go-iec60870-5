@@ -477,7 +477,7 @@ func (r *Requester) MeasureDelay(ctx context.Context, ca asdu.CommonAddr) (time.
 	defer cancel()
 	start := time.Now()
 	sent := (start.Second()*1000 + start.Nanosecond()/int(time.Millisecond)) % 60000
-	req := asdu.New(asdu.CauseActivation, ca, asdu.DelayAcquisition{Delay: uint16(sent)})
+	req := asdu.New(asdu.CauseActivation, ca, asdu.DelayAcquisition{Delay: uint16(sent & 0xFFFF)}) // CP16Time2a: 0..59999 by the modulo
 	x, err := r.begin(ctx, req, nil, confirming)
 	if err != nil {
 		return 0, err

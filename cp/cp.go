@@ -96,7 +96,7 @@ func flags(t Timestamp) byte {
 func AppendCP16(b []byte, d time.Duration) []byte {
 	ms := d.Milliseconds()
 	ms = min(max(ms, 0), 59999)
-	return append(b, byte(ms), byte(ms>>8))
+	return append(b, byte(ms&0xFF), byte(ms>>8&0xFF))
 }
 
 // ParseCP16 decodes a CP16Time2a. Values above 59999 are returned as they

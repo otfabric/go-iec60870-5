@@ -95,19 +95,29 @@ type Value struct {
 	Data []byte
 }
 
+// octet returns n as a GDD field of one octet (DATASIZE, NUMBER), or 0
+// when n does not fit: 0 is outside both fields' ranges (clause 7.2.6.32),
+// so encoding the value fails instead of announcing a truncated count.
+func octet(n int) uint8 {
+	if n < 0 || n > math.MaxUint8 {
+		return 0
+	}
+	return uint8(n)
+}
+
 // ASCII returns an OS8ASCII value (DATASIZE = length, NUMBER = 1).
 func ASCII(s string) Value {
-	return Value{GDD: GDD{Type: DataASCII, Size: uint8(len(s)), Number: 1}, Data: []byte(s)}
+	return Value{GDD: GDD{Type: DataASCII, Size: octet(len(s)), Number: 1}, Data: []byte(s)}
 }
 
 // Uints returns values of type t (DataUint, DataIndex, DataTextNumber or
 // any other unsigned type) of size octets each, least significant octet
 // first.
 func Uints(t DataType, size int, vs ...uint64) Value {
-	v := Value{GDD: GDD{Type: t, Size: uint8(size), Number: uint8(len(vs))}}
+	v := Value{GDD: GDD{Type: t, Size: octet(size), Number: octet(len(vs))}}
 	for _, x := range vs {
 		for i := range size {
-			v.Data = append(v.Data, byte(x>>(8*i)))
+			v.Data = append(v.Data, byte(x>>(8*i)&0xFF))
 		}
 	}
 	return v
@@ -117,7 +127,9 @@ func Uints(t DataType, size int, vs ...uint64) Value {
 func Ints(size int, vs ...int64) Value {
 	u := make([]uint64, len(vs))
 	for i, x := range vs {
-		u[i] = uint64(x)
+		// The two's complement bit pattern of x, taken in two masked
+		// halves so no conversion changes a value.
+		u[i] = uint64(x>>32&0xFFFFFFFF)<<32 | uint64(x&0xFFFFFFFF)
 	}
 	v := Uints(DataInt, size, u...)
 	return v
@@ -125,7 +137,7 @@ func Ints(size int, vs ...int64) Value {
 
 // Float32s returns R32.23 values.
 func Float32s(vs ...float32) Value {
-	v := Value{GDD: GDD{Type: DataFloat32, Size: 4, Number: uint8(len(vs))}}
+	v := Value{GDD: GDD{Type: DataFloat32, Size: 4, Number: octet(len(vs))}}
 	for _, x := range vs {
 		v.Data = binary.LittleEndian.AppendUint32(v.Data, math.Float32bits(x))
 	}
@@ -134,7 +146,7 @@ func Float32s(vs ...float32) Value {
 
 // Float64s returns R64.53 values.
 func Float64s(vs ...float64) Value {
-	v := Value{GDD: GDD{Type: DataFloat64, Size: 8, Number: uint8(len(vs))}}
+	v := Value{GDD: GDD{Type: DataFloat64, Size: 8, Number: octet(len(vs))}}
 	for _, x := range vs {
 		v.Data = binary.LittleEndian.AppendUint64(v.Data, math.Float64bits(x))
 	}
@@ -160,7 +172,7 @@ func Structure(fields ...Value) (Value, error) {
 	if len(d) == 0 || len(d) > 255 {
 		return Value{}, fmt.Errorf("%w: structure of %d octets, DATASIZE is 1..255", ErrInvalid, len(d))
 	}
-	return Value{GDD: GDD{Type: DataStructure, Size: uint8(len(d)), Number: 1}, Data: d}, nil
+	return Value{GDD: GDD{Type: DataStructure, Size: octet(len(d)), Number: 1}, Data: d}, nil
 }
 
 // Text returns the data as a string (for DataASCII).
@@ -190,7 +202,13 @@ func (v Value) Int(i int) (int64, error) {
 	if bits < 64 && x&(1<<(bits-1)) != 0 {
 		x |= ^uint64(0) << bits
 	}
-	return int64(x), nil
+	// Reassemble the two's complement value from its sign bit and the
+	// 63 bits below it, so no conversion changes a value.
+	n := int64(x & math.MaxInt64)
+	if x&(1<<63) != 0 {
+		n += math.MinInt64
+	}
+	return n, nil
 }
 
 // Float returns element i of a DataFloat32 or DataFloat64 value.

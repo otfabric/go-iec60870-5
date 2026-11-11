@@ -203,7 +203,8 @@ func (a *assembler) frame(p Packet) error {
 		c.closed = true
 	}
 	if payload := t[thl:]; len(payload) > 0 && !syn {
-		end := seq + uint32(len(payload))
+		// Sequence numbers count modulo 2^32 (RFC 9293 3.4).
+		end := seq + uint32(int64(len(payload))&0xFFFFFFFF)
 		f.segs = append(f.segs, segment{frame: p.Num, time: p.Time, seq: seq, end: end, payload: payload})
 	}
 	return nil
