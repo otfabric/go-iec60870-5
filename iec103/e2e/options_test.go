@@ -36,8 +36,12 @@ func TestSyncDelay(t *testing.T) {
 		if _, err := r.c.ClockSync(ctx(t), want); err != nil {
 			t.Fatal(err)
 		}
-		if d := (<-got).Sub(want); d != c.want {
-			t.Errorf("bit rate %d, SyncDelay %v: correction %v, want %v", c.rate, c.delay, d, c.want)
+		// The client sends want advanced by the time the request waited for
+		// the link (it stamps at transmission), so the server's time is the
+		// correction plus that wait: a few milliseconds, more on a loaded
+		// runner.
+		if d := (<-got).Sub(want); d < c.want || d > c.want+250*time.Millisecond {
+			t.Errorf("bit rate %d, SyncDelay %v: correction %v, want %v plus the wait for the link", c.rate, c.delay, d, c.want)
 		}
 	}
 }
