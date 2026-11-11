@@ -367,6 +367,12 @@ func (l *Link) SendStamped(ctx context.Context, asdu []byte, epoch *atomic.Uint6
 }
 
 func (l *Link) send(ctx context.Context, asdu []byte, acked func(), epoch *atomic.Uint64) error {
+	if len(asdu) == 0 {
+		// IEC 60870-5-104 clause 5: an I-format APDU always contains an
+		// ASDU. Refused here, before the loop, where a write error would
+		// end the link.
+		return fmt.Errorf("%w: I frame without ASDU", apci.ErrInvalidLength)
+	}
 	if len(asdu) > apci.MaxASDULength {
 		return fmt.Errorf("%w: %d octets", apci.ErrASDUTooLong, len(asdu))
 	}

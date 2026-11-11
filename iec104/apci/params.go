@@ -28,8 +28,10 @@ type Params struct {
 	K int
 
 	// W is the number of received I frames after which a station must send
-	// an acknowledgement at the latest. Range 1..32767, default 8. The
-	// standard recommends W <= 2K/3.
+	// an acknowledgement at the latest. Range 1..32767, default 8,
+	// independent of K (IEC 60870-5-104 ed. 1, 5.5 and the parameter table
+	// of clause 9), which only recommends W <= 2K/3. W relates to the K of
+	// the peer, not to the local one.
 	W int
 
 	// T0 is the connection establishment timeout. Default 30s.
@@ -84,15 +86,18 @@ func (p Params) WithDefaults() Params {
 	return p
 }
 
-// Validate reports whether p is usable. It enforces the hard limits of the
-// standard (1 <= W <= K <= 32767, positive timers, T2 < T1) and not its
-// recommendations.
+// Validate reports whether p is usable. It enforces the hard limits of
+// IEC 60870-5-104 ed. 1, 5.5 and clause 9 (1 <= K <= 32767,
+// 1 <= W <= 32767, T2 < T1) and not its recommendations (W <= 2K/3). The
+// timers only have to be positive: clause 9 gives 1..255 s in steps of
+// 1 s, which the library does not enforce so that test set-ups can use
+// shorter values; T3 = 0 disables the idle test, an extension.
 func (p Params) Validate() error {
 	switch {
 	case p.K < 1 || p.K > SeqMask:
 		return fmt.Errorf("%w: k=%d, want 1..%d", ErrInvalidParams, p.K, SeqMask)
-	case p.W < 1 || p.W > p.K:
-		return fmt.Errorf("%w: w=%d, want 1..k (%d)", ErrInvalidParams, p.W, p.K)
+	case p.W < 1 || p.W > SeqMask:
+		return fmt.Errorf("%w: w=%d, want 1..%d", ErrInvalidParams, p.W, SeqMask)
 	case p.T0 <= 0:
 		return fmt.Errorf("%w: t0=%s, want > 0", ErrInvalidParams, p.T0)
 	case p.T1 <= 0:
