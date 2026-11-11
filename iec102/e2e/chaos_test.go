@@ -67,7 +67,8 @@ func (e *chaosExec) HandleASDU(s *server.Server, a *iec102.ASDU) {
 
 func chaos102(t *testing.T, seed int64, d time.Duration) {
 	check := serialline.Goroutines(t)
-	line := serialline.New(seed, serialline.ChaosFaults, serialline.ChaosFaults)
+	// The client's primary messages stay in order (serialline.InOrder).
+	line := serialline.New(seed, serialline.InOrder(serialline.ChaosFaults), serialline.ChaosFaults)
 	e := &chaosExec{runs: map[uint32]int{}}
 	lc := link.Config{Timeout: 60 * time.Millisecond, Retries: 3}
 	s, err := server.New(line.B, server.Config{Link: lc, LinkAddr: linkAddr, CommonAddr: commonAddr, Store: meter(), Handler: e})

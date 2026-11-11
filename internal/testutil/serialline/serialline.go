@@ -305,6 +305,17 @@ func (e *End) flushHeld() error {
 var ChaosFaults = Faults{Drop: 0.03, Dup: 0.03, Corrupt: 0.03, Noise: 0.03, Truncate: 0.02,
 	Split: 0.05, Reorder: 0.02, Delay: 0.05, MaxDelay: 20 * time.Millisecond}
 
+// InOrder returns f without Reorder: the faults of a direction that carries
+// primary messages. The FCB of IEC 60870-5-2 is one bit, so a repetition
+// a transport delivers after the next message is a new message to the
+// secondary and is executed again; a serial line never reorders, and the
+// chaos suites keep primary messages in order to check the FCB rules, not
+// that limit (LIMITATIONS.md).
+func InOrder(f Faults) Faults {
+	f.Reorder = 0
+	return f
+}
+
 // ChaosRuns returns how long each chaos seed runs and how many seeds run:
 // E2E_CHAOS_SECONDS (default 2) and E2E_CHAOS_SEEDS (default 3), the
 // variables of the IEC 104 chaos test; with -short one seed of one second.

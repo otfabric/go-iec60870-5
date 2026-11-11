@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/otfabric/go-iec60870-5/asdu"
+	"github.com/otfabric/go-iec60870-5/ft12"
 	"github.com/otfabric/go-iec60870-5/iec101"
 	"github.com/otfabric/go-iec60870-5/iec101/client"
 	"github.com/otfabric/go-iec60870-5/iec101/server"
@@ -47,9 +49,40 @@ func TestChaos(t *testing.T) {
 	}
 }
 
+// frameTrace keeps the last frames of both sides.
+type frameTrace struct {
+	mu    sync.Mutex
+	start time.Time
+	lines []string
+}
+
+func (tr *frameTrace) add(side string, tx bool, f ft12.Frame) {
+	dir := "rx"
+	if tx {
+		dir = "tx"
+	}
+	tr.note(fmt.Sprintf("%s %s %v % X", side, dir, f, f.Data))
+}
+
+func (tr *frameTrace) note(s string) {
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+	tr.lines = append(tr.lines, fmt.Sprintf("%9.3f %s", time.Since(tr.start).Seconds()*1000, s))
+	if len(tr.lines) > 4000 {
+		tr.lines = append([]string(nil), tr.lines[2000:]...)
+	}
+}
+
+func (tr *frameTrace) dump() string {
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+	return strings.Join(tr.lines, "\n")
+}
+
 // chaosStation executes each command once per information object address
 // and remembers how often it did.
 type chaosStation struct {
+	trace *frameTrace
 	mu   sync.Mutex
 	runs map[asdu.IOA]int
 	dup  []asdu.IOA
@@ -64,6 +97,9 @@ func (st *chaosStation) HandleASDU(s *server.Server, a *asdu.ASDU) {
 	case asdu.SingleCommand:
 		st.mu.Lock()
 		st.runs[o.IOA]++
+		if st.trace != nil {
+			st.trace.note(fmt.Sprintf("EXECUTE %d (%d)", o.IOA, st.runs[o.IOA]))
+		}
 		if st.runs[o.IOA] > 1 {
 			st.dup = append(st.dup, o.IOA)
 		}
@@ -81,17 +117,36 @@ func (st *chaosStation) HandleASDU(s *server.Server, a *asdu.ASDU) {
 
 func chaos101(t *testing.T, seed int64, mode iec101.Mode, d time.Duration) {
 	check := serialline.Goroutines(t)
-	line := serialline.New(seed, serialline.ChaosFaults, serialline.ChaosFaults)
+	// Primary messages stay in order (serialline.InOrder): the client's,
+	// and in balanced transmission the server's too. Responses may be
+	// reordered.
+	ab, ba := serialline.InOrder(serialline.ChaosFaults), serialline.ChaosFaults
+	if mode == iec101.ModeBalanced {
+		ba = serialline.InOrder(ba)
+	}
+	line := serialline.New(seed, ab, ba)
 	p := params(mode)
 	p.ASDU.IOASize = 3 // room for a new address per command
 	st := &chaosStation{runs: map[asdu.IOA]int{}}
-	s, err := server.New(line.B, server.Config{Params: p, LinkAddr: 3, Remote: 1, CommonAddr: ca, Handler: st,
+	// The frames of both sides, the last few thousand: a violation shows
+	// how it came about.
+	tr := &frameTrace{start: time.Now()}
+	sp, cp := p, p
+	sp.Link.OnFrame = func(tx bool, f ft12.Frame) { tr.add("server", tx, f) }
+	cp.Link.OnFrame = func(tx bool, f ft12.Frame) { tr.add("client", tx, f) }
+	st.trace = tr
+	defer func() {
+		if t.Failed() {
+			t.Log(tr.dump())
+		}
+	}()
+	s, err := server.New(line.B, server.Config{Params: sp, LinkAddr: 3, Remote: 1, CommonAddr: ca, Handler: st,
 		RetryInterval: 20 * time.Millisecond, QueueSize: 256})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var spont atomic.Int64
-	c, err := client.New(line.A, client.Config{Params: p, LinkAddr: 3, OwnAddr: 1,
+	c, err := client.New(line.A, client.Config{Params: cp, LinkAddr: 3, OwnAddr: 1,
 		PollInterval: 5 * time.Millisecond, RetryInterval: 20 * time.Millisecond, TestInterval: 30 * time.Millisecond,
 		RequestTimeout: time.Second, Handler: func(a *asdu.ASDU) {
 			if a.Cause == asdu.CauseSpontaneous {
