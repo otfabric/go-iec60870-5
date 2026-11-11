@@ -205,6 +205,9 @@ func TestInterrogation(t *testing.T) {
 			}
 		}
 		// Confirmation and termination frame the data, and reach the handler.
+		// The handler runs on its own goroutine: the termination can reach
+		// it after Interrogate has returned.
+		testutil.Eventually(t, "the handler to see the termination", func() bool { return len(rec.all()) >= len(data)+2 })
 		all := rec.all()
 		if n := len(all); n != len(data)+2 || all[0].Cause != asdu.CauseActivationCon || all[n-1].Cause != asdu.CauseActivationTerm {
 			t.Errorf("handler saw %d ASDUs for %d data ASDUs: %v", n, len(data), all)
@@ -443,13 +446,20 @@ func TestFileTransfer(t *testing.T) {
 			if !bytes.Equal(got, f.Content()) {
 				t.Errorf("file %d: got %d octets that are not the %d of the fixture", f.IOA, len(got), f.Size)
 			}
-			sections := 0
-			for _, a := range rec.all() {
-				if _, ok := a.First().(asdu.SectionReady); ok {
-					sections++
+			// The handler runs on its own goroutine: the last section ready
+			// can reach it after GetFile has returned.
+			want := (f.Size + f.SectionSize - 1) / f.SectionSize
+			countSections := func() int {
+				n := 0
+				for _, a := range rec.all() {
+					if _, ok := a.First().(asdu.SectionReady); ok {
+						n++
+					}
 				}
+				return n
 			}
-			if want := (f.Size + f.SectionSize - 1) / f.SectionSize; sections != want {
+			testutil.Eventually(t, "every section ready", func() bool { return countSections() >= want })
+			if sections := countSections(); sections != want {
 				t.Errorf("file %d: %d sections, want %d", f.IOA, sections, want)
 			}
 		}
