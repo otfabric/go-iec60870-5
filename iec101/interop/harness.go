@@ -25,12 +25,19 @@ import (
 	"github.com/otfabric/go-iec60870-5/iec101/server"
 )
 
-// The references: otfabric/iec60870-5-interop v0.3.0 (contract 2.2),
-// lib60870-C v2.4.1 and cB-Sigma/iec60870 v0.3.0, pinned by multi-arch
-// index digest (the release's manifest.json).
+// The references: otfabric/iec60870-5-interop contract 2.3 (field sizes),
+// lib60870-C v2.4.1, cB-Sigma/iec60870 v0.3.0 and digitalpetri/iec60870
+// 33e52b3.
+//
+// TODO(pin): the images below are local ":dev" builds of the harness branch
+// feat/iec101-digitalpetri (make image-iec101-lib60870 image-iec101-cbsigma
+// image-iec101-digitalpetri). Pin each one by its multi-arch index digest
+// (the release's manifest.json) once that harness release is published, as
+// v0.3.0 was pinned before.
 var stacks = []struct{ name, env, image string }{
-	{"lib60870", "IEC101_INTEROP_LIB60870_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec101-lib60870@sha256:4ae9405390e397f85a37a38c0f078f4b3a10f3f0eca278b247ed6ad51a4480b8"},
-	{"cbsigma", "IEC101_INTEROP_CBSIGMA_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec101-cbsigma@sha256:31d0e159182cd2271ae3579b73c8ae1833447f9428d81badf5f2de784bdd5d86"},
+	{"lib60870", "IEC101_INTEROP_LIB60870_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec101-lib60870:dev"},
+	{"cbsigma", "IEC101_INTEROP_CBSIGMA_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec101-cbsigma:dev"},
+	{"digitalpetri", "IEC101_INTEROP_DIGITALPETRI_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec101-digitalpetri:dev"},
 }
 
 var modes = []string{"unbalanced", "balanced"}
@@ -41,11 +48,17 @@ type adapter struct {
 }
 
 type capabilities struct {
-	Adapter   string          `json:"adapter"`
-	Standard  string          `json:"standard"`
-	LinkModes []string        `json:"linkModes"`
-	Features  map[string]bool `json:"features"`
-	Upstream  struct {
+	Adapter   string   `json:"adapter"`
+	Standard  string   `json:"standard"`
+	LinkModes []string `json:"linkModes"`
+	// The field sizes the image takes (contract 2.3); nil for an image of
+	// contract 2.2, which takes the defaults only.
+	LinkAddressSizes []int           `json:"linkAddressSizes"`
+	CotSizes         []int           `json:"cotSizes"`
+	CaSizes          []int           `json:"caSizes"`
+	IoaSizes         []int           `json:"ioaSizes"`
+	Features         map[string]bool `json:"features"`
+	Upstream         struct {
 		Name, Version, Revision string
 		IndependentEngine       bool `json:"independentEngine"`
 	} `json:"upstream"`
@@ -127,11 +140,16 @@ func adapters(t *testing.T) []adapter {
 
 func linkFlags(mode string) []string { return []string{"--link-mode", mode} }
 
-func params(mode string) iec101.Params {
+func params(mode string) iec101.Params { return paramsFor(mode, defaultFields()) }
+
+// paramsFor are this module's parameters for the field sizes of a run.
+func paramsFor(mode string, f fields) iec101.Params {
 	p := iec101.DefaultParams() // the contract's defaults: address 1 octet, COT 1, CA 1, IOA 2
 	if mode == "balanced" {
 		p.Mode = iec101.ModeBalanced
 	}
+	p.Link.FT12.AddrSize = f.addrSize
+	p.ASDU.CauseSize, p.ASDU.CommonAddrSize, p.ASDU.IOASize = f.cot, f.ca, f.ioa
 	p.Link.Timeout = 500 * time.Millisecond
 	return p
 }
@@ -472,7 +490,7 @@ func withTime(o asdu.InformationObject) asdu.InformationObject {
 
 // serve accepts connections on ln one at a time, as a line has one
 // controlling station, and runs a fresh server on each.
-func serve(t *testing.T, ln net.Listener, p iec101.Params, st *station) {
+func serve(t *testing.T, ln net.Listener, p iec101.Params, linkAddr uint16, st *station) {
 	t.Helper()
 	done := make(chan struct{})
 	go func() {
@@ -482,7 +500,7 @@ func serve(t *testing.T, ln net.Listener, p iec101.Params, st *station) {
 			if err != nil {
 				return
 			}
-			s, err := server.New(conn, server.Config{Params: p, LinkAddr: 1, Remote: 1, CommonAddr: st.ca, Handler: st, NoEndOfInit: true})
+			s, err := server.New(conn, server.Config{Params: p, LinkAddr: linkAddr, Remote: linkAddr, CommonAddr: st.ca, Handler: st, NoEndOfInit: true})
 			if err != nil {
 				t.Error(err)
 				_ = conn.Close()
@@ -571,11 +589,12 @@ func runClient(ctx context.Context, a adapter, port int, mode string, op []strin
 }
 
 // startServer runs a reference server and returns its host port.
-func startServer(t *testing.T, a adapter, mode string) int {
+func startServer(t *testing.T, a adapter, mode string, extra ...string) int {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	args := append([]string{"run", "-d", "-p", "127.0.0.1::2401", a.image, "server"}, linkFlags(mode)...)
+	args = append(args, extra...)
 	out, err := docker(ctx, args...)
 	if err != nil {
 		t.Fatal(err)

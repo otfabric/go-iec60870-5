@@ -172,7 +172,7 @@ test-interop: ## IEC 104 against the lib60870, OpenMUC, wendy512, cB-Sigma and p
 
 interop: test-interop ## Alias for test-interop
 
-interop-iec101: ## IEC 101 against the lib60870-C and cB-Sigma images of iec60870-5-interop (needs Docker; images: iec101/interop/harness.go)
+interop-iec101: ## IEC 101 against the lib60870-C, cB-Sigma and digitalpetri images of iec60870-5-interop (needs Docker; images: iec101/interop/harness.go)
 	@echo "Running IEC 101 interop tests"
 	@IEC101_REQUIRE_INTEROP=$${IEC101_REQUIRE_INTEROP:-1} go test -tags=$(INTEROP_TAGS) -count=1 -timeout=40m ./iec101/interop/...
 

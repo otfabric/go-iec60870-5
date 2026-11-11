@@ -31,10 +31,13 @@ own list: [docs/iec104/LIMITATIONS.md](docs/iec104/LIMITATIONS.md).
 
 ## IEC 60870-5-101
 
-- **Independent interoperability evidence covers the default field sizes
-  only**, against two references that are not fully independent of each
-  other (the Interop workflow runs the suite). No run against
-  digitalpetri/iec60870 or another third stack. See
+- **Independent interoperability evidence** covers the default field sizes
+  and the sets 2/2/2/3, 1/2/1/3, 2/1/2/2 and (balanced) 0/1/1/2 against
+  lib60870-C, cB-Sigma and digitalpetri/iec60870, so far only from a local run
+  against unpinned `:dev` images of the harness's contract 2.3 (pinning is a
+  TODO in `iec101/interop/harness.go`). Balanced against a digitalpetri
+  station nothing beyond the link start-up interworks: the station does not
+  initialize its own direction (an upstream defect, known-bugs.tsv). See
   [INTEROPERABILITY.md](INTEROPERABILITY.md).
 - **Line idle after an error.** IEC 60870-5-101:2003 relaxes the
   inter-character rule (6.1: the receiver need not measure gaps), but after

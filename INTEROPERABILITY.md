@@ -52,10 +52,48 @@ IEC 60870-5-101:2003 6.2.1.2 (the receiver's address) interworks with it.
 cB-Sigma's adapter takes one link address for both directions and cannot
 show the difference. The harness itself runs equal addresses only.
 
-Not covered by independent runs: other field sizes, 2-octet and 0-octet
-link addresses, single character acknowledgement, multidrop, DFC set by
-the peer. cB-Sigma's IEC 101 was debugged against
-lib60870, so the two references are not fully independent of each other.
+Contract 2.3 of the harness (field sizes, a third stack) was run locally on
+2026-11-11 against `:dev` images of all three references built from the
+harness branch `feat/iec101-digitalpetri` (lib60870-C v2.4.1, cB-Sigma/iec60870
+v0.3.0, digitalpetri/iec60870 33e52b3; the images are to be pinned by digest
+after that harness release, see the TODO in `iec101/interop/harness.go`),
+`IEC101_REQUIRE_INTEROP=1`, 0 failures:
+
+| Reference | This module's client, default sizes (scenarios) | This module's client, field sizes (subtests) | Reference client against this module's server (cases) |
+|---|---|---|---|
+| lib60870-C | 5 + 5 pass | 12 + 16 pass | 61 + 64 pass |
+| cB-Sigma | 5 + 5 pass | 12 + 16 pass | 61 + 64 pass |
+| digitalpetri | 5 pass + 1 skipped (known bug) | 12 pass + 4 skipped (known bug) | 55 + 64 pass |
+
+(unbalanced + balanced). The field sizes are those of the harness: link
+address, cause, common address, object address 2/2/2/3 (link address 300),
+1/2/1/3 and 2/1/2/2 in both modes, 0/1/1/2 (no link address field) in balanced
+mode; the client runs interrogation, the broadcast common address of the size
+(255 or 65535), a read, a refused read of an address that needs the size
+(70000 with three octets) and a set point with its report. The reference
+clients replay the harness's 64 cases (33 with field sizes). Not run: the
+0/1/1/2 cases in unbalanced mode (no link address field is balanced only),
+and digitalpetri's unbalanced client on the 6 cases whose common address is
+not its link address (its master sends an ASDU to the station whose link
+address equals the common address; capability `unbalancedCommonAddress`
+false).
+
+The skips are the harness's known bug `digitalpetri-balanced-server-no-link-reset`
+(`iec101/interop/testdata/known-bugs.tsv`), reproduced by every run: a
+balanced digitalpetri station sends its user data without initializing its own
+primary direction (no request status of link, no reset of remote link), which
+IEC 60870-5-101:2003 clause 6, figures 8 and 9, requires; this module's
+balanced secondary keeps the "secondary link not reset" state and does not
+take the data (`link/balanced.go`), as cB-Sigma's does, so the station's
+answers never arrive. The suite skips those scenarios only after an
+interrogation has failed; lib60870-C and digitalpetri as controlling stations
+accept data on a link that was never reset. Not a defect of this module.
+
+Not covered by independent runs: a one-octet object address (the fixture's
+addresses need two), single character acknowledgement sent by this module,
+multidrop, DFC set by the peer. cB-Sigma's IEC 101 was debugged against
+lib60870, so those two references are not fully independent of each other;
+digitalpetri is.
 
 The implementation was checked clause by clause on 2026-11-11 against
 IEC 60870-5-101:2003 (GOST R IEC 60870-5-101-2006, an identical
