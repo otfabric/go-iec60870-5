@@ -12,6 +12,7 @@ import (
 
 	"github.com/otfabric/go-iec60870-5/asdu"
 	"github.com/otfabric/go-iec60870-5/iec104/apci"
+	"github.com/otfabric/go-iec60870-5/internal/pcapio"
 )
 
 // seg is one TCP segment of a synthetic capture.
@@ -57,7 +58,7 @@ func ipTCP(s seg) []byte {
 	ip[0] = 0x45
 	binary.BigEndian.PutUint16(ip[2:], uint16(20+len(tcp)))
 	ip[8] = 64
-	ip[9] = protoTCP
+	ip[9] = 6 // TCP
 	copy(ip[12:], src)
 	copy(ip[16:], dst)
 	return append(ip, tcp...)
@@ -90,7 +91,7 @@ func ethPcap(segs ...seg) []byte {
 	for i, s := range segs {
 		frames[i] = ether(ipTCP(s))
 	}
-	return pcapFile(linkEthernet, frames...)
+	return pcapFile(pcapio.LinkEthernet, frames...)
 }
 
 func u(fn apci.UFunction) []byte { b, _ := apci.NewU(fn).MarshalBinary(); return b }
@@ -314,10 +315,10 @@ func TestReadFormats(t *testing.T) {
 	_, _ = w.Write(ethPcap(segs...))
 	_ = w.Close()
 	for name, file := range map[string][]byte{
-		"null":   pcapFile(linkNull, frames(loop)...),
-		"sll":    pcapFile(linkSLL, frames(sll)...),
-		"vlan":   pcapFile(linkEthernet, frames(vlan)...),
-		"raw":    pcapFile(linkRaw, frames(raw)...),
+		"null":   pcapFile(pcapio.LinkNull, frames(loop)...),
+		"sll":    pcapFile(pcapio.LinkSLL, frames(sll)...),
+		"vlan":   pcapFile(pcapio.LinkEthernet, frames(vlan)...),
+		"raw":    pcapFile(pcapio.LinkRaw, frames(raw)...),
 		"gzip":   gz.Bytes(),
 		"pcapng": pcapng(frames(func(ip []byte) []byte { return ether(ip) })),
 		"bigend": bigEndian(ethPcap(segs...)),

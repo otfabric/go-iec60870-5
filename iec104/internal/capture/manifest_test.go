@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/otfabric/go-iec60870-5/asdu"
+	"github.com/otfabric/go-iec60870-5/internal/pcapio"
 )
 
 // testdata/captures/manifest.json describes every committed capture: where
@@ -266,15 +267,12 @@ func buildManifest(t *testing.T) manifest {
 // recordedSpan returns the first and last time stamp of a capture.
 func recordedSpan(t *testing.T, b []byte) string {
 	t.Helper()
-	b, err := gunzip(b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ps, err := packets(b)
+	ps, err := pcapio.Packets(b)
 	if err != nil || len(ps) == 0 {
 		t.Fatal(err)
 	}
-	return ps[0].time.Format("2006-01-02 15:04:05Z07:00") + " .. " + ps[len(ps)-1].time.Format("2006-01-02 15:04:05Z07:00")
+	first, last := pcapio.Span(ps)
+	return first.Format("2006-01-02 15:04:05Z07:00") + " .. " + last.Format("2006-01-02 15:04:05Z07:00")
 }
 
 func TestManifest(t *testing.T) {
