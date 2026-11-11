@@ -76,11 +76,9 @@ current list is [iec104/LIMITATIONS.md](iec104/LIMITATIONS.md).
 
 ## Open items before parity can be called demonstrated
 
-- Run the interop suite on the v0.3.0 pins in CI: the Interop workflow
-  runs on every push and pull request that changes more than Markdown, and
-  ran green on the v0.2.0 pins; the v0.3.0 pins have run locally only.
 - History: moving the interop suite onto otfabric/iec60870-5-interop
   images was done on 2026-11-11 (v0.2.1, with part5 as a fifth reference;
-  v0.3.0 since the library's v0.3.0).
+  v0.3.0 since the library's v0.3.0, green in the Interop workflow on the
+  v0.3.0 release commit).
 - Decide whether `iec104/client` adopts `telecontrol.Requester` (shared with
   IEC 101), only with the full IEC 104 suite green before and after.

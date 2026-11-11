@@ -3,7 +3,7 @@
 Working log of the IEC 60870-5 program (go-iec60870-5 and
 otfabric/iec60870-5-interop). Newest first. Plan: [docs/ROADMAP.md](docs/ROADMAP.md).
 
-## v0.3.0 (prepared on release/v0.3.0, not released)
+## v0.3.0 (released 2026-11-11)
 
 - Hardening: SAST (gosec, opengrep) 44 findings to 0; hostile-peer, chaos
   and fuzz suites for IEC 101, 102 and 103 and the defects they found
