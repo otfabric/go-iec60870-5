@@ -1,0 +1,519 @@
+{
+  "description": "Recorded IEC 60870-5-103 traffic and test vectors go-iec60870-5 is tested against (testdata/captures/README.md). Files are byte-identical to their sources.",
+  "evidence_levels": {
+    "A": "verified physical-device traffic",
+    "B": "credibly documented physical-device traffic",
+    "C": "independent recorded traffic, hardware origin unknown",
+    "D": "simulated or software testbed",
+    "E": "standards-derived examples or generated fixtures"
+  },
+  "sources": [
+    {
+      "id": "wireshark-mr-2917",
+      "url": "https://gitlab.com/wireshark/wireshark/-/merge_requests/2917",
+      "revision": "uploads of the merge request's first comment (2021-05-04); merged 2021-05-09",
+      "terms": "Attached to a public Wireshark merge request by its author; no licence is stated for the attachments. Wireshark itself is GPL-2.0-or-later.",
+      "notes": "Merge request \"packet-iec104.c - Add IEC 60870-5-103 Protocol Dissection\" by Chris Bontje: \"sample PCAP files providing examples of the supported ASDU types\", SEL RTAC serial-line captures (decode the RTAC serial line as IEC 103)."
+    },
+    {
+      "id": "masarray/ARIEC103",
+      "url": "https://github.com/masarray/ARIEC103/tree/ec08dd73991be646864aef55e6a5538b78129db8/samples/test-vectors",
+      "revision": "ec08dd73991be646864aef55e6a5538b78129db8",
+      "terms": "Apache-2.0 (repository licence).",
+      "notes": "\"Sanitized FT1.2 frame examples\" of the ARIEC103 .NET protocol library (samples/test-vectors/README.md), each with the decode it expects in a comment."
+    },
+    {
+      "id": "wireshark",
+      "url": "https://gitlab.com/wireshark/wireshark/-/blob/f7e10bdd477b2f8f4995aa45c8155a0768f433ab/test/captures/iec104_coverage.pcap.gz",
+      "revision": "f7e10bdd477b2f8f4995aa45c8155a0768f433ab",
+      "terms": "The Wireshark repository is GPL-2.0-or-later; the capture has no statement of its own.",
+      "notes": "The synthetic capture of the IEC 104 corpus (iec104/testdata/captures/wireshark), not committed twice: its TCP port 2406 carries generated IEC 103 frames."
+    }
+  ],
+  "files": [
+    {
+      "path": "../../../iec104/testdata/captures/wireshark/synthetic_synthetic_iec104-coverage.pcap.gz",
+      "source": "wireshark",
+      "original_name": "test/captures/iec104_coverage.pcap.gz",
+      "url": "https://gitlab.com/wireshark/wireshark/-/blob/f7e10bdd477b2f8f4995aa45c8155a0768f433ab/test/captures/iec104_coverage.pcap.gz",
+      "size": 13716,
+      "sha256": "792ca959feeba8476ea6a2b5dea04a281c515b1c9a82d13c2f13c5a5a27531a9",
+      "format": "pcap (gzip), Ethernet, IPv4, TCP 2406 (IEC 103 part)",
+      "recorded": "2023-11-14 22:13:20Z .. 2023-11-14 22:23:49Z",
+      "evidence": "E",
+      "evidence_basis": "Generated for Wireshark's dissector tests; the frames follow no exchange.",
+      "systems": [
+        "generated controlling system",
+        "generated protection equipment"
+      ],
+      "operations": "the ASDUs the Wireshark dissector knows, in both directions",
+      "privacy": "documentation addresses (192.0.2.0/24)",
+      "missing_for_verification": "-",
+      "counts": {
+        "lines": 1,
+        "frames": 25,
+        "single_characters": 2,
+        "fixed_frames": 9,
+        "variable_frames": 14,
+        "asdu_errors": 1,
+        "reencoded_exactly": 16,
+        "raw_bodies": 5,
+        "exchanges": 1,
+        "responses_before_first_request": 1,
+        "responses_overheard": 1,
+        "repetitions": 0,
+        "requests_abandoned": [
+          585,
+          587,
+          589,
+          617,
+          619,
+          621,
+          623,
+          625
+        ],
+        "fcb_toggles_checked": 1,
+        "primary_functions": [
+          0,
+          3,
+          9,
+          10,
+          11
+        ],
+        "secondary_functions": [
+          0,
+          8,
+          11
+        ],
+        "asdus": {
+          "controlling system ASDU 20 cause 20 FUN 160": 1,
+          "controlling system ASDU 45 cause 20 FUN 160": 1,
+          "controlling system ASDU 46 cause 20 FUN 160": 1,
+          "controlling system ASDU 6 cause 8 FUN 160": 1,
+          "controlling system ASDU 7 cause 9 FUN 160": 1,
+          "controlling system ASDU 99 cause 20 FUN 160": 1,
+          "protection equipment ASDU 1 cause 1 FUN 160": 1,
+          "protection equipment ASDU 205 cause 1 FUN 160": 1,
+          "protection equipment ASDU 5 cause 3 FUN 160": 1,
+          "protection equipment ASDU 6 cause 8 FUN 160": 1,
+          "protection equipment ASDU 77 cause 1 FUN 160": 1,
+          "protection equipment ASDU 8 cause 10 FUN 160": 1,
+          "protection equipment ASDU 9 cause 2 FUN 160": 1
+        },
+        "link_findings": [
+          "192.0.2.10:50103 -\u003e 192.0.2.20:2406: frame 589: FCB 0 in the first message with FCV set after a reset",
+          "192.0.2.10:50103 -\u003e 192.0.2.20:2406: frame 593: response fn=0 does not answer request PRM fn=11 (frame 591)",
+          "192.0.2.10:50103 -\u003e 192.0.2.20:2406: frame 595: response fn=11 without an outstanding request",
+          "192.0.2.10:50103 -\u003e 192.0.2.20:2406: frame 597: response fn=0 without an outstanding request",
+          "192.0.2.10:50103 -\u003e 192.0.2.20:2406: frame 599: response fn=11 without an outstanding request",
+          "192.0.2.10:50103 -\u003e 192.0.2.20:2406: frame 601: response fn=8 without an outstanding request",
+          "192.0.2.10:50103 -\u003e 192.0.2.20:2406: frame 603: response fn=8 without an outstanding request",
+          "192.0.2.10:50103 -\u003e 192.0.2.20:2406: frame 605: response fn=8 without an outstanding request",
+          "192.0.2.10:50103 -\u003e 192.0.2.20:2406: frame 607: response fn=8 without an outstanding request",
+          "192.0.2.10:50103 -\u003e 192.0.2.20:2406: frame 609: response fn=8 without an outstanding request",
+          "192.0.2.10:50103 -\u003e 192.0.2.20:2406: frame 611: response fn=8 without an outstanding request",
+          "192.0.2.10:50103 -\u003e 192.0.2.20:2406: frame 613: response fn=8 without an outstanding request",
+          "192.0.2.10:50103 -\u003e 192.0.2.20:2406: frame 615: response fn=8 without an outstanding request",
+          "192.0.2.10:50103 -\u003e 192.0.2.20:2406: frame 617: FCB not toggled for a new message to link address 1 (previous true)",
+          "192.0.2.10:50103 -\u003e 192.0.2.20:2406: frame 619: FCB not toggled for a new message to link address 1 (previous true)",
+          "192.0.2.10:50103 -\u003e 192.0.2.20:2406: frame 621: FCB not toggled for a new message to link address 1 (previous true)",
+          "192.0.2.10:50103 -\u003e 192.0.2.20:2406: frame 623: FCB not toggled for a new message to link address 1 (previous true)",
+          "192.0.2.10:50103 -\u003e 192.0.2.20:2406: frame 625: FCB not toggled for a new message to link address 1 (previous true)",
+          "192.0.2.10:50103 -\u003e 192.0.2.20:2406: frame 627: FCB not toggled for a new message to link address 1 (previous true)"
+        ]
+      }
+    },
+    {
+      "path": "ariec103/synthetic_synthetic_class1-event-type1.hex",
+      "source": "masarray/ARIEC103",
+      "original_name": "samples/test-vectors/class1-event-type1.hex",
+      "url": "https://github.com/masarray/ARIEC103/blob/ec08dd73991be646864aef55e6a5538b78129db8/samples/test-vectors/class1-event-type1.hex",
+      "size": 198,
+      "sha256": "f42a7f469e79f1c80feee5a126f8cf5c7dafbe1dafddae64176230beb071e6f7",
+      "format": "text, one FT 1.2 frame per line in hexadecimal",
+      "evidence": "E",
+      "evidence_basis": "Hand-made test vector of another implementation (\"sanitized\", \"project-neutral\"), not a recording.",
+      "systems": [
+        "generated protection equipment, link address 1"
+      ],
+      "operations": "ASDU 1 with cause spontaneous, FUN 192, INF 36, DPI 2, 14:34:12.345",
+      "privacy": "none",
+      "missing_for_verification": "-",
+      "counts": {
+        "lines": 1,
+        "frames": 1,
+        "single_characters": 0,
+        "fixed_frames": 0,
+        "variable_frames": 1,
+        "asdu_errors": 0,
+        "reencoded_exactly": 0,
+        "raw_bodies": 0,
+        "exchanges": 0,
+        "responses_before_first_request": 1,
+        "responses_overheard": 0,
+        "repetitions": 0,
+        "fcb_toggles_checked": 0,
+        "primary_functions": null,
+        "secondary_functions": [
+          8
+        ],
+        "asdus": {
+          "protection equipment ASDU 1 cause 1 FUN 192": 1
+        }
+      }
+    },
+    {
+      "path": "ariec103/synthetic_synthetic_class2-measurand-type9.hex",
+      "source": "masarray/ARIEC103",
+      "original_name": "samples/test-vectors/class2-measurand-type9.hex",
+      "url": "https://github.com/masarray/ARIEC103/blob/ec08dd73991be646864aef55e6a5538b78129db8/samples/test-vectors/class2-measurand-type9.hex",
+      "size": 132,
+      "sha256": "3b5fd90fd0fc744a3765624aebbe87acc453015f20eace07dc415a63f936e3b1",
+      "format": "text, one FT 1.2 frame per line in hexadecimal",
+      "evidence": "E",
+      "evidence_basis": "Hand-made test vector of another implementation (\"sanitized\", \"project-neutral\"), not a recording.",
+      "systems": [
+        "generated protection equipment, link address 1"
+      ],
+      "operations": "ASDU 9, first value 1234",
+      "privacy": "none",
+      "missing_for_verification": "-",
+      "counts": {
+        "lines": 1,
+        "frames": 1,
+        "single_characters": 0,
+        "fixed_frames": 0,
+        "variable_frames": 1,
+        "asdu_errors": 0,
+        "reencoded_exactly": 1,
+        "raw_bodies": 0,
+        "exchanges": 0,
+        "responses_before_first_request": 1,
+        "responses_overheard": 0,
+        "repetitions": 0,
+        "fcb_toggles_checked": 0,
+        "primary_functions": null,
+        "secondary_functions": [
+          8
+        ],
+        "asdus": {
+          "protection equipment ASDU 9 cause 2 FUN 160": 1
+        }
+      }
+    },
+    {
+      "path": "ariec103/synthetic_synthetic_fixed-no-data.hex",
+      "source": "masarray/ARIEC103",
+      "original_name": "samples/test-vectors/fixed-no-data.hex",
+      "url": "https://github.com/masarray/ARIEC103/blob/ec08dd73991be646864aef55e6a5538b78129db8/samples/test-vectors/fixed-no-data.hex",
+      "size": 113,
+      "sha256": "0f8ed8aa3901ff3d71d1b86cdc77b1fc4636d0b6daa8566b0f944debe663ba64",
+      "format": "text, one FT 1.2 frame per line in hexadecimal",
+      "evidence": "E",
+      "evidence_basis": "Hand-made test vector of another implementation (\"sanitized\", \"project-neutral\"), not a recording.",
+      "systems": [
+        "generated protection equipment, link address 1"
+      ],
+      "operations": "fixed frame: secondary function 9 (no data)",
+      "privacy": "none",
+      "missing_for_verification": "-",
+      "counts": {
+        "lines": 1,
+        "frames": 1,
+        "single_characters": 0,
+        "fixed_frames": 1,
+        "variable_frames": 0,
+        "asdu_errors": 0,
+        "reencoded_exactly": 1,
+        "raw_bodies": 0,
+        "exchanges": 0,
+        "responses_before_first_request": 1,
+        "responses_overheard": 0,
+        "repetitions": 0,
+        "fcb_toggles_checked": 0,
+        "primary_functions": null,
+        "secondary_functions": [
+          9
+        ],
+        "asdus": {}
+      }
+    },
+    {
+      "path": "ariec103/synthetic_synthetic_gi-end-type8.hex",
+      "source": "masarray/ARIEC103",
+      "original_name": "samples/test-vectors/gi-end-type8.hex",
+      "url": "https://github.com/masarray/ARIEC103/blob/ec08dd73991be646864aef55e6a5538b78129db8/samples/test-vectors/gi-end-type8.hex",
+      "size": 125,
+      "sha256": "7d335eed4bb92f2233f938050ddd2170ac0de95698abdbfa1b904b95aedf8907",
+      "format": "text, one FT 1.2 frame per line in hexadecimal",
+      "evidence": "E",
+      "evidence_basis": "Hand-made test vector of another implementation (\"sanitized\", \"project-neutral\"), not a recording.",
+      "systems": [
+        "generated protection equipment, link address 1"
+      ],
+      "operations": "ASDU 8, end of general interrogation",
+      "privacy": "none",
+      "missing_for_verification": "-",
+      "counts": {
+        "lines": 1,
+        "frames": 1,
+        "single_characters": 0,
+        "fixed_frames": 0,
+        "variable_frames": 1,
+        "asdu_errors": 0,
+        "reencoded_exactly": 0,
+        "raw_bodies": 0,
+        "exchanges": 0,
+        "responses_before_first_request": 1,
+        "responses_overheard": 0,
+        "repetitions": 0,
+        "fcb_toggles_checked": 0,
+        "primary_functions": null,
+        "secondary_functions": [
+          8
+        ],
+        "asdus": {
+          "protection equipment ASDU 8 cause 10 FUN 0": 1
+        }
+      }
+    },
+    {
+      "path": "ariec103/synthetic_synthetic_identification-type5.hex",
+      "source": "masarray/ARIEC103",
+      "original_name": "samples/test-vectors/identification-type5.hex",
+      "url": "https://github.com/masarray/ARIEC103/blob/ec08dd73991be646864aef55e6a5538b78129db8/samples/test-vectors/identification-type5.hex",
+      "size": 203,
+      "sha256": "6b14765c1a0571ef8f54751f5794f11e668f473e4254d6e176cd714bb49c68fa",
+      "format": "text, one FT 1.2 frame per line in hexadecimal",
+      "evidence": "E",
+      "evidence_basis": "Hand-made test vector of another implementation (\"sanitized\", \"project-neutral\"), not a recording.",
+      "systems": [
+        "generated protection equipment, link address 1"
+      ],
+      "operations": "ASDU 5 with the text \"ArIEC103 Relay Simulator\"",
+      "privacy": "none",
+      "missing_for_verification": "-",
+      "counts": {
+        "lines": 1,
+        "frames": 1,
+        "single_characters": 0,
+        "fixed_frames": 0,
+        "variable_frames": 1,
+        "asdu_errors": 1,
+        "reencoded_exactly": 0,
+        "raw_bodies": 0,
+        "exchanges": 0,
+        "responses_before_first_request": 1,
+        "responses_overheard": 0,
+        "repetitions": 0,
+        "fcb_toggles_checked": 0,
+        "primary_functions": null,
+        "secondary_functions": [
+          8
+        ],
+        "asdus": {}
+      }
+    },
+    {
+      "path": "ariec103/synthetic_synthetic_unknown-private-type205.hex",
+      "source": "masarray/ARIEC103",
+      "original_name": "samples/test-vectors/unknown-private-type205.hex",
+      "url": "https://github.com/masarray/ARIEC103/blob/ec08dd73991be646864aef55e6a5538b78129db8/samples/test-vectors/unknown-private-type205.hex",
+      "size": 140,
+      "sha256": "17fba123e5231db42eba0a0b4952ad4683d145642e13d67a6974a69af8f137e1",
+      "format": "text, one FT 1.2 frame per line in hexadecimal",
+      "evidence": "E",
+      "evidence_basis": "Hand-made test vector of another implementation (\"sanitized\", \"project-neutral\"), not a recording.",
+      "systems": [
+        "generated protection equipment, link address 1"
+      ],
+      "operations": "private ASDU 205 with two octets of data",
+      "privacy": "none",
+      "missing_for_verification": "-",
+      "counts": {
+        "lines": 1,
+        "frames": 1,
+        "single_characters": 0,
+        "fixed_frames": 0,
+        "variable_frames": 1,
+        "asdu_errors": 0,
+        "reencoded_exactly": 1,
+        "raw_bodies": 1,
+        "exchanges": 0,
+        "responses_before_first_request": 1,
+        "responses_overheard": 0,
+        "repetitions": 0,
+        "fcb_toggles_checked": 0,
+        "primary_functions": null,
+        "secondary_functions": [
+          8
+        ],
+        "asdus": {
+          "protection equipment ASDU 205 cause 1 FUN 200": 1
+        }
+      }
+    },
+    {
+      "path": "wireshark-mr2917/sel-rtac_sel-ied_asdu1-5-20-45-46.pcap",
+      "source": "wireshark-mr-2917",
+      "original_name": "iec103_asdu1_5_20_45_46.pcap",
+      "url": "https://gitlab.com/-/project/7898047/uploads/496922fdf33fce9a50ebb548c03fb00b/iec103_asdu1_5_20_45_46.pcap",
+      "size": 882,
+      "sha256": "9b2066b6eb6edb17111d08babe739e09401e41a94d43db43644fe2917f3549e6",
+      "format": "pcap, SEL RTAC serial line (link type 250)",
+      "recorded": "2020-11-10 20:25:18Z .. 2020-11-10 20:26:35Z",
+      "evidence": "B",
+      "evidence_basis": "Written by an SEL RTAC's serial-line capture with the UART control lines of a physical port; the RTAC is the controlling system. The protection equipment identifies itself as \"SEL\" in ASDU 5; its model and firmware are not stated.",
+      "systems": [
+        "SEL RTAC as controlling system",
+        "protection equipment of manufacturer \"SEL\" (ASDU 5), link address 1"
+      ],
+      "operations": "identification (ASDU 5), general commands (ASDU 20) with their time-tagged answers (ASDU 1), class 1 and 2 polls, private ASDUs 45 and 46 in the control direction",
+      "privacy": "serial line only",
+      "missing_for_verification": "model and firmware of both",
+      "counts": {
+        "lines": 1,
+        "frames": 21,
+        "single_characters": 0,
+        "fixed_frames": 9,
+        "variable_frames": 12,
+        "asdu_errors": 0,
+        "reencoded_exactly": 21,
+        "raw_bodies": 2,
+        "exchanges": 9,
+        "responses_before_first_request": 1,
+        "responses_overheard": 0,
+        "repetitions": 0,
+        "requests_abandoned": [
+          20
+        ],
+        "fcb_toggles_checked": 8,
+        "primary_functions": [
+          3,
+          10,
+          11
+        ],
+        "secondary_functions": [
+          0,
+          8
+        ],
+        "asdus": {
+          "controlling system ASDU 20 cause 20 FUN 250": 3,
+          "controlling system ASDU 45 cause 20 FUN 250": 1,
+          "controlling system ASDU 46 cause 20 FUN 250": 1,
+          "protection equipment ASDU 1 cause 12 FUN 250": 3,
+          "protection equipment ASDU 1 cause 20 FUN 250": 3,
+          "protection equipment ASDU 5 cause 3 FUN 255": 1
+        },
+        "link_findings": [
+          "rtac: frame 8: FCB not toggled for a new message to link address 1 (previous true)",
+          "rtac: frame 20: FCB not toggled for a new message to link address 1 (previous false)"
+        ]
+      }
+    },
+    {
+      "path": "wireshark-mr2917/sel-rtac_unknown_asdu1-6-7-8-9.pcap",
+      "source": "wireshark-mr-2917",
+      "original_name": "iec103_asdu1_6_7_8_9.pcap",
+      "url": "https://gitlab.com/-/project/7898047/uploads/6c6eb65be80cdb92028ae8552b93092e/iec103_asdu1_6_7_8_9.pcap",
+      "size": 1699,
+      "sha256": "978cc2c674e29a30773d180ddfd0b6a5a4a43de5155db6f4f6f9e19662243fb8",
+      "format": "pcap, SEL RTAC serial line (link type 250)",
+      "recorded": "2020-10-31 11:25:42Z .. 2020-10-31 11:28:15Z",
+      "evidence": "B",
+      "evidence_basis": "Written by an SEL RTAC's serial-line capture with the UART control lines of a physical port; the RTAC is the controlling system. The protection equipment is not identified.",
+      "systems": [
+        "SEL RTAC as controlling system",
+        "protection equipment (not identified), link address 1"
+      ],
+      "operations": "time synchronization (ASDU 6), general interrogation (ASDU 7) answered with ASDU 1 and its termination (ASDU 8), cyclic measurands (ASDU 9)",
+      "privacy": "serial line only",
+      "missing_for_verification": "the protection equipment, the RTAC model and firmware",
+      "counts": {
+        "lines": 1,
+        "frames": 40,
+        "single_characters": 0,
+        "fixed_frames": 21,
+        "variable_frames": 19,
+        "asdu_errors": 3,
+        "reencoded_exactly": 37,
+        "raw_bodies": 0,
+        "exchanges": 19,
+        "responses_before_first_request": 1,
+        "responses_overheard": 0,
+        "repetitions": 0,
+        "fcb_toggles_checked": 17,
+        "primary_functions": [
+          3,
+          10,
+          11
+        ],
+        "secondary_functions": [
+          0,
+          8,
+          9
+        ],
+        "asdus": {
+          "controlling system ASDU 6 cause 8 FUN 255": 1,
+          "controlling system ASDU 7 cause 9 FUN 255": 1,
+          "protection equipment ASDU 1 cause 9 FUN 250": 12,
+          "protection equipment ASDU 6 cause 8 FUN 255": 1,
+          "protection equipment ASDU 8 cause 10 FUN 255": 1
+        },
+        "link_findings": [
+          "rtac: frame 8: response fn=8 without an outstanding request",
+          "rtac: frame 9: FCB not toggled for a new message to link address 1 (previous true)"
+        ]
+      }
+    },
+    {
+      "path": "wireshark-mr2917/sel-rtac_unknown_private-asdu205.pcap",
+      "source": "wireshark-mr-2917",
+      "original_name": "iec103_asdu205.pcap",
+      "url": "https://gitlab.com/-/project/7898047/uploads/b7c9eccb7539031e36c337556aa71c1f/iec103_asdu205.pcap",
+      "size": 3698,
+      "sha256": "64a21e148dd4fdd190013e9cd2dc524c73ecfde165f1f2a54fcbcfe1c7a3deb9",
+      "format": "pcap, SEL RTAC serial line (link type 250)",
+      "recorded": "2020-10-21 17:15:57Z .. 2020-10-21 17:17:19Z",
+      "evidence": "B",
+      "evidence_basis": "Written by an SEL RTAC's serial-line capture with the UART control lines of a physical port; the RTAC is the controlling system. A shared line with protection equipment at link addresses 1, 2 and 3; addresses 4 and 5 do not answer. None is identified.",
+      "systems": [
+        "SEL RTAC as controlling system",
+        "protection equipment at link addresses 1, 2 and 3 (not identified)"
+      ],
+      "operations": "reset of the frame count bit to five link addresses, class 2 polls answered with measurands (ASDU 9) and the private ASDU 205 (function types 133 and 134)",
+      "privacy": "serial line only",
+      "missing_for_verification": "the protection equipment, the meaning of ASDU 205",
+      "counts": {
+        "lines": 1,
+        "frames": 88,
+        "single_characters": 0,
+        "fixed_frames": 46,
+        "variable_frames": 42,
+        "asdu_errors": 1,
+        "reencoded_exactly": 87,
+        "raw_bodies": 20,
+        "exchanges": 42,
+        "responses_before_first_request": 0,
+        "responses_overheard": 0,
+        "repetitions": 0,
+        "requests_abandoned": [
+          2
+        ],
+        "fcb_toggles_checked": 39,
+        "primary_functions": [
+          7,
+          10,
+          11
+        ],
+        "secondary_functions": [
+          8
+        ],
+        "asdus": {
+          "protection equipment ASDU 205 cause 1 FUN 133": 20,
+          "protection equipment ASDU 9 cause 2 FUN 134": 21
+        }
+      }
+    }
+  ]
+}
