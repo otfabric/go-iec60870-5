@@ -36,7 +36,7 @@ iec103/client iec103/server  iec101/client  iec101/server        iec104/client  
 | `iec103` | 103 only | Its own ASDU (one-octet data unit identifier, FUN/INF addressing, types 1-31), IEC 60870-5-103 cl. 7. |
 | `telecontrol` | 101 (104 later) | How a controlling station recognises the answers to its requests. Neither 101 nor 104 has a transaction identifier; both use the same matching rules. |
 | `iec104/...` | 104 only | APCI framing, sequence numbers, k/w, t0..t3, TLS, redundancy groups: nothing of it applies to a serial line. |
-| `sec` | 104 (101 planned) | IEC TS 60870-5-7 profiles IEC 62351-5 for 101 and 104; it is wired into 104 only. |
+| `sec` | 104 (101 planned) | IEC TS 60870-5-7 profiles IEC 62351-5 for 101 and 104; it is wired into 104 only. `Config.Serial` selects the MAC lengths of serial links. The `Endpoint` also emits the statistic reports (M_IT_TB_1 Secure Data) with the output of the call that made them due, and refuses monitor-direction data for roles without MONITOR DATA in `Protect`, so the transport needs no extra wiring. |
 
 What is deliberately not shared: there is no universal client or server
 interface across the companion standards. IEC 103 (protection equipment,
@@ -83,23 +83,40 @@ structure and checksum and hunts for the next start character instead; see
 `link.Primary` (unbalanced) serializes exchanges: one message out, wait
 `Config.Timeout` for the response, repeat the identical frame (same FCB)
 up to `Config.Retries` times. It toggles FCB per secondary for each new
-message with FCV set and clears it after reset of remote link.
+message with FCV set and clears it after reset of remote link. A response
+whose function code cannot answer the message sent (an ACK while a class 2
+poll is outstanding: a late repetition) is discarded and the real answer
+awaited; up to 8 frames queue for the exchange, and those left over are
+discarded before the next message. `Init` repeats request status of link
+while the secondary reports DFC (IEC 60870-5-101:2003 figure 5).
 
-`link.Secondary` keeps its expected FCB; a message with FCV set whose FCB
-equals the previous one is a repetition and is answered with the stored
-previous response without calling the user again. This is what keeps a
-lost ACK from executing a command twice (test
-`TestRepetitionNotProcessedTwice`).
+`link.Secondary` follows the states of IEC 60870-5-101:2003 figure 6:
+until the first reset of remote link it answers only request status of
+link and reset of remote link. It keeps its expected FCB; a message with
+FCV set whose FCB equals the previous one, and whose function code and
+user data equal the previous message's, is a repetition and is answered
+with the stored previous response without calling the user again. This is
+what keeps a lost ACK from executing a command twice (test
+`TestRepetitionNotProcessedTwice`); comparing function and data keeps a
+master that does not toggle the FCB from getting a stale answer
+(`TestSameFCBOtherRequest`).
 
-IEC 103 adds optional secondary hooks a `SecondaryHandler` may implement:
-`FCBResetHandler` (function 7, 103 cl. 6.3), `FlowControlHandler` (DFC on
-every response) and `FunctionFilter` (function codes outside 103 cl. 6.2.3
-answered with 15, FCB still advancing). The IEC 101 server does not use
-them yet, although 101:2003 figures 6 and 9 call for DFC on every response
-while busy (LIMITATIONS.md).
+Optional secondary hooks a `SecondaryHandler` may implement:
+`FCBResetHandler` (function 7, 103 cl. 6.3; without it function 7 is
+answered 15, as IEC 60870-5-101 table 3 has no function 7),
+`FlowControlHandler` (DFC on every response, user data refused with NACK:
+"secondary link busy", 101 figures 6 and 9; a `BalancedHandler` may
+implement it too) and `FunctionFilter` (function codes outside 103 cl.
+6.2.3 answered with 15 in any state, FCB still advancing). The IEC 101
+server and the balanced client report busy while their handler queue is
+more than half full.
 
 `link.Balanced` is a primary for its own direction and a secondary for the
-peer's, over a full-duplex line, with the DIR bit set by station A.
+peer's, over a full-duplex line, with the DIR bit set by station A. Its
+secondary has the not-reset state of figure 9; its primary waits for DFC
+to clear before sending user data again (figure 8). Its responses carry the
+receiver's address (6.2.1.2) unless `Config.SenderAddr`, and it accepts
+responses with either address.
 
 ### Application layer
 
@@ -118,8 +135,11 @@ own, in order, so a handler may issue requests.
 
 `iec101/server` holds class 1 and class 2 queues (unbalanced) or a send
 queue (balanced). Control-direction ASDUs are queued to a handler goroutine;
-when that queue is full the link answers NACK with DFC set, as
-IEC 60870-5-2 provides. After the first reset of remote link it sends end of
+while that queue is more than half full every response carries DFC and user
+data is refused with NACK, as IEC 60870-5-101:2003 figures 6 and 9 provide.
+A balanced server sends a refused ASDU again. With `Params.Strict` both
+client and server apply `iec101.Validate`, the 101 profile checks the
+shared codec leaves out. After the first reset of remote link it sends end of
 initialization (M_EI_NA_1).
 
 ## Testing

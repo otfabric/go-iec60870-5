@@ -20,6 +20,13 @@
 // (client.WithSecurity, server.WithSecurity). On its own it is useful to test
 // and to analyse.
 //
+// A controlled station also applies role-based access control
+// ([Config.Roles], [Endpoint.PermitsASDU]; without MONITOR DATA
+// [Endpoint.Protect] refuses monitor-direction data) and reports its
+// security statistics spontaneously in M_IT_TB_1 ([Config.Reports]), as
+// IEC TS 60870-5-7:2025 8.2 and 5.4.2.3 ask. [Config.Serial] selects the
+// MAC lengths of a serial link.
+//
 // # Provenance
 //
 // The normative documents are not public. The message formats, MAC inputs,
