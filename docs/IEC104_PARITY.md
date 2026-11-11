@@ -80,5 +80,8 @@ current list is [iec104/LIMITATIONS.md](iec104/LIMITATIONS.md).
   images was done on 2026-11-11 (v0.2.1, with part5 as a fifth reference;
   v0.3.0 since the library's v0.3.0, green in the Interop workflow on the
   v0.3.0 release commit).
-- Decide whether `iec104/client` adopts `telecontrol.Requester` (shared with
-  IEC 101), only with the full IEC 104 suite green before and after.
+- Decided (v0.4.0): `iec104/client` shares the matching rules of
+  `telecontrol` (`Mirrored`, `FromStation`) but not the `Requester`, which
+  lacks the per-period failing on STOPDT and per link, caller deadlines
+  longer than the request timeout, retries and request metrics, the
+  `iec104` error types and file transfer.

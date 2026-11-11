@@ -126,9 +126,9 @@ Connect fails with [iec104.ErrBusy](https://pkg.go.dev/github.com/otfabric/go-ie
 func (c *Client) CounterInterrogate(ctx context.Context, ca asdu.CommonAddr, request, freeze uint8) ([]*asdu.ASDU, error)
 ```
 
-CounterInterrogate runs a counter interrogation (C\_CI\_NA\_1) and collects the integrated totals the station sends in answer, until the activation termination arrives. request is [asdu.CounterGeneral](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#CounterGeneral) or a counter group 1..4; freeze is one of the asdu.Freeze\* qualifiers.
+CounterInterrogate runs a counter interrogation (C\_CI\_NA\_1). request is [asdu.CounterGeneral](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#CounterGeneral) or a counter group 1..4; freeze is one of the asdu.Freeze\* qualifiers.
 
-It follows the same collection rules as [Client.Interrogate](#func-client-interrogate).
+With [asdu.FreezeRead](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#FreezeRead) it is a counter request: it collects the integrated totals the station sends in answer until the activation termination arrives, following the same collection rules as [Client.Interrogate](#func-client-interrogate). With a freeze or reset qualifier it is a counter freeze command, which the station only confirms (IEC 60870-5-104 7.8; IEC 60870-5-101:2003 7.4.8, mode C, figures 95 and 96): it returns at the confirmation with no ASDUs and is never retried. Collect the frozen values with a following request; a termination or totals a station sends anyway reach the Handler.
 
 #### func (Client) Deactivate
 

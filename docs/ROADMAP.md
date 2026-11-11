@@ -15,7 +15,6 @@ Phases of go-iec60870-5 and otfabric/iec60870-5-interop. Status as of
 
 ## Open decisions
 
-- Whether the IEC 104 client moves onto `telecontrol.Requester`.
 - Whether IEC 101 gets file transfer and IEC TS 60870-5-7 security
   (`sec`), and in which order.
 - Multidrop: one IEC 101 client polling several link addresses.

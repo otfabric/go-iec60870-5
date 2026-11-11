@@ -437,15 +437,16 @@ func (r *Requester) ClockSync(ctx context.Context, ca asdu.CommonAddr, t time.Ti
 }
 
 // TestCommand sends a test command. With withTime set it is C_TS_TA_1
-// with a fresh test sequence counter and the current time (the only test
+// with the test sequence counter, starting at 0 and incremented per
+// command (IEC 60870-5-104 8.8), and the current time (the only test
 // command of IEC 60870-5-104); otherwise C_TS_NA_1 with the fixed test bit
 // pattern (IEC 60870-5-101).
 func (r *Requester) TestCommand(ctx context.Context, ca asdu.CommonAddr, withTime bool) error {
 	obj := asdu.TestCommand{Counter: asdu.TestPattern}
 	if withTime {
 		r.mu.Lock()
-		r.testSeq++
 		obj = asdu.TestCommand{Counter: r.testSeq, Time: asdu.Now()}
+		r.testSeq++
 		r.mu.Unlock()
 	}
 	return r.Confirmed(ctx, asdu.New(asdu.CauseActivation, ca, obj))

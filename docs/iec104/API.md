@@ -181,7 +181,7 @@ func (c *Client) ListFiles(ctx context.Context, ca asdu.CommonAddr, ioa asdu.IOA
 | Method | Sends | Returns when |
 |--------|-------|--------------|
 | `Interrogate` | `C_IC_NA_1` activation | activation termination; result is the data with the matching "interrogated by …" cause |
-| `CounterInterrogate` | `C_CI_NA_1` activation | activation termination; result is the counters with the matching "requested by … counter request" cause |
+| `CounterInterrogate` | `C_CI_NA_1` activation | with `asdu.FreezeRead`: activation termination; result is the counters with the matching "requested by … counter request" cause. With a freeze or reset qualifier: activation confirmation, no result |
 | `Read` | `C_RD_NA_1` request | the ASDU with cause "request" containing the address |
 | `ClockSync` | `C_CS_NA_1` activation | activation confirmation |
 | `Command` | process command, activation | activation confirmation |

@@ -1,5 +1,35 @@
 # Release notes
 
+## v0.4.0
+
+**Date:** not released (prepared)
+**Previous release:** v0.3.0
+
+### Fixed
+
+- `iec104/client`: `CounterInterrogate` with a freeze or reset qualifier
+  returns at the activation confirmation with no ASDUs, instead of waiting
+  for a termination the station does not send (IEC 60870-5-104 7.8;
+  IEC 60870-5-101:2003 7.4.8 mode C, figures 95 and 96). It is still never
+  retried. A termination or totals a station sends anyway reach the
+  Handler.
+- `telecontrol`: the test sequence counter of C_TS_TA_1 starts at 0
+  (IEC 60870-5-104 8.8), as in `iec104/client`.
+
+### Changed
+
+- `iec104/client` uses the matching rules of `telecontrol` (`Mirrored`,
+  `FromStation`) instead of its own copy; behaviour is unchanged. It keeps
+  its own request handling; see docs/IEC104_PARITY.md for why it does not
+  use `telecontrol.Requester`.
+
+### Behaviour changes
+
+`CounterInterrogate` with a freeze or reset qualifier returns at the
+confirmation.
+
+---
+
 ## v0.3.0
 
 **Date:** 2026-11-11
