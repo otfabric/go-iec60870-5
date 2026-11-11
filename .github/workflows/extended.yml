@@ -42,13 +42,20 @@ jobs:
           path: "**/testdata/fuzz/"
           if-no-files-found: ignore
 
+  # One job per suite: IEC 104 over TCP, the serial standards over a faulty
+  # in-memory line. IEC 101 runs every seed unbalanced and balanced, twice
+  # the time of the others.
   chaos:
-    name: Chaos
+    name: Chaos ${{ matrix.suite }}
     runs-on: ubuntu-latest
     timeout-minutes: 70
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [iec104, iec101, iec102, iec103]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: make chaos CHAOS_SEEDS=${{ inputs.chaos_seeds || '20' }}
+      - run: make chaos CHAOS_PKGS=./${{ matrix.suite }}/e2e/ CHAOS_SEEDS=${{ inputs.chaos_seeds || '20' }}

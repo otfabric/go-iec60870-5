@@ -16,8 +16,21 @@ own list: [docs/iec104/LIMITATIONS.md](docs/iec104/LIMITATIONS.md).
 - **Line idle after an error.** IEC 60870-5-101:2003 relaxes the
   inter-character rule (6.1: the receiver need not measure gaps), but after
   a receive error a station looks for a line idle of 33 bits (figures 6 and
-  9). `ft12.Decoder` cannot see timing on an `io.Reader`; it hunts for the
-  next start character instead, and the checksum rejects false frames.
+  9). `ft12.Decoder` cannot see character timing on an `io.Reader`; it
+  hunts for the next start character instead, and the checksum rejects
+  false frames. What it can see is the time between reads: the stations
+  discard a frame whose next octet comes later than `link.Config.FrameGap`
+  (default `Timeout`), so a start character in line noise or a peer that
+  stopped mid-frame does not swallow the frames that follow. A transport
+  that pauses longer than that inside a frame needs a larger `FrameGap`.
+- **The FCB is one bit** (IEC 60870-5-2 5.1; also IEC 60870-5-102 and
+  -103): a repetition that a transport delivers after the primary's next
+  message is a new message to the secondary and is executed again. A
+  serial line delivers in order; over a transport that may reorder or hold
+  back frames (a terminal server, a radio link with retransmission) keep
+  `link.Config.Timeout` above its worst delay. The chaos suites found it
+  when they let frames of the primary overtake each other; they now keep
+  primary messages in order (`link.TestRepetitionAfterTheNextMessage`).
 - **One controlled station per client.** The link layer filters by address
   and a `link.Primary` can poll several secondaries, but `iec101/client`
   serves one link address. Multidrop polling needs one client per address on

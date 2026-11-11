@@ -1,0 +1,3 @@
+go test fuzz v1
+[]byte("\x06987\x01\x000\x0671Z\x01\x008\x12{Xa\x01\x00\v\x010B a\x03\x18#98Y7\rw1272890Y0000\x03A00\vn91\x01\x00\x15aA000Z887CA12")
+byte('\x01')

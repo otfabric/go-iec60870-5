@@ -30,7 +30,9 @@ var (
 	// implemented.
 	ErrNotImplemented = errors.New("link: link service not implemented")
 	// ErrUnexpected reports a response that does not answer the request:
-	// a wrong function code or the address of another station.
+	// a wrong function code or the address of another station. When only
+	// such responses came until the last time-out, the error also wraps
+	// [ErrTimeout]: the secondary did not answer the message.
 	ErrUnexpected = errors.New("link: unexpected response")
 	// ErrInvalidConfig reports a Config a station cannot be built with.
 	ErrInvalidConfig = errors.New("link: invalid configuration")
@@ -83,6 +85,18 @@ type Config struct {
 	// accepted whatever this says. Unbalanced stations ignore it.
 	SenderAddr bool
 
+	// FrameGap is how long the line may stay idle inside a frame: octets
+	// of a frame whose next octet comes later are discarded as a frame
+	// that never ended (IEC 60870-5-1 6.2.4.2, rules R2 and R4, which
+	// leave no idle interval between the characters of a frame). Without
+	// it a start character in line noise, or a peer that stopped in the
+	// middle of a frame, makes the station take the octets of the next
+	// frames as the rest of that one: with L = 255 the next 261 octets.
+	// Zero means Timeout; negative disables the check. Over a transport
+	// that splits frames with pauses (a terminal server on a congested
+	// network) choose it above the longest pause.
+	FrameGap time.Duration
+
 	// OnFrame, when set, is called for every frame sent (tx true) and
 	// received. It runs on the station's goroutines and must not block.
 	OnFrame func(tx bool, f ft12.Frame)
@@ -101,6 +115,12 @@ func (c Config) withDefaults() (Config, error) {
 	}
 	if c.Timeout == 0 {
 		c.Timeout = DefaultTimeout
+	}
+	switch {
+	case c.FrameGap == 0:
+		c.FrameGap = c.Timeout
+	case c.FrameGap < 0:
+		c.FrameGap = 0
 	}
 	switch {
 	case c.Retries == 0:
@@ -180,6 +200,7 @@ func (p *port) run(deliver func(ft12.Frame)) {
 	defer close(p.readDone)
 	d := ft12.NewDecoder(p.rw, p.cfg.FT12)
 	d.OnDiscard = p.cfg.OnDiscard
+	d.Gap = p.cfg.FrameGap
 	for {
 		f, err := d.Next()
 		if err != nil {
@@ -330,7 +351,10 @@ func (x *exchanger) exchange(ctx context.Context, addr uint16, fn byte, fcb bool
 		case <-timer.C:
 			if attempt >= x.p.cfg.Retries {
 				if stray != nil {
-					return *stray, fmt.Errorf("%w: %v to function %d", ErrUnexpected, *stray, fn)
+					// Only answers to something else came: no response to
+					// this message, as if none had come (the error wraps
+					// ErrTimeout, so the caller re-initializes the link).
+					return *stray, fmt.Errorf("%w: %w: %v to function %d after %d attempt(s)", ErrUnexpected, ErrTimeout, *stray, fn, attempt+1)
 				}
 				return ft12.Frame{}, fmt.Errorf("%w: function %d to address %d after %d attempt(s)", ErrTimeout, fn, addr, attempt+1)
 			}

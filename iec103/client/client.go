@@ -324,7 +324,9 @@ func (c *Client) deliver() {
 }
 
 // Send transmits a control-direction ASDU with send/confirm and returns
-// when the link layer confirmed it. Answers reach the Handler.
+// when the link layer confirmed it, or at the deadline of ctx: the link
+// layer then still finishes the exchange, repeating the frame until it is
+// answered or Link.Retries ran out. Answers reach the Handler.
 func (c *Client) Send(ctx context.Context, a *iec103.ASDU) error {
 	raw, err := a.AppendIn(nil, c.cfg.Location)
 	if err != nil {
@@ -335,7 +337,9 @@ func (c *Client) Send(ctx context.Context, a *iec103.ASDU) error {
 
 // Broadcast transmits a control-direction ASDU with send/no reply to link
 // address 255 (clause 6.2.3), between two exchanges of the link, also
-// while the equipment sets DFC (clause 6.3). Nothing is confirmed.
+// while the equipment sets DFC (clause 6.3). Nothing is confirmed. It
+// returns [iec103.ErrLinkDown] when the link goes down before the link
+// loop took it.
 func (c *Client) Broadcast(a *iec103.ASDU) error {
 	raw, err := a.AppendIn(nil, c.cfg.Location)
 	if err != nil {
@@ -344,13 +348,34 @@ func (c *Client) Broadcast(a *iec103.ASDU) error {
 	return c.broadcast(sendReq{data: raw})
 }
 
+// up returns the channel closed when the link goes down, or ErrLinkDown
+// (ErrClosed) when it is not up.
+func (c *Client) up() (<-chan struct{}, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	switch c.state {
+	case iec103.StateUp:
+		return c.downCh, nil
+	case iec103.StateClosed:
+		return nil, iec103.ErrClosed
+	case iec103.StateDown:
+	}
+	return nil, iec103.ErrLinkDown
+}
+
 func (c *Client) broadcast(r sendReq) error {
-	if c.State() != iec103.StateUp {
-		return iec103.ErrLinkDown
+	down, err := c.up()
+	if err != nil {
+		return err
 	}
 	r.done = make(chan error, 1)
+	// The link loop takes broadcasts only while the link is up: one that
+	// goes down before it took this one ends the call, which has no
+	// context to bound it.
 	select {
 	case c.bcasts <- r:
+	case <-down:
+		return iec103.ErrLinkDown
 	case <-c.ctx.Done():
 		return iec103.ErrClosed
 	}
@@ -368,20 +393,28 @@ func (c *Client) send(ctx context.Context, raw []byte) error {
 
 // submit hands r to the link loop and waits for the confirmation.
 func (c *Client) submit(ctx context.Context, r sendReq) error {
-	if c.State() != iec103.StateUp {
-		return iec103.ErrLinkDown
+	down, err := c.up()
+	if err != nil {
+		return err
 	}
 	r.done = make(chan error, 1)
 	select {
 	case c.sends <- r:
+	case <-down:
+		return iec103.ErrLinkDown
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-c.ctx.Done():
 		return iec103.ErrClosed
 	}
+	// The link loop finishes the exchange it started (a primary repeats a
+	// message until it is answered or Link.Retries ran out), but the
+	// request ends at its deadline.
 	select {
 	case err := <-r.done:
 		return err
+	case <-ctx.Done():
+		return ctx.Err()
 	case <-c.ctx.Done():
 		return iec103.ErrClosed
 	}
@@ -486,6 +519,12 @@ func (c *Client) run() {
 		data, st, err := c.pri.RequestData(c.ctx, addr, class)
 		if err != nil {
 			c.linkFailed(err)
+			// A station that answers every poll with an error (function
+			// 14 or 15, say) is polled at the poll interval, not as fast
+			// as it answers.
+			if !c.sleep(c.cfg.PollInterval) {
+				return
+			}
 			continue
 		}
 		acd, dfc = st.ACD, st.DFC

@@ -254,9 +254,11 @@ with `errors.Is`.
 | `ft12.ErrShort` | the buffer ends before the frame: more octets may complete it |
 
 `ft12.Decoder` never returns `ErrMalformed` or `ErrChecksum`: it skips the
-octets and resynchronizes, reporting them to `OnDiscard`. It returns the
-reader's error, or `io.ErrUnexpectedEOF` when the stream ends inside a
-frame.
+octets and resynchronizes, reporting them to `OnDiscard`. With `Gap` set,
+the octets of a frame whose next octet comes later than `Gap` are skipped
+the same way and reported with `ErrShort` (the stations of `link` set it
+from `link.Config.FrameGap`). It returns the reader's error, or
+`io.ErrUnexpectedEOF` when the stream ends inside a frame.
 
 ### Link procedures (`link`)
 
@@ -267,7 +269,7 @@ frame.
 | `link.ErrDataFlow` | DFC is set: the secondary cannot take more user data now, and kept it set while `Init` or a balanced `Send` requested the status of link `Config.Retries` + 1 times | stays up |
 | `link.ErrNotFunctioning` | function 14: link service not functioning | stays up |
 | `link.ErrNotImplemented` | function 15: link service not implemented | stays up |
-| `link.ErrUnexpected` | a response that does not answer the request (its function code cannot answer the function sent), and no fitting one came before the last time-out | stays up |
+| `link.ErrUnexpected` | a response that does not answer the request (its function code cannot answer the function sent). When only such responses came until the last time-out the error also wraps `link.ErrTimeout`: the message went unanswered | stays up; with `link.ErrTimeout` the caller re-initializes it |
 | `link.ErrNoData` | `SendConfirm`, `SendNoReply` or a balanced `Send` with empty user data: without an ASDU a frame is fixed-length (IEC 60870-5-101:2003 6.1) | stays up |
 | `link.ErrClosed` | the station was closed, or the transport failed (wrapped with the transport error) | gone |
 | `link.ErrInvalidConfig` | a `Config` a station cannot be built with | - |
@@ -286,7 +288,9 @@ Requests of `iec101/client` return `*telecontrol.NegativeError` for a
 negative confirmation or an "unknown ..." cause, `telecontrol.ErrBusy` for a
 request whose answers could not be told apart from a pending identical one,
 and wrap `context.DeadlineExceeded` when no answer arrives within
-`Config.RequestTimeout`.
+`Config.RequestTimeout`. A request ends at its deadline also while the link
+layer is still repeating its user data; the exchange itself runs to its
+end, so the station may still receive it.
 
 ## IEC 60870-5-103
 
@@ -306,7 +310,7 @@ transmission, is not an error: it decodes as `iec103.Raw`.
 
 | Sentinel | Meaning |
 |---|---|
-| `iec103.ErrLinkDown` | a request while the link is not initialized; a pending request fails with it when the link is lost |
+| `iec103.ErrLinkDown` | a request while the link is not initialized; a pending request fails with it when the link is lost, and so does a broadcast (`Broadcast`, `BroadcastClockSync`) the link loop had not taken when the link went down |
 | `iec103.ErrClosed` | an operation on a closed client or server, or on a `client.StagedWrite` that was already executed or aborted |
 | `iec103.ErrInvalidConfig` | invalid configuration: link address 255, a server without function type (`Config.Fun` 0), a negative `Config.BitRate`, a start cause other than 5 or 6, an invalid `link.Config` |
 | `iec103.ErrBusy` | a request while another of the same kind is pending (command, GI, generic read, generic write, generic GI, disturbance transfer) |
@@ -315,7 +319,8 @@ transmission, is not an error: it decodes as `iec103.Raw`.
 | `server.ErrQueueFull` (`iec103/server`) | a class 1 or class 2 queue is full |
 
 Requests wrap `context.DeadlineExceeded` when no answer arrives within the
-context's deadline or `Config.RequestTimeout`. A generic read answered with
+context's deadline or `Config.RequestTimeout`, also while the link layer is
+still repeating their user data (the exchange runs to its end). A generic read answered with
 cause 43 is not an error: `GenericResult.Cause` reports it and the data sets
 carry the generic reply codes. Link errors (`link.ErrNack` while the
 equipment holds back commands with DFC, `link.ErrTimeout`) are returned

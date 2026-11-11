@@ -5,6 +5,7 @@ package ft12
 import (
 	"errors"
 	"io"
+	"time"
 )
 
 // Decoder reads FT 1.2 frames from a byte stream. After octets that do not
@@ -24,6 +25,16 @@ type Decoder struct {
 	// skips while resynchronizing and the error that caused it. The slice
 	// is only valid during the call.
 	OnDiscard func(skipped []byte, err error)
+
+	// Gap, when positive, is the longest pause between two reads inside a
+	// frame: octets of an unfinished frame read before a longer pause are
+	// discarded, with [ErrShort], before the octets after it are looked
+	// at. FT 1.2 sends a frame without idle line between its characters
+	// (IEC 60870-5-1 6.2.4.2, rules R2 and R4); this is the closest a
+	// reader without character timing comes to that check.
+	Gap time.Duration
+
+	last time.Time // when the last octets were read
 }
 
 // NewDecoder returns a decoder reading from r with parameters p. It panics
@@ -97,6 +108,16 @@ func (d *Decoder) fill() error {
 	// Like bufio, tolerate a few empty reads before giving up.
 	for range 100 {
 		n, err := d.r.Read(d.buf[d.end:])
+		if n > 0 && d.Gap > 0 {
+			now := time.Now()
+			if d.end > 0 && now.Sub(d.last) > d.Gap {
+				if d.OnDiscard != nil {
+					d.OnDiscard(d.buf[:d.end], ErrShort)
+				}
+				d.end = copy(d.buf, d.buf[d.end:d.end+n]) - n
+			}
+			d.last = now
+		}
 		d.end += n
 		if n > 0 {
 			return nil
