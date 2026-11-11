@@ -111,8 +111,11 @@ own list: [docs/iec104/LIMITATIONS.md](docs/iec104/LIMITATIONS.md).
   which deviates from the standard in its GI answers, command
   acknowledgements and identification: link start-up, clock
   synchronization and the GI termination pass, the rest is unverified
-  against an independent server. Generic services, disturbance data and
-  broadcast synchronization are exercised by no reference; the cause 12
+  against an independent server. The server's disturbance transfer is
+  exercised by Open103 (its values hit a known Open103 bug); generic
+  services, the disturbance list and the client side of both have no
+  conforming reference; broadcast synchronization is exercised by no
+  reference; the cause 12
   report after a command only towards the reference clients. See
   [docs/iec103/INTEROPERABILITY.md](docs/iec103/INTEROPERABILITY.md).
 - One controlling system polls one protection device per client (no shared

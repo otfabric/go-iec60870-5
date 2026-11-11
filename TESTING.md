@@ -23,7 +23,7 @@ How to run each test tier of go-iec60870-5. What is implemented and at which evi
 | Recorded traffic, the full recordings | `make captures-extended` | network (GitHub), 251 MB | no |
 | Recorded traffic, regenerate the tshark oracle, the manifest and the fuzz seeds | `make captures-oracle`, `make captures-manifest` | `tshark` for the oracle | no |
 | IEC 104 interop with reference images | `make interop` | Docker | Interop workflow, every push and pull request except Markdown-only changes |
-| IEC 101 interop (lib60870-C, cB-Sigma) | `make interop-iec101` | Docker | Interop workflow, job `iec101` |
+| IEC 101 interop (lib60870-C, cB-Sigma, digitalpetri) | `make interop-iec101` | Docker | Interop workflow, job `iec101` |
 | IEC 103 interop (vitusdong, ARIEC103, Open103, go-iecp5) | `make interop-iec103` | Docker | Interop workflow, job `iec103` |
 | IEC 102 interop (gisce/iec870ree against the server) | `make interop-iec102` | Docker; the iec60870-5-interop v0.3.0 image, pinned by digest | Interop workflow, job `iec102` |
 | IEC 62351-5 against cB-Sigma/iec60870, in process | `make test-cbsigma` | Go 1.26 (`iec104/interop/cbsigma` is a module of its own) | Interop workflow, job cB-Sigma |

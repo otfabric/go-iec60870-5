@@ -63,7 +63,7 @@ after that harness release, see the TODO in `iec101/interop/harness.go`),
 |---|---|---|---|
 | lib60870-C | 5 + 5 pass | 12 + 16 pass | 61 + 64 pass |
 | cB-Sigma | 5 + 5 pass | 12 + 16 pass | 61 + 64 pass |
-| digitalpetri | 5 pass + 1 skipped (known bug) | 12 pass + 4 skipped (known bug) | 55 + 64 pass |
+| digitalpetri | 5 + 0 pass (balanced: the scenario skipped, known upstream bug) | 12 + 0 pass (balanced: 4 runs skipped, known upstream bug) | 55 + 64 pass (unbalanced: 6 cases not run, `unbalancedCommonAddress` false) |
 
 (unbalanced + balanced). The field sizes are those of the harness: link
 address, cause, common address, object address 2/2/2/3 (link address 300),

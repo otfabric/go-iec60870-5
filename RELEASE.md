@@ -5,6 +5,15 @@
 **Date:** not released (prepared)
 **Previous release:** v0.3.0
 
+More independent evidence for the serial standards: IEC 101 against a third
+reference, digitalpetri/iec60870, and with four non-default sets of field
+sizes; IEC 103 generic services and disturbance data against the harness's
+contract 2.3, with the server's disturbance data transfer evidenced by
+Open103. `iec104/client` returns from a counter freeze or reset at the
+confirmation and shares the matching rules of `telecontrol`. SAST stays at
+zero. The interop suites run against local `:dev` images of
+iec60870-5-interop contract 2.3 until its release pins them by digest.
+
 ### Fixed
 
 - `iec104/client`: `CounterInterrogate` with a freeze or reset qualifier
@@ -22,6 +31,57 @@
   `FromStation`) instead of its own copy; behaviour is unchanged. It keeps
   its own request handling; see docs/IEC104_PARITY.md for why it does not
   use `telecontrol.Requester`.
+
+### Security hardening
+
+- `internal/testutil/serialline`: the noise octet of the faulty test line is
+  bounded to a byte before conversion (gosec G115). Its use of `math/rand`
+  (G404, a seeded, reproducible test line, not security relevant) is
+  recorded as a false positive in the organisation's triage records. SAST
+  (gosec, opengrep) at the lowest thresholds: 0 findings, also in the nested
+  module `iec104/interop/cbsigma`.
+
+### Tests
+
+- `iec101/interop`: digitalpetri/iec60870 as third reference, and the field
+  sizes 2/2/2/3, 1/2/1/3, 2/1/2/2 and (balanced) 0/1/1/2 (link address,
+  cause, common address, object address). This module's client: 5 + 5
+  scenarios and 12 + 16 field-size runs pass against lib60870-C and against
+  cB-Sigma (unbalanced + balanced), against digitalpetri 5 scenarios and 12
+  field-size runs unbalanced; balanced against a digitalpetri station is
+  skipped as the harness's known bug
+  `digitalpetri-balanced-server-no-link-reset` (`testdata/known-bugs.tsv`),
+  checked to reproduce on every run. The reference clients replay the
+  harness's 64 cases (33 with field sizes) against this module's server:
+  61 + 64 pass for lib60870-C and for cB-Sigma, 55 + 64 for digitalpetri (6
+  cases with a common address other than its link address not run). 0
+  failures ([INTEROPERABILITY.md](INTEROPERABILITY.md)).
+- `iec103/interop`: the 7 cases of generic services and disturbance data and
+  5 value checks. Open103's client against `iec103/server`: the disturbance
+  transfer case passes and the description, tags and channel ratings match
+  the fixture; its values hit the known Open103 bug `open103-asdu30-nfe`.
+  vitusdong's client: the disturbance list case passes; the generic cases,
+  the transfer and the value checks are known vitusdong bugs. This module's
+  client against vitusdong's server: generic read, generic write and the
+  list are known server bugs, asserted on the octets; the transfer is
+  skipped (vitusdong declares no `disturbanceDataServer`). The bugs no
+  harness pairing shows are in `testdata/known-bugs-consumer.tsv` (six
+  entries); none is counted as a pass
+  ([docs/iec103/INTEROPERABILITY.md](docs/iec103/INTEROPERABILITY.md)).
+- Unit and e2e: the counter freeze returning at the confirmation
+  (`iec104/client`), the C_TS_TA_1 counter starting at 0 (`telecontrol`),
+  a full IEC 103 class 1 queue (`iec103/server`), a broadcast on a closed
+  IEC 103 client.
+
+### Documentation
+
+- docs/IEC104_PARITY.md: the decision that `iec104/client` shares the
+  matching rules of `telecontrol` but not `telecontrol.Requester`, and why.
+- docs/iec103/INTEROPERABILITY.md: interpretation 12, the numbering of the
+  disturbance values (NFE counts from 0, as TAP counts tag positions), and
+  the contract 2.3 results.
+- README, LIMITATIONS, ROADMAP, FEATURE-STATUS, STANDARDS: the IEC 101 and
+  IEC 103 evidence of this release.
 
 ### Behaviour changes
 

@@ -3,6 +3,32 @@
 Working log of the IEC 60870-5 program (go-iec60870-5 and
 otfabric/iec60870-5-interop). Newest first. Plan: [docs/ROADMAP.md](docs/ROADMAP.md).
 
+## v0.4.0 (prepared on release/v0.4.0, not released)
+
+- IEC 101 interop against digitalpetri/iec60870 as third reference and
+  with four non-default sets of field sizes (iec60870-5-interop contract
+  2.3, local `:dev` images; pinning after the harness release). The
+  balanced digitalpetri station is a known upstream bug
+  (`digitalpetri-balanced-server-no-link-reset`).
+- IEC 103 interop for generic services and disturbance data (contract 2.3):
+  the server's disturbance transfer evidenced by Open103 (values: known bug
+  `open103-asdu30-nfe`); generic services, the disturbance list and the
+  client side have no conforming reference (vitusdong only, with known bugs
+  on every pairing); `known-bugs-consumer.tsv`.
+- `iec104/client`: a counter freeze or reset returns at the confirmation;
+  the matching rules of `telecontrol` instead of its own copy, not the
+  `Requester` (decided, docs/IEC104_PARITY.md). `telecontrol`: the C_TS_TA_1
+  counter starts at 0.
+- SAST: `internal/testutil/serialline` G115 fixed, G404 triaged as a false
+  positive; 0 findings, also in the nested cbsigma module.
+- Vetting on release/v0.4.0: e2e of all four standards, `make fuzz` (20
+  targets, 30 s), `make chaos` (4 standards, 20 seeds, 30 s), `make check`.
+- Next: an IEC 102 client peer (no open controlled station exists); the
+  open deviations ([LIMITATIONS.md](LIMITATIONS.md)); real devices; the
+  IEC 103 open items (a server serving the fixture's disturbance values,
+  generic reads by heading, group or directory, the generic interrogation,
+  writes with confirmation or abort, aborts and more than one record).
+
 ## v0.3.0 (released 2026-11-11)
 
 - Hardening: SAST (gosec, opengrep) 44 findings to 0; hostile-peer, chaos

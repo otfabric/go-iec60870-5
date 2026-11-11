@@ -39,7 +39,7 @@ interop suite.
 |---|---|---|
 | ASDU codec with configurable field sizes | IEC 101 uses it unchanged | `asdu` |
 | CP24Time2a / CP56Time2a | extracted, plus CP16/CP32 for 101 and 103 | `cp` |
-| Request matching (mirrors, interrogation collection, read, rejection) | re-expressed transport-independently for 101 | `telecontrol` (the 104 client keeps its own copy for now) |
+| Request matching (mirrors, interrogation collection, read, rejection) | re-expressed transport-independently for 101 | `telecontrol` (the 104 client uses the matching rules since v0.4.0, not `Requester`) |
 | `NegativeError` semantics | same rules, new type `telecontrol.NegativeError` | `telecontrol` |
 | Logger interfaces | shared by all stations | root `iec60870` |
 | `sec` (IEC TS 60870-5-7 covers 101 and 104) | not yet wired into 101 | `sec` |
