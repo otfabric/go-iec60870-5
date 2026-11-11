@@ -59,9 +59,9 @@ func TestNDERange(t *testing.T) {
 // VSQ: 81H for single information objects, SQ = 0 for ASDUs 3, 9 and 23.
 func TestVSQChecked(t *testing.T) {
 	for _, b := range [][]byte{
-		cat([]byte{1, 0x01, 1, 3, 128, 16, 2}, t32Oct, []byte{0}),
 		cat([]byte{1, 0x82, 1, 3, 128, 16, 2}, t32Oct, []byte{0}),
-		{8, 0x01, 10, 3, 255, 0, 1},
+		cat([]byte{1, 0x02, 1, 3, 128, 16, 2}, t32Oct, []byte{0}),
+		{8, 0x00, 10, 3, 255, 0, 1},
 		{3, 0x81, 2, 3, 128, 144, 0, 0},
 		cat([]byte{23, 0x81, 31, 3, 128, 0, 1, 0, 0}, t56Oct),
 	} {
@@ -71,6 +71,22 @@ func TestVSQChecked(t *testing.T) {
 	}
 	if _, err := Decode(cat([]byte{23, 0x01, 31, 3, 128, 0, 1, 0, 0}, t56Oct)); err != nil {
 		t.Fatal(err)
+	}
+	// SQ = 0 with one object (01H) is accepted on receive (ARIEC103 and
+	// Wireshark send it); the encoder writes the conformant 81H.
+	for _, b := range [][]byte{
+		cat([]byte{1, 0x01, 1, 3, 128, 16, 2}, t32Oct, []byte{0}),
+		{8, 0x01, 10, 3, 255, 0, 1},
+	} {
+		a, err := Decode(b)
+		if err != nil {
+			t.Fatalf("% X: %v", b, err)
+		}
+		want := bytes.Clone(b)
+		want[1] = 0x81
+		if back, err := a.Encode(); err != nil || !bytes.Equal(back, want) {
+			t.Errorf("% X re-encoded % X %v", b, back, err)
+		}
 	}
 }
 

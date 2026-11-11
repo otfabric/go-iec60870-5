@@ -42,7 +42,7 @@ other implementations. No otfabric 103 interop harness exists yet.
 |---|---|---|---|
 | 7.1 | one ASDU per frame, one information object | implemented | unit |
 | 7.2.1 | type identification 1..31 compatible, 32..255 private | tables 3, 4: typed bodies; others `Raw` | unit, fuzz, recorded (private 45, 46, 205 as `Raw`, byte for byte) |
-| 7.2.2 | VSQ: number and SQ | written from the body; checked on decode (81H for one information object, SQ = 0 for ASDUs 3, 9, 23) and kept | unit (`TestVSQChecked`) |
+| 7.2.2 | VSQ: number and SQ | written from the body (81H for one information object, SQ = 0 for ASDUs 3, 9, 23); on decode the number is checked, and 01H (SQ = 0) is accepted for a single object, as ARIEC103 and Wireshark's generator send it (interpretation: robustness) | unit (`TestVSQChecked`), recorded |
 | 7.2.3 | causes, tables 5 and 6 | constants and names | unit |
 | 7.2.4 | common address, 255 global | client default = link address; server accepts own and 255 | e2e |
 | 7.2.5.1 | function type ranges, table 7 | `FunctionType.Compatible`, constants | unit |

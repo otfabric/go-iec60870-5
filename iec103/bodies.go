@@ -440,6 +440,11 @@ func (m EndOfTransmission) append(b []byte, _ *time.Location) ([]byte, error) {
 // and the structures of clause 7.3: the ASDUs with a sequence of elements
 // (3, 9 and 23) have SQ = 0 and the number of elements, every other
 // compatible ASDU has SQ = 1 and number 1 (VSQ = 81H).
+//
+// On receive a single-object ASDU with SQ = 0 and number 1 (VSQ = 01H) is
+// accepted: the ARIEC103 test vectors and Wireshark's generated IEC 103
+// frames use it, and the object is unambiguous. Encode writes the
+// conformant 81H. A number other than 1 is refused.
 func checkVSQ(t TypeID, vsq VSQ) error {
 	switch t {
 	case TypeMeasurands1, TypeMeasurands2, TypeDisturbanceList:
@@ -447,7 +452,7 @@ func checkVSQ(t TypeID, vsq VSQ) error {
 			return fmt.Errorf("%w: VSQ %02XH: %s has SQ = 0 (clause 7.3)", ErrInvalid, uint8(vsq), t)
 		}
 	default:
-		if vsq != VSQSingle {
+		if vsq&0x7F != 1 {
 			return fmt.Errorf("%w: VSQ %02XH: %s has VSQ 81H (clause 7.3)", ErrInvalid, uint8(vsq), t)
 		}
 	}
