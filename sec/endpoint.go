@@ -342,7 +342,7 @@ func (e *Endpoint) canProtect(now time.Time) bool {
 	if !e.ready() || e.txSeq == 0xffffffff {
 		return false
 	}
-	return e.cfg.Role != Controlled || !(e.keysExpired(now) || e.keyUses >= e.cfg.Settings.KeyUses)
+	return e.cfg.Role != Controlled || (!e.keysExpired(now) && e.keyUses < e.cfg.Settings.KeyUses)
 }
 
 // flushReports appends the statistic reports that are due to out

@@ -148,8 +148,9 @@ func (s Stat) DefaultThreshold() uint32 {
 		return 3
 	case StatMessagesSent, StatMessagesReceived:
 		return 500
+	default:
+		return 1
 	}
-	return 1
 }
 
 // StatisticReport says where and when a controlled station reports a

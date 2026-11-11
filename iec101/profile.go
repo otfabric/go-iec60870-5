@@ -90,6 +90,7 @@ func Validate(a *asdu.ASDU, p asdu.Params) error {
 		if ioa := a.Objects[0].Address(); ioa != 0 {
 			return refuse(asdu.CauseUnknownIOA, "%s with information object address %d, want 0", a.Type, ioa)
 		}
+	default:
 	}
 	if a.Type.HasTimeTag() && !a.Type.InControlDirection() &&
 		a.Cause >= asdu.CauseInterrogatedStation && a.Cause <= asdu.CauseInterrogatedStation+16 {
