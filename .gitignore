@@ -27,3 +27,6 @@ coverage.out
 
 # Captures fetched by make captures-fetch (testdata/captures/CACHED)
 /testdata/captures/cache/
+
+# Claude Code agent worktrees
+/.claude/worktrees/

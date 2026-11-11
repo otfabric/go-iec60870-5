@@ -41,7 +41,7 @@ Plain IEC 60870-5-104 carries no authentication and no encryption: anyone who ca
 
 ### Application-layer security (IEC 62351-5)
 
-IEC 62351-5 authenticates application messages themselves, on top of or instead of TLS; IEC TS 60870-5-7 says how it applies to IEC 60870-5-101 and -104. Package `sec` implements the A-Profile of the 2023 edition with IEC TS 60870-5-7:2025: `client.WithSecurity` and `server.WithSecurity` switch it on, and [examples/secure](examples/secure/main.go) shows it end to end.
+IEC 62351-5 authenticates application messages themselves, on top of or instead of TLS; IEC TS 60870-5-7 says how it applies to IEC 60870-5-101 and -104. Package `sec` implements the A-Profile of the 2023 edition with IEC TS 60870-5-7:2025: `client.WithSecurity` and `server.WithSecurity` switch it on, and [examples/secure](iec104/examples/secure/main.go) shows it end to end.
 
 - **Station Association**: the stations exchange X.509 certificates; each checks the other's against its `sec.Trust` (pinned fingerprints or public keys of self-signed certificates, or Central Authorities with an optional list of subjects). ECDH on secp256r1 or Curve25519 and HKDF give the update keys
 - **Session Key Change**: the controlling station sends fresh session keys, wrapped with AES-256 key wrap, at every connection, after `Settings.KeyLifetime` or `Settings.KeyUses`, and on `Endpoint.Renew`. A controlled station whose keys are not valid asks for new ones

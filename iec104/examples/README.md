@@ -39,5 +39,5 @@ runs the self-contained ones, which is also how CI keeps them working.
 - A control centre of your own: **client** for the shape of the program,
   **observability** for the options a long-running one needs,
   **redundancy** when the station has two links.
-- The API in full: [API.md](../API.md). What the library does and does not
-  implement of the standard: [INTEROPERABILITY.md](../INTEROPERABILITY.md).
+- The API in full: [API.md](../../docs/iec104/API.md). What the library does and does not
+  implement of the standard: [INTEROPERABILITY.md](../../docs/iec104/INTEROPERABILITY.md).
