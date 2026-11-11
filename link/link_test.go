@@ -252,6 +252,12 @@ func TestConfigErrors(t *testing.T) {
 	if c, _ := (Config{Retries: -1}).withDefaults(); c.Retries != 0 || c.Timeout != DefaultTimeout {
 		t.Errorf("%+v", c)
 	}
+	if c, _ := (Config{FrameGap: -1}).withDefaults(); c.FrameGap != 0 {
+		t.Errorf("negative FrameGap: %v, want 0 (disabled)", c.FrameGap)
+	}
+	if c, _ := (Config{Timeout: time.Second}).withDefaults(); c.FrameGap != time.Second {
+		t.Errorf("default FrameGap: %v, want the timeout", c.FrameGap)
+	}
 }
 
 func TestControl(t *testing.T) {
