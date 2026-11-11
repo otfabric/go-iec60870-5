@@ -251,7 +251,7 @@ is how go-iec104 keeps it at one; it is not taken from the text of clause 10.
 
 The A-Profile of IEC 62351-5:2023 as IEC TS 60870-5-7:2025 applies it to
 IEC 60870-5-104, in package `sec` (`client.WithSecurity`,
-`server.WithSecurity`). See [SECURITY.md](../../SECURITY.md)#application-layer-security-iec-62351-5)
+`server.WithSecurity`). See [SECURITY.md](../../SECURITY.md#application-layer-security-iec-62351-5)
 for what it protects and where it came from.
 
 | Item | Support |
@@ -268,9 +268,9 @@ for what it protects and where it came from.
 | Certificates | X.509, self-signed and pinned, or issued by a trusted Central Authority, optionally restricted by subject |
 | Role-based access control | the seven roles of IEC TS 60870-5-7, configured per association; refusals with cause 17 |
 | Several controlling stations at one station | yes, one association per AIM, made on first contact or refused |
-| Security statistics and events | yes, all counters and mnemonics |
+| Security statistics and events | counters and mnemonics locally (`Endpoint.Statistics`, `Config.OnEvent`); **no M_IT_TB_1 reporting on the wire** (TS 5.4.2.3), five counters never incremented |
 | Broadcast session key (IEC 60870-5-101) | no |
-| secp256k1, X448, brainpool curves; BLAKE2s | no |
+| secp256k1, X448 (mandatory in the TS 9.2 PICS), brainpool curves; BLAKE2s | no |
 | IEC 62351-8 access tokens, certificate revocation lists | no |
 
 Behaviour that goes beyond what cB-Sigma/iec60870 v0.3.0 does, and stays

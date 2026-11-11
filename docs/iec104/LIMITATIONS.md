@@ -1,12 +1,12 @@
 # Limitations: IEC 60870-5-104 (iec104 packages)
 
-What go-iec104 does not do, or does only partly. The interoperability list, clause by clause, is in [INTEROPERABILITY.md](INTEROPERABILITY.md)).
+What go-iec104 does not do, or does only partly. The interoperability list, clause by clause, is in [INTEROPERABILITY.md](INTEROPERABILITY.md).
 
 ## Scope not implemented
 
-- **IEC 60870-5-101** serial links: not in this module. The `asdu` package takes the 101 field sizes so that a separate module can build on it.
+- **IEC 60870-5-101** is in this module (`iec101`), without application-layer security.
 - **File deletion and the query log**: their types are in the codec, with no procedure.
-- **IEC 62351-5**: no broadcast key, no IEC 62351-8 tokens, no secp256k1, X448 or brainpool. See [SECURITY.md](../../SECURITY.md)#application-layer-security-iec-62351-5).
+- **IEC 62351-5 / IEC TS 60870-5-7**: no broadcast key, no IEC 62351-8 tokens, no secp256k1 or X448 (mandatory in the TS PICS), no brainpool, no statistics reporting on the wire, file deletion checked as file read under RBAC. See [SECURITY.md](../../SECURITY.md#checked-against-iec-ts-60870-5-72025).
 - **Event queue**: in memory. It survives an absent control centre, not a restart of the station.
 
 ## Verification

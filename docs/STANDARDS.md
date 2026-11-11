@@ -15,6 +15,7 @@ apart throughout the documentation:
 | Document | Edition held | Form | Notes |
 |---|---|---|---|
 | IEC 60870-5-103 | 1997 (ed. 1) | GOST R IEC 60870-5-103-2005, "IDT" (identical translation, Russian) | Clause 6 quotes the IEC 60870-5-1 FT 1.2 rules and the IEC 60870-5-2 unbalanced procedures that 103 uses; this is our only text for parts 1 and 2. |
+| IEC TS 60870-5-7 | 2025 (ed. 2.0) | PD IEC TS 60870-5-7:2025 (English) | Obtained 2026-11-11; `sec` checked against it, gaps in SECURITY.md. IEC 62351-5:2023, to which it delegates algorithms and procedures, is not held. |
 | IEC 60870-5-104 | 2000 (ed. 1) | GOST R IEC 60870-5-104-2004, "full authentic text" of IEC 60870-5-104:2000 (Russian) | Ed. 2 (2006) and Amd. 1 (2016) are not held. The IEC 104 code was written against them by go-iec104 (see docs/iec104/INTEROPERABILITY.md); differences between ed. 1 and ed. 2 are not re-verified here. |
 
 Everything else below is **not held**. Behaviour that depends on it is
@@ -39,7 +40,7 @@ interoperability results.
 | IEC 60870-5-6 | Conformance testing guidelines | not used | no | - |
 | IEC TS 60870-5-601 | Conformance test cases for 101 | not used | no | - |
 | IEC TS 60870-5-604 | Conformance test cases for 104 | not used | no | - |
-| IEC TS 60870-5-7:2025 | Security extensions for 101/104 | 104 only (`sec`) | no | go-iec104 implementation, differential tests against cB-Sigma |
+| IEC TS 60870-5-7:2025 | Security extensions for 101/104 | 104 only (`sec`) | **yes** | framing checked against the text (SECURITY.md); differential tests against cB-Sigma |
 | IEC 62351-3 | TLS profile | 104 only (TLS 1.2/1.3 via crypto/tls) | no | see SECURITY.md |
 | IEC 62351-5:2023 | Application-layer security | 104 only (`sec`) | no | see SECURITY.md |
 

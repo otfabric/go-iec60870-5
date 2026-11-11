@@ -3,6 +3,10 @@
 [![Go Version](https://img.shields.io/badge/Go-1.26%2B-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![Go Reference](https://pkg.go.dev/badge/github.com/otfabric/go-iec60870-5.svg)](https://pkg.go.dev/github.com/otfabric/go-iec60870-5)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![CI Status](https://github.com/otfabric/go-iec60870-5/actions/workflows/ci.yml/badge.svg)](https://github.com/otfabric/go-iec60870-5/actions/workflows/ci.yml)
+[![Interop](https://github.com/otfabric/go-iec60870-5/actions/workflows/interop.yml/badge.svg)](https://github.com/otfabric/go-iec60870-5/actions/workflows/interop.yml)
+[![Code Coverage](https://codecov.io/gh/otfabric/go-iec60870-5/graph/badge.svg)](https://codecov.io/gh/otfabric/go-iec60870-5)
+[![Latest Release](https://img.shields.io/github/v/release/otfabric/go-iec60870-5?label=release)](https://github.com/otfabric/go-iec60870-5/releases)
 
 A pure Go implementation of the IEC 60870-5 protocol family: no cgo, no
 dependencies outside the standard library.

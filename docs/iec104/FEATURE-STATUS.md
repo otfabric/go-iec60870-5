@@ -83,9 +83,9 @@ The library is pure Go with no dependencies outside the standard library.
 | Station Association, Session Key Change, Secure Data, both roles | ✅ | the `secure` and `secure-gcm-tls` variants of the station scenarios | cB-Sigma only, container and in process |
 | Role-based access control | ✅ | `TestSecurityRoles` | cB-Sigma only |
 | Several controlling stations, refused station | ✅ | `TestSecurityStations`, `TestSecurityRefusedStation` | cB-Sigma only, for a refused AIM |
-| Broadcast session key, IEC 62351-8 tokens, certificate revocation lists, secp256k1, X448, brainpool | — | | |
+| Broadcast session key, IEC 62351-8 tokens, certificate revocation lists, secp256k1, X448 (mandatory in the TS PICS), brainpool, statistics reported as M_IT_TB_1 | — | | |
 
-The security was derived from cB-Sigma/iec60870, not from the IEC documents, so that one implementation is not a test of it against the standard ([SECURITY.md](../../SECURITY.md#application-layer-security-iec-62351-5)).
+The security was derived from cB-Sigma/iec60870, not from the IEC documents, so that one implementation is not a test of it against the standard. Its framing has since been checked against the text of IEC TS 60870-5-7:2025; the gaps found are listed in [SECURITY.md](../../SECURITY.md#checked-against-iec-ts-60870-5-72025).
 
 ### Observability
 
