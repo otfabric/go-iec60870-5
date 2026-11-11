@@ -130,6 +130,14 @@ func sameRequest(a, b *asdu.ASDU) bool {
 type exchange struct {
 	req   *asdu.ASDU
 	match func(a *asdu.ASDU) bool
+	// done reports whether a, delivered to the exchange, is the answer
+	// that ends it. Dispatch hands nothing to an exchange that ended, so
+	// what arrives after the answer (the activation termination after the
+	// confirmation of a command) reaches the application even while the
+	// waiting request has not unregistered yet. Dispatch calls it with the
+	// Requester's lock held, in arrival order.
+	done  func(a *asdu.ASDU) bool
+	ended bool
 
 	mu    sync.Mutex
 	items []*asdu.ASDU
@@ -207,12 +215,17 @@ func (r *Requester) Dispatch(a *asdu.ASDU) (consumed bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, x := range r.exchanges {
-		if Mirrored(r.Params, x.req, a) {
-			x.deliver(a)
+		switch {
+		case x.ended:
+			continue
+		case Mirrored(r.Params, x.req, a):
 			consumed = true
-		} else if x.match != nil && x.match(a) {
-			x.deliver(a)
+		case x.match != nil && x.match(a):
+		default:
+			continue
 		}
+		x.deliver(a)
+		x.ended = x.done != nil && x.done(a)
 	}
 	return consumed
 }
@@ -227,11 +240,11 @@ func (r *Requester) FailAll(err error) {
 	}
 }
 
-func (r *Requester) begin(ctx context.Context, req *asdu.ASDU, also func(*asdu.ASDU) bool) (*exchange, error) {
+func (r *Requester) begin(ctx context.Context, req *asdu.ASDU, also, done func(*asdu.ASDU) bool) (*exchange, error) {
 	if req.First() == nil {
 		return nil, fmt.Errorf("%w: request without information object", asdu.ErrInvalidValue)
 	}
-	x := &exchange{req: req, match: also, sig: make(chan struct{}, 1)}
+	x := &exchange{req: req, match: also, done: done, sig: make(chan struct{}, 1)}
 	r.mu.Lock()
 	for _, o := range r.exchanges {
 		if sameRequest(o.req, req) {
@@ -247,6 +260,11 @@ func (r *Requester) begin(ctx context.Context, req *asdu.ASDU, also func(*asdu.A
 	}
 	return x, nil
 }
+
+// confirming ends an exchange that waits for the confirmation: any answer
+// but an activation termination, which concludes an earlier request for
+// the same object.
+func confirming(a *asdu.ASDU) bool { return a.Cause != asdu.CauseActivationTerm }
 
 func (r *Requester) end(x *exchange) {
 	r.mu.Lock()
@@ -273,7 +291,7 @@ func (r *Requester) bound(ctx context.Context) (context.Context, context.CancelF
 func (r *Requester) Confirmed(ctx context.Context, req *asdu.ASDU) error {
 	ctx, cancel := r.bound(ctx)
 	defer cancel()
-	x, err := r.begin(ctx, req, nil)
+	x, err := r.begin(ctx, req, nil, confirming)
 	if err != nil {
 		return err
 	}
@@ -296,8 +314,20 @@ func (r *Requester) Confirmed(ctx context.Context, req *asdu.ASDU) error {
 func (r *Requester) Collect(ctx context.Context, req *asdu.ASDU, cause asdu.Cause) ([]*asdu.ASDU, error) {
 	ctx, cancel := r.bound(ctx)
 	defer cancel()
+	ended := false // the exchange's view, under the Requester's lock
 	x, err := r.begin(ctx, req, func(a *asdu.ASDU) bool {
 		return a.Cause == cause && processData(r.Params, req, a)
+	}, func(a *asdu.ASDU) bool {
+		switch {
+		case a.Type != req.Type:
+			return false
+		case Rejected(a) != nil:
+			return true
+		case a.Cause != asdu.CauseActivationTerm:
+			ended = true // confirmed: the next termination ends it
+			return false
+		}
+		return ended
 	})
 	if err != nil {
 		return nil, err
@@ -342,7 +372,7 @@ func (r *Requester) Read(ctx context.Context, ca asdu.CommonAddr, ioa asdu.IOA) 
 			}
 		}
 		return false
-	})
+	}, func(a *asdu.ASDU) bool { return a.Type != req.Type || Rejected(a) != nil })
 	if err != nil {
 		return nil, err
 	}
@@ -448,7 +478,7 @@ func (r *Requester) MeasureDelay(ctx context.Context, ca asdu.CommonAddr) (time.
 	start := time.Now()
 	sent := (start.Second()*1000 + start.Nanosecond()/int(time.Millisecond)) % 60000
 	req := asdu.New(asdu.CauseActivation, ca, asdu.DelayAcquisition{Delay: uint16(sent)})
-	x, err := r.begin(ctx, req, nil)
+	x, err := r.begin(ctx, req, nil, confirming)
 	if err != nil {
 		return 0, err
 	}

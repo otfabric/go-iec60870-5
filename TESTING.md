@@ -19,7 +19,7 @@ How to run each test tier of go-iec60870-5. What is implemented and at which evi
 | Examples | `make examples` | none | CI workflow, job Examples |
 | Cross-compilation | `make cross` | none | no |
 | Recorded traffic, committed captures | `make test` (the capture suites below) | none | CI workflow |
-| Recorded traffic, files unchanged | `make captures-verify` | `sha256sum` or `shasum` | CI workflow, job Captures |
+| Recorded traffic, files unchanged | `make captures-verify` (the SHA256SUMS of `iec104`, `iec101`, `iec103` and `iec102/testdata/captures`) | `sha256sum` or `shasum` | CI workflow, job Captures |
 | Recorded traffic, the full recordings | `make captures-extended` | network (GitHub), 251 MB | no |
 | Recorded traffic, regenerate the tshark oracle, the manifest and the fuzz seeds | `make captures-oracle`, `make captures-manifest` | `tshark` for the oracle | no |
 | Interop with reference images | `make interop` | Docker | Interop workflow, every push and pull request |
@@ -39,7 +39,11 @@ The `Extended` workflow runs nightly: every fuzz target for 5 minutes and the ch
   - `statemachine_test.go` covers start, stop, close and switchover races.
   - `chaos_test.go` runs seeded random operations while connections are cut.
   - `hostile_test.go` sends broken framing, control fields, sequence numbers, idle and flooding peers, malformed ASDUs and out-of-turn file transfer to the server, and plays a hostile station against the client; each case checks the time bound, that a legitimate client is then served, and goroutines. `FuzzServerStream` (in `hostile_fuzz_test.go`) feeds arbitrary octets to a running server over an in-memory connection.
-- **Recorded traffic** ([testdata/captures](iec104/testdata/captures/README.md)): `internal/capture` reads the captures (pcap, pcapng, gzip), reassembles TCP and checks every conversation's sequence numbers, acknowledgements and procedures; `TestCorpusReencode` decodes and encodes every APDU; `TestOracleTshark` and `TestOracleZeek` compare the decoded fields with Wireshark's (the `*.tshark.tsv.gz` files next to the captures) and with CERT.LV's Zeek logs; `TestManifest` checks testdata/captures/manifest.json. `client/capture_test.go` plays every recorded controlled station against the client (through `Send`, and through the request and file methods), `server/capture_test.go` every recorded controlling station against the server. The comparison rules: sequence numbers are rebuilt from the live link, ASDU octets are compared as recorded, and every difference is classified in the test that finds it. `IEC104_CAPTURE_EXTENDED=1` adds the files of `make captures-fetch`.
+- **Recorded traffic, shared readers**: `internal/pcapio` reads pcap and pcapng (gzip or not; Ethernet, loopback, Linux cooked, raw IPv4 and SEL RTAC serial-line frames) and reassembles TCP per direction; `internal/serialcap` splits FT 1.2 frames out of RTAC lines and TCP streams of serial port servers and checks the link procedures (FCV per function, FCB toggled and kept for repetitions, FCB 1 after a reset, every request answered by a matching response); `internal/testutil/corpus` holds the manifest, SHA256SUMS and tshark-oracle helpers of the serial corpora.
+- **Recorded IEC 101** ([iec101/testdata/captures](iec101/testdata/captures/README.md)): `iec101/internal/capture` decodes every frame and ASDU with the manifest's field sizes, encodes both again, checks the link analysis and compares with Wireshark (`TestCorpus`, `TestOracleTshark`, `TestManifest`); `iec101/client/capture_test.go` replays the recorded controlled stations against the client (the client makes the recorded requests through `Interrogate`, `Command` and `Send`; every request must equal the recording and every station ASDU must reach the handler), `iec101/server/capture_test.go` sends the recorded requests to the server and compares the confirmations and terminations it builds.
+- **Recorded IEC 103** ([iec103/testdata/captures](iec103/testdata/captures/README.md)): `iec103/internal/capture` does the same for the SEL RTAC excerpts and the ARIEC103 vectors, with the frames the codec refuses or does not re-encode exactly listed with their reason; no replay.
+- **IEC 102 frames** ([iec102/testdata/captures](iec102/testdata/captures/README.md)): `iec102/internal/capture` checks FT 1.2 framing and checksum of every frame of a meter log and of the gisce tests.
+- **Recorded IEC 104** ([iec104/testdata/captures](iec104/testdata/captures/README.md)): `iec104/internal/capture` reads the captures (pcap, pcapng, gzip), reassembles TCP and checks every conversation's sequence numbers, acknowledgements and procedures; `TestCorpusReencode` decodes and encodes every APDU; `TestOracleTshark` and `TestOracleZeek` compare the decoded fields with Wireshark's (the `*.tshark.tsv.gz` files next to the captures) and with CERT.LV's Zeek logs; `TestManifest` checks testdata/captures/manifest.json. `client/capture_test.go` plays every recorded controlled station against the client (through `Send`, and through the request and file methods), `server/capture_test.go` every recorded controlling station against the server. The comparison rules: sequence numbers are rebuilt from the live link, ASDU octets are compared as recorded, and every difference is classified in the test that finds it. `IEC104_CAPTURE_EXTENDED=1` adds the files of `make captures-fetch`.
 - **`interop`** (build tag `interop`): go-iec60870-5 as client and as server against the images of [otfabric/iec104-interop](https://github.com/otfabric/iec104-interop). The images are pinned by digest in `interop/harness.go`, the Makefile and `.github/workflows/interop.yml`; keep the three in step.
 - **`interop/cbsigma`**: `sec` against cB-Sigma/iec60870 in memory.
 
@@ -73,13 +77,14 @@ The gate is 90% of statements in total, the same value as `coverage-min` in `.gi
 | `examples/...` | Programs, run by `make examples` |
 | `internal/testutil` | Test helpers, no production code |
 | `internal/station` | Test station for the suites, no production code |
-| `internal/capture` | Reader and replay of the recorded captures, test infrastructure; its own tests run |
+| `iec104/internal/capture`, `iec101/internal/capture`, `iec103/internal/capture`, `iec102/internal/capture` | Readers and replay of the recorded captures, test infrastructure; their own tests run |
+| `internal/testutil/corpus` | Manifest and oracle helpers of the capture suites, no production code |
 
 `interop` is outside the default build by its build tag, and `interop/cbsigma` is another module.
 
 ## Fuzz regressions
 
-The targets are `FuzzParse` in `apci`, `FuzzDecode` in `asdu` and `FuzzDecode` in `sec`. The seeds `testdata/fuzz/<Target>/capture-*` of `apci` and `asdu` are one APDU or ASDU of every shape in the recorded captures (`make captures-manifest` writes them). A new decoder gets a target; `make fuzz` discovers it.
+The targets include `FuzzParse` in `apci`, `FuzzDecode` in `asdu`, `ft12`, `iec103` and `sec`. The seeds `testdata/fuzz/<Target>/capture-*` of `apci`, `asdu`, `ft12` and `iec103` are one APDU, frame or ASDU of every shape in the recorded captures of levels A to D (`make captures-manifest` writes them). A new decoder gets a target; `make fuzz` discovers it.
 
 When a target fails, `go test` writes the input to `testdata/fuzz/<Target>/` in the package; CI uploads the same directory as the artifact `fuzz-failures`. To keep it as a regression test:
 

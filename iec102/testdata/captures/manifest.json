@@ -1,0 +1,160 @@
+{
+  "description": "IEC 60870-5-102 frames kept for the coming IEC 102 work (testdata/captures/README.md). Files are byte-identical to their sources.",
+  "evidence_levels": {
+    "A": "verified physical-device traffic",
+    "B": "credibly documented physical-device traffic",
+    "C": "independent recorded traffic, hardware origin unknown",
+    "D": "simulated or software testbed",
+    "E": "standards-derived examples or generated fixtures"
+  },
+  "sources": [
+    {
+      "id": "innoWatt/icra-tarifes-optic",
+      "url": "https://github.com/innoWatt/icra-tarifes-optic/tree/b76638cef85e345aba883776ab5b106554df5c5b",
+      "revision": "b76638cef85e345aba883776ab5b106554df5c5b",
+      "terms": "GPL-3.0 (repository licence).",
+      "notes": "Python 2 tool reading electricity meters over IEC 60870-5-102 through their optical port from a Raspberry Pi. The README lists the meters tried; \"icra\" is the Actaris SL762B. usr/tests/icra_201605_raw.txt is the tool's log of a reading: per message the octets and its interpretation (Catalan)."
+    },
+    {
+      "id": "gisce/iec870ree",
+      "url": "https://github.com/gisce/iec870ree/tree/993242daa3e998c9d86948881d97835438d8bef3/tests",
+      "revision": "993242daa3e998c9d86948881d97835438d8bef3",
+      "terms": "AGPL-3.0 (repository licence).",
+      "notes": "Python IEC 60870-5-102 (REE profile) implementation; its unit tests hold link frames and ASDU element octets."
+    }
+  ],
+  "files": [
+    {
+      "path": "gisce/synthetic_synthetic_app-asdu.py",
+      "source": "gisce/iec870ree",
+      "original_name": "tests/test_app_asdu.py",
+      "url": "https://github.com/gisce/iec870ree/blob/993242daa3e998c9d86948881d97835438d8bef3/tests/test_app_asdu.py",
+      "size": 15156,
+      "sha256": "64f584a563a281dac416bbdb71a3cbd4aa753cfaab842a33f1cf70ae15c86de9",
+      "format": "Python unit test with ASDU element octets as bytearray.fromhex",
+      "evidence": "E",
+      "evidence_basis": "Element octets written into unit tests, kept for the coming ASDU codec (no frames).",
+      "systems": [
+        "-"
+      ],
+      "operations": "access key, time tags of the REE profile, integrated totals and their quality",
+      "privacy": "none",
+      "missing_for_verification": "-",
+      "params": {
+        "link_address_octets": 2
+      },
+      "counts": {
+        "frames": 0,
+        "fixed_frames": 0,
+        "variable_frames": 0,
+        "primary": 0,
+        "secondary": 0,
+        "link_addresses": null,
+        "first_user_data_octets": null
+      }
+    },
+    {
+      "path": "gisce/synthetic_synthetic_base-asdu.py",
+      "source": "gisce/iec870ree",
+      "original_name": "tests/test_base_asdu.py",
+      "url": "https://github.com/gisce/iec870ree/blob/993242daa3e998c9d86948881d97835438d8bef3/tests/test_base_asdu.py",
+      "size": 2637,
+      "sha256": "18a7b643f62da466bfde56689352a2e4722d933b53acc27b4f02f7f50dc23900",
+      "format": "Python unit test with frames as bytearray.fromhex",
+      "evidence": "E",
+      "evidence_basis": "Frames written into unit tests.",
+      "systems": [
+        "meter at link address 34572 (test data)"
+      ],
+      "operations": "fixed and variable frames of the link layer",
+      "privacy": "none",
+      "missing_for_verification": "-",
+      "params": {
+        "link_address_octets": 2
+      },
+      "counts": {
+        "frames": 6,
+        "fixed_frames": 4,
+        "variable_frames": 2,
+        "primary": 4,
+        "secondary": 2,
+        "link_addresses": [
+          34572
+        ],
+        "first_user_data_octets": [
+          183
+        ]
+      }
+    },
+    {
+      "path": "gisce/synthetic_synthetic_link-frames.py",
+      "source": "gisce/iec870ree",
+      "original_name": "tests/test_protocol.py",
+      "url": "https://github.com/gisce/iec870ree/blob/993242daa3e998c9d86948881d97835438d8bef3/tests/test_protocol.py",
+      "size": 3361,
+      "sha256": "93c61048b47e471c1b9ac61d3215648025841e22d1fad06b66b7043180d78956",
+      "format": "Python unit test with frames as bytearray.fromhex",
+      "evidence": "E",
+      "evidence_basis": "Frames written into unit tests; whether they were taken from a meter is not stated.",
+      "systems": [
+        "meters at link addresses 34572 and 53653 (test data)"
+      ],
+      "operations": "request of link status, its answer, reset of the remote link, an ASDU 183 confirmation",
+      "privacy": "none",
+      "missing_for_verification": "-",
+      "params": {
+        "link_address_octets": 2
+      },
+      "counts": {
+        "frames": 4,
+        "fixed_frames": 3,
+        "variable_frames": 1,
+        "primary": 1,
+        "secondary": 3,
+        "link_addresses": [
+          34572,
+          53653
+        ],
+        "first_user_data_octets": [
+          183
+        ]
+      }
+    },
+    {
+      "path": "innowatt/icra-tarifes-optic_actaris-sl762b_load-profile-201605.txt",
+      "source": "innoWatt/icra-tarifes-optic",
+      "original_name": "usr/tests/icra_201605_raw.txt",
+      "url": "https://github.com/innoWatt/icra-tarifes-optic/blob/b76638cef85e345aba883776ab5b106554df5c5b/usr/tests/icra_201605_raw.txt",
+      "size": 1054233,
+      "sha256": "72fec4f4847bbb3829dd9d8a268f2a116540e194e64b7a9d0ddc515fc4fcdebb",
+      "format": "text log: \"N bytes:\" and the octets in hexadecimal per message, then the tool's interpretation",
+      "evidence": "B",
+      "evidence_basis": "The tool's log of reading the Actaris SL762B meter at ICRA through its optical port (README: meters tried, \"icra\" Actaris SL762B OK). A log, not a capture: it prints the meter's answers only, not the requests, and no time stamps.",
+      "systems": [
+        "icra-tarifes-optic (Python 2, Raspberry Pi) as controlling station",
+        "Actaris SL762B electricity meter, link address 1, measurement point 1"
+      ],
+      "operations": "the meter's answers of one reading: the confirmation of the session start with access key (ASDU 183), confirmations of load profile requests (ASDU 123) and the integrated totals of the load profile (ASDU 11), two ACKs",
+      "privacy": "meter readings of a research institute, no personal data",
+      "missing_for_verification": "the requests, the time of the session, the meter firmware",
+      "params": {
+        "link_address_octets": 2
+      },
+      "counts": {
+        "frames": 749,
+        "fixed_frames": 2,
+        "variable_frames": 747,
+        "primary": 0,
+        "secondary": 749,
+        "link_addresses": [
+          1
+        ],
+        "first_user_data_octets": [
+          11,
+          123,
+          183
+        ]
+      }
+    }
+  ]
+}

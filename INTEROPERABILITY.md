@@ -14,6 +14,14 @@ Evidence levels used below:
   independent)
 - **independent**: a passing run against a pinned image of
   otfabric/iec60870-5-interop
+- **recorded**: traffic of other implementations captured by others
+  ([iec101/testdata/captures](iec101/testdata/captures/README.md), levels B
+  and C only): every frame decodes and encodes back byte for byte, the link
+  procedures check out, Wireshark agrees, and the recorded controlled
+  stations are replayed against the client (and the stations' answers to
+  recorded requests built by the server). The recordings are of an SEL RTAC
+  and of three stations of a utility (Energisa), with 1-octet link address,
+  COT 1, CA 1, IOA 2
 
 Independent evidence for IEC 101 comes from `make interop-iec101`
 (`iec101/interop`), run locally on 2026-11-11 against the lib60870-C v2.4.1
@@ -60,28 +68,28 @@ The deviations found and still open are listed in
 
 | Item | Implemented | Evidence |
 |---|---|---|
-| FT 1.2 single character E5h, fixed and variable frames | yes | unit (`ft12`), fuzz |
-| Checksum, start/stop, double length check | yes | unit |
+| FT 1.2 single character E5h, fixed and variable frames | yes | unit (`ft12`), fuzz, recorded |
+| Checksum, start/stop, double length check | yes | unit, recorded |
 | Resynchronization after noise or a broken frame | yes | unit (`TestDecoderResync`) |
 | Line idle interval / inter-character gap detection | **no** | - |
 | Link address size 0, 1, 2 octets | yes (0 only balanced) | unit, e2e (1 and 2), unit balanced 0 |
-| Unbalanced: request status of link, reset of remote link, reset of user process | yes | unit, e2e, independent (status, reset of remote link) |
-| Unbalanced: send/confirm, send/no reply (broadcast), request class 1/2 | yes | unit, e2e, independent (send/confirm, class 1/2) |
+| Unbalanced: request status of link, reset of remote link, reset of user process | yes | unit, e2e, independent (status, reset of remote link), recorded (status) |
+| Unbalanced: send/confirm, send/no reply (broadcast), request class 1/2 | yes | unit, e2e, independent (send/confirm, class 1/2), recorded (send/confirm, class 1/2) |
 | Request for access demand (8) answered with status of link (11), table 3 | yes | unit (`TestAccessDemand`) |
 | Reset of FCB (7): not in table 3, answered 15 unless the handler opts in (`link.FCBResetHandler`, IEC 60870-5-103) | yes | unit (`TestResetFCBOptIn`) |
 | "Secondary link not reset" (figures 6, 9): only functions 9 and 0 answered until the first reset of remote link | yes | unit (`TestNotResetState`), independent |
-| ACD-driven class 1 polling, DFC holds back user data | yes | unit, e2e, independent (ACD) |
+| ACD-driven class 1 polling, DFC holds back user data | yes | unit, e2e, independent (ACD), recorded (ACD) |
 | Primary waits for DFC = 0 before reset (figures 5, 8); balanced primary requests status while the peer's DFC is set | yes | unit (`TestInitWaitsForDFC`, `TestBalancedSendWaitsForDFC`) |
 | "Secondary link busy" (figures 6, 9): DFC in every response while the input queue is more than half full, user data refused with NACK | yes | unit (`TestBusyRefusesUserData`), e2e (`TestServerBusySetsDFC`) |
 | Balanced server sends a refused ASDU again (NACK or DFC) | yes | e2e (`TestServerBalancedResendsAfterNack`) |
 | Responses that cannot answer the request (a late repetition) discarded, not taken as the answer | yes | unit (`TestLateResponseDiscarded`) |
-| FCB/FCV, repetition answered with the stored response; a repetition is the same function and data with the FCB not toggled | yes | unit (`TestRepetitionNotProcessedTwice`, `TestSameFCBOtherRequest`) |
-| Single character E5h as ACK / no-data NACK (configurable) | yes | unit |
+| FCB/FCV, repetition answered with the stored response; a repetition is the same function and data with the FCB not toggled | yes | unit (`TestRepetitionNotProcessedTwice`, `TestSameFCBOtherRequest`), recorded (FCB/FCV; no repetition in the recordings) |
+| Single character E5h as ACK / no-data NACK (configurable) | yes | unit, recorded (E5h to class 2 polls, by a station on an RTAC's line) |
 | NACK (1), not functioning (14), not implemented (15) | yes | unit |
 | Empty user data refused (`link.ErrNoData`): without an ASDU a frame is fixed-length (6.1) | yes | unit (`TestEmptyUserData`) |
 | Balanced: both directions initialized, test function for link, DIR bit | yes | unit, e2e, independent |
 | Balanced address field: responses carry the receiver's address (6.2.1.2); `link.Config.SenderAddr` for the own address; either accepted | yes | unit (`TestBalancedReceiverAddr`), independent (lib60870-C, by hand) |
-| Multiple secondaries on one line (multidrop) polled by one client | link layer yes, `iec101/client` **no** (one link address per client) | unit (address filtering) |
+| Multiple secondaries on one line (multidrop) polled by one client | link layer yes, `iec101/client` **no** (one link address per client) | unit (address filtering), recorded (shared RTAC line, decoded only) |
 
 ## Application layer
 
@@ -103,15 +111,15 @@ with the fitting "unknown ..." cause (7.2.3) or drops it.
 | Function | Client | Server | Evidence |
 |---|---|---|---|
 | End of initialization (M_EI_NA_1) after the first link reset and after reset of user process | delivered to the handler | sent | e2e |
-| General and group interrogation (C_IC_NA_1) | `Interrogate` | handler | e2e, independent (station; groups e2e only) |
+| General and group interrogation (C_IC_NA_1) | `Interrogate` | handler | e2e, independent (station; groups e2e only), recorded (station) |
 | Counter interrogation (C_CI_NA_1): request (mode B) and freeze/reset commands confirmed without readings (modes C/D, 7.4.8) | `CounterInterrogate` | handler | e2e; independent for the request |
 | Read (C_RD_NA_1) | `Read` | handler | e2e, independent |
 | Clock synchronization (C_CS_NA_1) | `ClockSync` | handler | e2e, independent |
 | Test command (C_TS_NA_1, fixed test pattern) | `TestCommand` | handler | e2e, independent |
 | Reset process (C_RP_NA_1) | `ResetProcess` | handler | e2e |
 | Delay acquisition (C_CD_NA_1, 7.4.12): measurement with cause activation, setting the delay with cause spontaneous | `MeasureDelay`, `SetDelay` | handler (the clock correction is the application's) | e2e |
-| Process commands, direct and select-before-operate, deactivation | `Command`, `Deactivate` | handler | e2e, independent (C_SC, C_DC, C_RC, C_SE_NA/NB/NC) |
-| Spontaneous (class 1) and cyclic (class 2) data | handler | `Send`, `SendClass` | e2e, independent (class 1 reports) |
+| Process commands, direct and select-before-operate, deactivation | `Command`, `Deactivate` | handler | e2e, independent (C_SC, C_DC, C_RC, C_SE_NA/NB/NC), recorded (C_DC_NA_1 select and execute) |
+| Spontaneous (class 1) and cyclic (class 2) data | handler | `Send`, `SendClass` | e2e, independent (class 1 reports), recorded (CP24Time2a and CP56Time2a types, periodic M_ME_NC_1) |
 | Negative confirmations and "unknown ..." causes | `*telecontrol.NegativeError` | `Negative`, `Reject` | e2e, independent |
 | 101 profile checks (`Params.Strict`) | drops and logs | mirrors with 44..47, or drops | unit (`TestValidate`), e2e (`TestStrictProfile`) |
 | File transfer | **no** | **no** | - |

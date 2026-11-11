@@ -1,5 +1,41 @@
 # Release notes
 
+## v0.2.0
+
+**Date:** not released (prepared)
+**Previous release:** v0.1.0
+
+Recorded traffic for the serial companion standards, more for IEC 104,
+and one defect it found.
+
+- `telecontrol`: an activation termination that arrives right after a
+  command's confirmation, before `Command` returned, now reaches the
+  handler instead of being consumed by the finished request (found by
+  replaying a recorded SEL RTAC select-before-operate against
+  `iec101/client`; it depended on timing). Each request knows the answer
+  that ends it; nothing is handed to a request after that.
+- IEC 101 corpus (`iec101/testdata/captures`): SEL RTAC serial-line
+  captures and an Energisa utility's lines (level B), generated captures
+  (E). Every frame decodes and encodes back byte for byte, the link
+  procedures check out, Wireshark agrees; the recorded stations are
+  replayed against `iec101/client` and `iec101/server`.
+- IEC 103 corpus (`iec103/testdata/captures`): SEL RTAC excerpts (B) and
+  the ARIEC103 vectors (E). ASDU 9 with 14 and 16 measurands, sent by the
+  recorded equipment, is refused as before (LIMITATIONS.md).
+- IEC 102: a meter's frame log and the gisce test frames kept for the
+  coming work, FT 1.2 checked.
+- IEC 104 corpus: 36 more public captures (Industroyer2, an MIO8 RTU,
+  Wireshark issues and wiki, ITI, nDPI, EmreEkin) under the corpus, oracle
+  and replay suites.
+- Shared capture reading in `internal/pcapio` (with the SEL RTAC serial
+  link type) and FT 1.2 link analysis in `internal/serialcap`; fuzz seeds
+  for `ft12`, `asdu` and `iec103` from the recordings.
+- `make captures-verify` covers every corpus; `make captures-extended`
+  runs the IEC 104 suites again (it pointed at removed paths), and the
+  capture cache is git-ignored where the script writes it.
+
+---
+
 ## v0.1.0
 
 **Date:** 2026-11-11

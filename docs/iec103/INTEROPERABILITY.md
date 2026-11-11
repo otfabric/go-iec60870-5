@@ -14,6 +14,7 @@ IEC 60870-5-103-2005.
 | e2e | `iec103/client` against `iec103/server` over `net.Pipe`, also over a line that drops frames, or one of the two against a bare `link.Primary` or a scripted handler (`iec103/e2e`) |
 | fuzz | `FuzzDecode` in `iec103`: decode, encode, decode, encode is stable |
 | interop | a passing run against an independent implementation |
+| recorded | frames of other implementations captured by others ([iec103/testdata/captures](../../iec103/testdata/captures/README.md)): three SEL RTAC serial-line excerpts (level B) decoded, re-encoded byte for byte and compared with Wireshark; not replayed against the client or server |
 
 **There is no interop evidence.** Every test runs this library against
 itself or against octets written from the standard. The library is not its
@@ -24,13 +25,13 @@ other implementations. No otfabric 103 interop harness exists yet.
 
 | Clause | Requirement | Status | Evidence |
 |---|---|---|---|
-| 6.1 | FT 1.2 only, fixed and variable frames, single character E5h | implemented (`ft12`; the primary accepts E5h, the server sends fixed frames) | unit (ft12), e2e |
+| 6.1 | FT 1.2 only, fixed and variable frames, single character E5h | implemented (`ft12`; the primary accepts E5h, the server sends fixed frames) | unit (ft12), e2e, recorded |
 | 6.1 note 2 | at most 255 octets of user data | `iec103.MaxSize` = 253 (L minus C and A) | unit |
 | 6.2.2 | procedures S1, S2, S3 | implemented (`link.Primary`) | e2e |
-| 6.2.3 | unbalanced, control system primary; one-octet address; broadcast 255 send/no reply; RES not used | implemented; the address size is forced to one octet | e2e (`TestTimeSync` broadcast) |
+| 6.2.3 | unbalanced, control system primary; one-octet address; broadcast 255 send/no reply; RES not used | implemented; the address size is forced to one octet | e2e (`TestTimeSync` broadcast), recorded (RTAC primary, several link addresses on one line) |
 | 6.2.3 | PRM=1 functions 0, 3, 4, 9, 10, 11 (+7); others answered with 15 | server: `link.FunctionFilter` | unit (`TestSecondaryExtensions`), e2e (`TestServerLink`) |
 | 6.2.4 | loop delay, 9.6/19.2 kbit/s | not applicable to the library: `link.Config.Timeout` and the transport | - |
-| 6.3 | function 7 reset FCB: next FCV message carries FCB = 1, nothing else reset | `link.Primary.ResetFCB`, `link.Secondary`; the server learns of it through `link.FCBResetHandler` | unit, e2e (`TestInitializationResetFCB`) |
+| 6.3 | function 7 reset FCB: next FCV message carries FCB = 1, nothing else reset | `link.Primary.ResetFCB`, `link.Secondary`; the server learns of it through `link.FCBResetHandler` | unit, e2e (`TestInitializationResetFCB`), recorded (the RTAC resets the FCB of each address) |
 | 6.3 | functions 14 and 15 toggle the FCB | the secondary advances its expected FCB before answering 15; the primary toggles for every new message | unit (`TestSecondaryExtensions`) |
 | 6.3 | DFC while the equipment cannot take commands; a command anyway is not processed and answered NACK (function 1); broadcast excepted | server sets DFC through `link.FlowControlHandler` while its handler queue is more than half full and answers user data NACK while DFC is set, broadcasts excepted; the client holds back queued ASDUs while DFC is set, broadcasts go out | unit, e2e (`TestServerLink`, `TestDFCRefusesUserData`, `TestDFCHeldBack`) |
 | 6.3 | DFC at most 15 s | not enforced by the server: the application must keep its handler moving | - |
@@ -40,7 +41,7 @@ other implementations. No otfabric 103 interop harness exists yet.
 | Clause | Item | Status | Evidence |
 |---|---|---|---|
 | 7.1 | one ASDU per frame, one information object | implemented | unit |
-| 7.2.1 | type identification 1..31 compatible, 32..255 private | tables 3, 4: typed bodies; others `Raw` | unit, fuzz |
+| 7.2.1 | type identification 1..31 compatible, 32..255 private | tables 3, 4: typed bodies; others `Raw` | unit, fuzz, recorded (private 45, 46, 205 as `Raw`, byte for byte) |
 | 7.2.2 | VSQ: number and SQ | written from the body; checked on decode (81H for one information object, SQ = 0 for ASDUs 3, 9, 23) and kept | unit (`TestVSQChecked`) |
 | 7.2.3 | causes, tables 5 and 6 | constants and names | unit |
 | 7.2.4 | common address, 255 global | client default = link address; server accepts own and 255 | e2e |
@@ -51,8 +52,8 @@ other implementations. No otfabric 103 interop harness exists yet.
 | 7.2.6.28, 7.2.6.29 | the bit after the minutes is RES1 | ignored on decode, written as 0 (`cp` keeps its 101/104 GEN meaning) | unit (`TestTimeRES1`) |
 | 7.2.6.32 | GDD: DATASIZE 1..255, NUMBER 1..127; data types 1 to 24 | ranges checked on encode and decode; every data type round-trips | unit (`TestGDDRanges`; `TestGenericDataTypes` for types 5, 6, 8 to 12, 15 to 20), annex (types 1, 3, 7, 14, 21 to 24) |
 | 7.2.6.35 | NDE 1..63 | checked on encode and decode; `PackGenericIdent` refuses no elements | unit (`TestNDERange`) |
-| 7.3.1 | monitor direction ASDUs 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 23, 26, 27, 28, 29, 30, 31 | encode and decode | unit, annex (10: B.1.2, B.2.2, B.3.2, B.5.2, B.6.2, B.7.2, B.8.2; 11: B.4.2), e2e |
-| 7.3.2 | control direction ASDUs 6, 7, 10, 20, 21, 24, 25 | encode and decode | unit, annex (21: B.1.1, B.2.1, B.3.1, B.4.1, B.5.1, B.6.1; 10: B.7.1, B.8.1), e2e |
+| 7.3.1 | monitor direction ASDUs 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 23, 26, 27, 28, 29, 30, 31 | encode and decode; ASDU 9 with more than nine measurands (recorded: 14 and 16) is refused, 7.3.1.8 | unit, annex (10: B.1.2, B.2.2, B.3.2, B.5.2, B.6.2, B.7.2, B.8.2; 11: B.4.2), e2e, recorded |
+| 7.3.2 | control direction ASDUs 6, 7, 10, 20, 21, 24, 25 | encode and decode | unit, annex (21: B.1.1, B.2.1, B.3.1, B.4.1, B.5.1, B.6.1; 10: B.7.1, B.8.1), e2e, recorded (6, 7, 20) |
 | 7.2 note | private combinations of compatible type and private cause | decoded as `Raw`; `DecodeTyped` to interpret them | unit |
 
 ## Clause 7.4: application functions
