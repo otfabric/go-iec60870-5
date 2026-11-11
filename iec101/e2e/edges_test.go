@@ -232,3 +232,26 @@ func TestClientBalancedSupervision(t *testing.T) {
 		t.Fatal("link loss not detected by the link test")
 	}
 }
+
+// Done and Err report the end of the transport, in both modes.
+func TestDoneOnTransportLoss(t *testing.T) {
+	for _, mode := range []iec101.Mode{iec101.ModeUnbalanced, iec101.ModeBalanced} {
+		r := start(t, params(mode), nil)
+		if r.c.Err() != nil || r.s.Err() != nil {
+			t.Fatal("error while running")
+		}
+		_ = r.c.Close() // closes the client's end of the line
+		select {
+		case <-r.s.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%v: server did not notice the line closing", mode)
+		}
+		if r.s.Err() == nil {
+			t.Errorf("%v: server Err nil after transport loss", mode)
+		}
+		<-r.c.Done()
+		if r.c.Err() != nil {
+			t.Errorf("%v: client closed by the application reports %v", mode, r.c.Err())
+		}
+	}
+}

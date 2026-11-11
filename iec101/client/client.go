@@ -154,6 +154,24 @@ func New(rw io.ReadWriter, cfg Config) (*Client, error) {
 	return c, nil
 }
 
+// Done is closed when the link station stops: after Close, or when the
+// transport fails. Err tells which.
+func (c *Client) Done() <-chan struct{} {
+	if c.bal != nil {
+		return c.bal.Done()
+	}
+	return c.pri.Done()
+}
+
+// Err returns the transport error that stopped the station, nil while it
+// runs or after Close.
+func (c *Client) Err() error {
+	if c.bal != nil {
+		return c.bal.Err()
+	}
+	return c.pri.Err()
+}
+
 // State returns the link state.
 func (c *Client) State() iec101.State {
 	c.mu.Lock()

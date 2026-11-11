@@ -99,6 +99,22 @@ func (c *Client) DelayAcquisition(ctx context.Context, ca asdu.CommonAddr, d tim
 
 DelayAcquisition sends a delay acquisition command (C\_CD\_NA\_1).
 
+#### func (Client) Done
+
+```go
+func (c *Client) Done() <-chan struct{}
+```
+
+Done is closed when the link station stops: after Close, or when the transport fails. Err tells which.
+
+#### func (Client) Err
+
+```go
+func (c *Client) Err() error
+```
+
+Err returns the transport error that stopped the station, nil while it runs or after Close.
+
 #### func (Client) Interrogate
 
 ```go

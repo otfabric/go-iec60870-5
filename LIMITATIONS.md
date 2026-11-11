@@ -11,8 +11,10 @@ own list: [docs/iec104/LIMITATIONS.md](docs/iec104/LIMITATIONS.md).
 
 ## IEC 60870-5-101
 
-- **No independent interoperability evidence yet**
-  ([INTEROPERABILITY.md](INTEROPERABILITY.md)).
+- **Independent interoperability evidence covers the default field sizes
+  only**, against two references that are not fully independent of each
+  other, run locally (not in CI: the reference images are not published
+  yet). See [INTEROPERABILITY.md](INTEROPERABILITY.md).
 - **Character timing.** IEC 60870-5-1 requires a receiver to reject a frame
   with an idle interval between its characters and a line idle interval
   between frames. `ft12.Decoder` works on an `io.Reader` and cannot see

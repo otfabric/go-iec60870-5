@@ -158,6 +158,22 @@ func (s *Server) Confirm(req *asdu.ASDU) error
 
 Confirm sends the positive (de)activation confirmation of req.
 
+#### func (Server) Done
+
+```go
+func (s *Server) Done() <-chan struct{}
+```
+
+Done is closed when the station stops: after Close, or when the transport fails (for example the TCP connection to a terminal server closes). Err tells which.
+
+#### func (Server) Err
+
+```go
+func (s *Server) Err() error
+```
+
+Err returns the transport error that stopped the station, nil while it runs or after Close.
+
 #### func (Server) Negative
 
 ```go

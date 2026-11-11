@@ -19,8 +19,9 @@ First version of go-iec60870-5.
   balanced station.
 - `telecontrol`: the request procedures IEC 101 and IEC 104 share.
 - `iec101`: IEC 60870-5-101 controlling station (`iec101/client`) and
-  controlled station (`iec101/server`), unbalanced and balanced. No
-  independent interoperability evidence yet.
+  controlled station (`iec101/server`), unbalanced and balanced, with
+  `Done`/`Err`. Interop suite `iec101/interop` (`make interop-iec101`)
+  against the lib60870-C and cB-Sigma images of iec60870-5-interop.
 - `iec103`: IEC 60870-5-103 codec for every compatible type, controlling
   system (`iec103/client`) and protection equipment (`iec103/server`),
   quickstart example. No independent interoperability evidence yet.

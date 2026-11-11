@@ -169,6 +169,25 @@ func (s *Server) Close() error {
 	return err
 }
 
+// Done is closed when the station stops: after Close, or when the
+// transport fails (for example the TCP connection to a terminal server
+// closes). Err tells which.
+func (s *Server) Done() <-chan struct{} {
+	if s.bal != nil {
+		return s.bal.Done()
+	}
+	return s.sec.Done()
+}
+
+// Err returns the transport error that stopped the station, nil while it
+// runs or after Close.
+func (s *Server) Err() error {
+	if s.bal != nil {
+		return s.bal.Err()
+	}
+	return s.sec.Err()
+}
+
 // State returns the link state: up once the controlling station reset the
 // link (unbalanced) or both directions are initialized (balanced).
 func (s *Server) State() iec101.State {

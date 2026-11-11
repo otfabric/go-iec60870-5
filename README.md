@@ -10,7 +10,7 @@ dependencies outside the standard library.
 | Companion standard | Package | Status |
 |---|---|---|
 | IEC 60870-5-104 (TCP/IP) | [`iec104`](iec104), `iec104/client`, `iec104/server` | Production code carried over from go-iec104 v0.3.0, with its tests, captures and interop suite. See [docs/IEC104_PARITY.md](docs/IEC104_PARITY.md). |
-| IEC 60870-5-101 (serial) | [`iec101`](iec101), `iec101/client`, `iec101/server` | New. Controlling and controlled station, unbalanced and balanced. Tested client against server and against scripted link peers; **no independent interoperability evidence yet** (planned against lib60870-C, cB-Sigma, digitalpetri). |
+| IEC 60870-5-101 (serial) | [`iec101`](iec101), `iec101/client`, `iec101/server` | New. Controlling and controlled station, unbalanced and balanced. Client and server pass independent interop runs against lib60870-C and cB-Sigma in both modes, default field sizes (`make interop-iec101`, local; [INTEROPERABILITY.md](INTEROPERABILITY.md)). |
 | IEC 60870-5-103 (protection equipment) | [`iec103`](iec103), `iec103/client`, `iec103/server` | New. Own ASDU codec for every compatible type (cl. 7.3), controlling system and protection equipment: initialization, time sync, general interrogation, general commands, generic services, disturbance data transfer. Unit, annex B and e2e evidence; **no independent interoperability evidence yet**. See [docs/iec103](docs/iec103/README.md). |
 | IEC 60870-5-102 (integrated totals) | - | Not implemented yet. See [docs/ROADMAP.md](docs/ROADMAP.md). |
 

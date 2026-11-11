@@ -26,10 +26,16 @@ State:
 - IEC 104 interop of the moved packages: 31 tests / 482 subtests pass
   against iec104-interop v0.5.0 (local).
 
+- IEC 101 independent interop (`make interop-iec101`, local): client vs
+  lib60870/cbsigma servers, 4/4 pairings pass; reference clients vs our
+  server 124/124 cases. Harness iec60870-5-interop a071afd (images :dev,
+  unpublished).
+
 Next:
 
-1. Record the IEC 104 interop run; write the IEC 101 consumer suite
-   (`iec101/interop`, build tag `interop`) against the harness images.
+1. Publish the harness images (owner), pin them by digest in
+   iec101/interop/harness.go and add a CI job; cover non-default field
+   sizes and the digitalpetri adapter.
 2. IEC 103 adapters (ARIEC103, vitusdong/iec103-dotnet) in the harness and
    an `iec103/interop` consumer suite.
 3. Phase 4, IEC 102.
