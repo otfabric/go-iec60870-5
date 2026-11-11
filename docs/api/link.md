@@ -362,6 +362,36 @@ func (c Control) String() string
 
 String describes the control field, for example "PRM FCB FCV fn=3" or "ACD fn=8".
 
+### type FCBResetHandler
+
+```go
+type FCBResetHandler interface {
+	ResetFCB()
+}
+```
+
+FCBResetHandler is implemented by a [SecondaryHandler](#type-secondaryhandler) that wants to know about function 7 "reset of frame count bit", the IEC 60870-5-103 extension (6.3): ResetFCB is called after the station reset its expected FCB and before it answers.
+
+### type FlowControlHandler
+
+```go
+type FlowControlHandler interface {
+	Busy() bool
+}
+```
+
+FlowControlHandler is implemented by a [SecondaryHandler](#type-secondaryhandler) that reports data flow control: while Busy returns true every response carries DFC = 1 (IEC 60870-5-2 5.1; IEC 60870-5-103 6.3), not only the NACK to refused user data.
+
+### type FunctionFilter
+
+```go
+type FunctionFilter interface {
+	Implemented(fn byte) bool
+}
+```
+
+FunctionFilter is implemented by a [SecondaryHandler](#type-secondaryhandler) that restricts the primary function codes it serves, as a companion standard does (IEC 60870-5-103 6.2.3): a message with a function code for which Implemented returns false is answered with function 15 "link service not implemented" and not processed (IEC 60870-5-103 6.3). The FCB bookkeeping is the same as for an accepted message.
+
 ### type Primary
 
 ```go

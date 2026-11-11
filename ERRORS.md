@@ -23,6 +23,7 @@ companion standards add their own layers, described in
 - [What is not an error](#what-is-not-an-error)
 - [Detection patterns](#detection-patterns)
 - [Serial companion standards](#serial-companion-standards)
+- [IEC 60870-5-103](#iec-60870-5-103)
 
 ## Quick reference
 
@@ -283,3 +284,35 @@ request whose answers could not be told apart from a pending identical one,
 and wrap `context.DeadlineExceeded` when no answer arrives within
 `Config.RequestTimeout`.
 
+## IEC 60870-5-103
+
+### Codec (`iec103`)
+
+| Sentinel | Meaning |
+|---|---|
+| `iec103.ErrShort` | the ASDU ends before its last field, or a GID is shorter than its GDD announces |
+| `iec103.ErrTrailing` | octets after the information object of a compatible type identification |
+| `iec103.ErrInvalid` | a field out of range: more elements than the ASDU may carry (ASDU 3: 4, ASDU 9: 9, ASDU 23: 8, ASDU 29 and 30: 25, NGD/NDE: 63), GID length different from its GDD, NUMBER above 127, an accessor of `iec103.Value` used on the wrong data type; also a client request with an information number that is not a generic read or write |
+| `iec103.ErrTooLong` | an ASDU longer than 253 octets (one FT 1.2 frame with a one-octet link address), or a data set or description element too large for one ASDU |
+
+A type identification outside tables 3 and 4, or a private cause of
+transmission, is not an error: it decodes as `iec103.Raw`.
+
+### Stations (`iec103/client`, `iec103/server`)
+
+| Sentinel | Meaning |
+|---|---|
+| `iec103.ErrLinkDown` | a request while the link is not initialized; a pending request fails with it when the link is lost |
+| `iec103.ErrClosed` | an operation on a closed client or server |
+| `iec103.ErrInvalidConfig` | invalid configuration: link address 255, a start cause other than 5 or 6, an invalid `link.Config` |
+| `iec103.ErrBusy` | a request while another of the same kind is pending (command, GI, generic read, generic write, generic GI, disturbance transfer) |
+| `iec103.ErrNegative` | negative acknowledgement of a command (cause 21), of a generic write (cause 41; the result is returned too), or a disturbance transfer with a channel acknowledged negatively (the record is returned too) |
+| `iec103.ErrAborted` | the protection equipment ended a disturbance transfer with TOO 34, 37 or 40 |
+| `server.ErrQueueFull` (`iec103/server`) | a class 1 or class 2 queue is full |
+
+Requests wrap `context.DeadlineExceeded` when no answer arrives within the
+context's deadline or `Config.RequestTimeout`. A generic read answered with
+cause 43 is not an error: `GenericResult.Cause` reports it and the data sets
+carry the generic reply codes. Link errors (`link.ErrNack` while the
+equipment holds back commands with DFC, `link.ErrTimeout`) are returned
+wrapped.

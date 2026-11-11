@@ -31,6 +31,32 @@ type SecondaryHandler interface {
 	Reset(user bool)
 }
 
+// FCBResetHandler is implemented by a [SecondaryHandler] that wants to
+// know about function 7 "reset of frame count bit", the IEC 60870-5-103
+// extension (6.3): ResetFCB is called after the station reset its expected
+// FCB and before it answers.
+type FCBResetHandler interface {
+	ResetFCB()
+}
+
+// FlowControlHandler is implemented by a [SecondaryHandler] that reports
+// data flow control: while Busy returns true every response carries DFC = 1
+// (IEC 60870-5-2 5.1; IEC 60870-5-103 6.3), not only the NACK to refused
+// user data.
+type FlowControlHandler interface {
+	Busy() bool
+}
+
+// FunctionFilter is implemented by a [SecondaryHandler] that restricts the
+// primary function codes it serves, as a companion standard does
+// (IEC 60870-5-103 6.2.3): a message with a function code for which
+// Implemented returns false is answered with function 15 "link service
+// not implemented" and not processed (IEC 60870-5-103 6.3). The FCB
+// bookkeeping is the same as for an accepted message.
+type FunctionFilter interface {
+	Implemented(fn byte) bool
+}
+
 // Secondary is the secondary station of unbalanced transmission: it
 // answers the messages addressed to it and ignores the others.
 type Secondary struct {
@@ -105,8 +131,14 @@ func (s *Secondary) receive(f ft12.Frame) {
 	_ = s.p.write(*r)
 }
 
+func (s *Secondary) busy() bool {
+	b, ok := s.h.(FlowControlHandler)
+	return ok && b.Busy()
+}
+
 func (s *Secondary) reply(fn byte, dfc bool) *ft12.Frame {
 	acd := s.h.HasClass1()
+	dfc = dfc || s.busy()
 	if s.p.cfg.SingleCharAck && !acd && !dfc && (fn == FuncAck || fn == FuncNoData) {
 		return &ft12.Frame{Kind: ft12.KindSingle}
 	}
@@ -114,6 +146,12 @@ func (s *Secondary) reply(fn byte, dfc bool) *ft12.Frame {
 }
 
 func (s *Secondary) respond(c Control, f ft12.Frame) *ft12.Frame {
+	if ff, ok := s.h.(FunctionFilter); ok && !ff.Implemented(c.Func()) {
+		if c.Func() == FuncUserDataNoRepl {
+			return nil
+		}
+		return s.reply(FuncNotImplemented, false)
+	}
 	switch c.Func() {
 	case FuncResetLink:
 		s.known, s.expected = true, true
@@ -121,6 +159,9 @@ func (s *Secondary) respond(c Control, f ft12.Frame) *ft12.Frame {
 		return s.reply(FuncAck, false)
 	case FuncResetFCB:
 		s.known, s.expected = true, true
+		if r, ok := s.h.(FCBResetHandler); ok {
+			r.ResetFCB()
+		}
 		return s.reply(FuncAck, false)
 	case FuncResetUser:
 		s.h.Reset(true)
@@ -151,7 +192,7 @@ func (s *Secondary) respond(c Control, f ft12.Frame) *ft12.Frame {
 			return s.reply(FuncNoData, false)
 		}
 		return &ft12.Frame{Kind: ft12.KindVariable, Addr: s.addr, Data: data,
-			Control: byte(SecondaryControl(FuncUserData, s.h.HasClass1(), false, false))}
+			Control: byte(SecondaryControl(FuncUserData, s.h.HasClass1(), s.busy(), false))}
 	}
 	return s.reply(FuncNotImplemented, false)
 }
