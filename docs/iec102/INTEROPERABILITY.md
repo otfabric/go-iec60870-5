@@ -201,9 +201,9 @@ profile. Nothing shows that the client agrees with an independent meter.
 `iec102-gisce` image of otfabric/iec60870-5-interop (contract 2.2):
 gisce/iec870ree v0.14.1 (commit `993242da`, AGPL-3.0, Python), a master of
 the Spanish REE profile, in a container of its own; nothing of it is linked
-into this module. Until the harness release v0.3.0 publishes the image the
-suite uses the local `:dev` build (`IEC102_INTEROP_GISCE_IMAGE` selects
-another); afterwards it is pinned by digest in `iec102/interop/harness.go`.
+into this module. The image of the harness release v0.3.0 is pinned by
+digest in `iec102/interop/harness.go` (`IEC102_INTEROP_GISCE_IMAGE`
+selects another).
 
 The station is `iec102/server` with `ree.Profile`, `ree.Session` (key from
 the fixture, `OnSetTime` setting the station's clock) and, behind it, a

@@ -143,16 +143,12 @@ jobs:
         run: make interop-iec103
 
   # IEC 60870-5-102: the client of gisce/iec870ree (REE profile) of
-  # otfabric/iec60870-5-interop (contract 2.2) against iec102/server. The
-  # image is published by the harness release v0.3.0; until then this job
-  # cannot pull it. After the release it is pinned by digest in
-  # iec102/interop/harness.go and the variable below goes.
+  # otfabric/iec60870-5-interop v0.3.0 (contract 2.2) against iec102/server.
+  # The image is pinned by digest in iec102/interop/harness.go.
   iec102:
     name: IEC 102 against gisce/iec870ree (server)
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      IEC102_INTEROP_GISCE_IMAGE: ghcr.io/otfabric/iec60870-5-interop-iec102-gisce:v0.3.0
     steps:
       - name: Checkout
         uses: actions/checkout@v4

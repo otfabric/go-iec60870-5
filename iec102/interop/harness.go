@@ -27,13 +27,10 @@ import (
 	"github.com/otfabric/go-iec60870-5/iec102/server"
 )
 
-// gisceImage is the reference: the gisce/iec870ree client of
-// otfabric/iec60870-5-interop (contract 2.2). Until the harness release
-// that publishes it (v0.3.0), this is the local tag a checkout of the
-// harness builds ("make image-iec102-gisce"); after the release it is
-// pinned here by its multi-arch index digest (the release's
-// manifest.json), as the IEC 101 and IEC 103 suites pin theirs.
-const gisceImage = "ghcr.io/otfabric/iec60870-5-interop-iec102-gisce:dev"
+// gisceImage is the reference: the gisce/iec870ree v0.14.1 client of
+// otfabric/iec60870-5-interop v0.3.0 (contract 2.2), pinned by multi-arch
+// index digest (the release's manifest.json).
+const gisceImage = "ghcr.io/otfabric/iec60870-5-interop-iec102-gisce@sha256:4d0e42bd267d066b04ddb48cc8542b1fc17da1485dc8c0aacecdec460b2c760a"
 
 type adapter struct {
 	name, image string

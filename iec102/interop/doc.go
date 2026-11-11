@@ -6,9 +6,8 @@
 // module (iec102/server with the REE profile of iec102/ree) against the
 // independent controlling station published by otfabric/iec60870-5-interop
 // (contract 2.2): gisce/iec870ree, a Python master of the Spanish REE
-// profile, in a Docker image. Until the harness release v0.3.0 publishes
-// that image, harness.go names the local :dev tag a harness checkout
-// builds; CI sets the released tag through IEC102_INTEROP_GISCE_IMAGE. The station serves the harness's baseline
+// profile, in the Docker image of the harness release v0.3.0, pinned by
+// digest in harness.go. The station serves the harness's baseline
 // fixture, which the suite reads from the image (print-fixture); every
 // result document is checked against the fixture's values, never against
 // this module.
@@ -23,7 +22,7 @@
 //
 // Environment:
 //
-//	IEC102_INTEROP_GISCE_IMAGE  the gisce image; empty skips
+//	IEC102_INTEROP_GISCE_IMAGE  another gisce image (default: the pinned one); empty skips
 //	IEC102_REQUIRE_INTEROP=1    fail instead of skip when Docker or the image is missing
 //	IEC102_INTEROP_TRACE=1      log every frame of the station
 //

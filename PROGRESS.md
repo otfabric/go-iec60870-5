@@ -14,11 +14,9 @@ otfabric/iec60870-5-interop). Newest first. Plan: [docs/ROADMAP.md](docs/ROADMAP
   the interop suite moved to the IEC 104 images of iec60870-5-interop
   v0.2.1 with pascaldekloe/part5 as fifth reference.
 - IEC 102: first independent evidence, gisce/iec870ree (REE profile)
-  against `iec102/server` (`make interop-iec102`, contract 2.2). The image
-  is a local `:dev` build until iec60870-5-interop v0.3.0 publishes it;
-  then pin its digest in `iec102/interop/harness.go` and drop the
-  `IEC102_INTEROP_GISCE_IMAGE` override in interop.yml.
-- Next: the harness release v0.3.0 and the IEC 102 pin; IEC 101
+  against `iec102/server` (`make interop-iec102`, contract 2.2), on the
+  image of iec60870-5-interop v0.3.0 pinned by digest.
+- Next: IEC 101
   digitalpetri and non-default field sizes; IEC 103 generic services and
   disturbance data in the harness contract; the open deviations
   ([LIMITATIONS.md](LIMITATIONS.md)).

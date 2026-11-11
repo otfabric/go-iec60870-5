@@ -25,7 +25,7 @@ How to run each test tier of go-iec60870-5. What is implemented and at which evi
 | IEC 104 interop with reference images | `make interop` | Docker | Interop workflow, every push and pull request except Markdown-only changes |
 | IEC 101 interop (lib60870-C, cB-Sigma) | `make interop-iec101` | Docker | Interop workflow, job `iec101` |
 | IEC 103 interop (vitusdong, ARIEC103, Open103, go-iecp5) | `make interop-iec103` | Docker | Interop workflow, job `iec103` |
-| IEC 102 interop (gisce/iec870ree against the server) | `make interop-iec102` | Docker; the image is a local `:dev` build until iec60870-5-interop v0.3.0 publishes it | Interop workflow, job `iec102` (pulls the v0.3.0 tag, so it fails until that release) |
+| IEC 102 interop (gisce/iec870ree against the server) | `make interop-iec102` | Docker; the iec60870-5-interop v0.3.0 image, pinned by digest | Interop workflow, job `iec102` |
 | IEC 62351-5 against cB-Sigma/iec60870, in process | `make test-cbsigma` | Go 1.26 (`iec104/interop/cbsigma` is a module of its own) | Interop workflow, job cB-Sigma |
 
 `make check` is the local gate: format, lint, vet, vulnerability scan, capture checksums, tests, per-package coverage, examples and `docs-check` (docsync, as the Docs workflow runs it). It needs `staticcheck`, `golangci-lint` and `govulncheck` on the `PATH`. It fails on the per-package floor; `make coverage-check` fails on the floor of the total.

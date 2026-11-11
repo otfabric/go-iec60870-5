@@ -94,8 +94,7 @@ own list: [docs/iec104/LIMITATIONS.md](docs/iec104/LIMITATIONS.md).
   points, blocks and the REE configuration requests are not exercised; the
   tariff answers come from the suite's handler, not from `iec102/server`.
   The client has no independent peer: we found no open controlled station
-  (meter), so its evidence is the recorded traffic of one meter. The image
-  is a local build until the harness release (v0.3.0) publishes it.
+  (meter), so its evidence is the recorded traffic of one meter.
 - The layout of M_EI_NA_2 (70) is unknown (carried raw); signatures are not
   checked; the server has no class 1 or spontaneous data and does not
   enforce a session; one station per client.

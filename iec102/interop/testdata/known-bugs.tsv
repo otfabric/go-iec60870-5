@@ -1,4 +1,4 @@
-# Copied from otfabric/iec60870-5-interop tests/iec102/known-bugs.tsv (contract 2.2, branch feat/iec102; v0.3.0 when released).
+# Copied from otfabric/iec60870-5-interop tests/iec102/known-bugs.tsv (v0.3.0, contract 2.2).
 # Known bugs of upstream versions for IEC 60870-5-102.
 # Same columns and rules as tests/iec104/known-bugs.tsv: adapter, upstream
 # version, a regular expression on the operation and its flags, what is wrong,
