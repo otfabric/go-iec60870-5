@@ -33,7 +33,7 @@ own list: [docs/iec104/LIMITATIONS.md](docs/iec104/LIMITATIONS.md).
 
 - **Independent interoperability evidence** covers the default field sizes
   and the sets 2/2/2/3, 1/2/1/3, 2/1/2/2 and (balanced) 0/1/1/2 against
-  lib60870-C, cB-Sigma and digitalpetri/iec60870 (iec60870-5-interop v0.4.0,
+  lib60870-C, cB-Sigma and digitalpetri/iec60870 (iec60870-5-interop v0.5.0,
   contract 2.3, pinned by digest); it is interop with these stacks, not
   with field devices. Balanced against a digitalpetri
   station nothing beyond the link start-up interworks: the station does not

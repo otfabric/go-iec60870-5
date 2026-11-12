@@ -29,14 +29,14 @@ import (
 	"github.com/otfabric/go-iec60870-5/iec103/server"
 )
 
-// The references: the IEC 103 images of otfabric/iec60870-5-interop v0.4.0
+// The references: the IEC 103 images of otfabric/iec60870-5-interop v0.5.0
 // (contract 2.3: generic services and the transmission of disturbance data),
 // pinned by multi-arch index digest (the release's manifest.json).
 var stacks = []struct{ name, env, image string }{
-	{"vitusdong", "IEC103_INTEROP_VITUSDONG_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-vitusdong@sha256:866a1d43eb9cedbdb79691fa6becb63cb71febe096e7107a98b50e4067393e08"},
-	{"ariec103", "IEC103_INTEROP_ARIEC103_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-ariec103@sha256:3b847f31d2e321e1a26309d619c540baaae2da480b7fd31d761f428691a5eb6e"},
-	{"open103", "IEC103_INTEROP_OPEN103_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-open103@sha256:8e848d426d1b98542810dbf06f63f78c54a40334dd72003da0ef07ae7d322ee0"},
-	{"goiecp5", "IEC103_INTEROP_GOIECP5_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-goiecp5@sha256:c429dd18938e1ce046231d476ec9d69c4edd3626cf99231512f7e0fae2439598"},
+	{"vitusdong", "IEC103_INTEROP_VITUSDONG_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-vitusdong@sha256:aa473f10cb8462e0adcc9ceb0c296af91517392ce0971be1a0f26a3fde2b2429"},
+	{"ariec103", "IEC103_INTEROP_ARIEC103_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-ariec103@sha256:9ef0df986e74385da8b171b217665a331aee9ed2446314df23b22abd5ab4d012"},
+	{"open103", "IEC103_INTEROP_OPEN103_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-open103@sha256:56ef05691794d3addac5ff36fc0cea10a1e88d3db332a8391f789729d7cd2b05"},
+	{"goiecp5", "IEC103_INTEROP_GOIECP5_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-goiecp5@sha256:ae042e80fdd077e346a84e8769201916d6ed92bb40aebcb626e0321d009be2fa"},
 	// OT Fabric's own stack, as published by iec60870-5-interop (ADR-0012):
 	// not a reference. It runs only when IEC103_INTEROP_OTFABRIC_IMAGE names
 	// an image, and shows compatibility between releases of this module, not
@@ -569,7 +569,14 @@ func readBugs(t *testing.T, name string) []knownBug {
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		bugs = append(bugs, knownBug{adapter: col[0], version: col[1], match: re, what: col[3], id: col[4], url: col[5]})
+		// Since harness v0.5.0 an adapter may name a role
+		// (<adapter>@client, <adapter>@server). The roles here come from
+		// clientBugs; a role in the file must agree with it.
+		who, role, scoped := strings.Cut(col[0], "@")
+		if scoped && (role == "client") != clientBugs[col[4]] {
+			t.Fatalf("%s: %s is listed for the %s role, clientBugs says otherwise", name, col[4], role)
+		}
+		bugs = append(bugs, knownBug{adapter: who, version: col[1], match: re, what: col[3], id: col[4], url: col[5]})
 	}
 	return bugs
 }

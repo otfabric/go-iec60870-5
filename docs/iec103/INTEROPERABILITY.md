@@ -13,7 +13,7 @@ IEC 60870-5-103-2005.
 | annex | the octet example of annex B, encoded and decoded |
 | e2e | `iec103/client` against `iec103/server` over `net.Pipe`, also over a line that drops frames, or one of the two against a bare `link.Primary`, a scripted handler or a hostile raw peer, and both over a faulty line (`iec103/e2e`) |
 | fuzz | `FuzzDecode` in `iec103`: decode, encode, decode, encode is stable; `server.FuzzDispatch` and `client.FuzzReceive` for the stations' receive paths |
-| independent | a passing run against an independent implementation: the reference images of otfabric/iec60870-5-interop v0.4.0 (contract 2.3), pinned by digest, `make interop-iec103` ([below](#independent-implementations)) |
+| independent | a passing run against an independent implementation: the reference images of otfabric/iec60870-5-interop v0.5.0 (contract 2.3), pinned by digest, `make interop-iec103` ([below](#independent-implementations)) |
 | recorded | frames of other implementations captured by others ([iec103/testdata/captures](../../iec103/testdata/captures/README.md)): three SEL RTAC serial-line excerpts (level B) decoded, re-encoded byte for byte and compared with Wireshark; not replayed against the client or server |
 
 ## Independent implementations
@@ -26,10 +26,12 @@ build). Expected outcomes are the
 harness's own: its case table (`testdata/cases.tsv`), its value and
 session checks (`scripts/interop-iec103.sh`) and the fixture the images
 print; known bugs of the references (`testdata/known-bugs.tsv` and
-`testdata/known-bugs-consumer.tsv`, the bugs no harness pairing shows) are
-skipped with their id, never counted as passes.
+`testdata/known-bugs-consumer.tsv`, the bugs no harness pairing shows; since
+harness v0.5.0 an entry may name a role, `<adapter>@client` or
+`<adapter>@server`, which the suite checks against its own table of client
+bugs and then strips) are skipped with their id, never counted as passes.
 
-| Direction | References | Result (2026-11-11, linux/arm64 images; the whole suite repeated 2026-11-12 on the pinned v0.4.0 images: 4 top-level tests, 75 subtests passed, 38 skipped as known bugs or undeclared features, 0 failed) |
+| Direction | References | Result (2026-11-11, linux/arm64 images; the whole suite repeated 2026-11-12 on the v0.4.0 images and again on the pinned v0.5.0 images, each time 4 top-level tests, 75 subtests passed, 38 skipped as known bugs or undeclared features, 0 failed) |
 |---|---|---|
 | reference client against `iec103/server` | vitusdong/iec103-dotnet v0.1.0, masarray/ARIEC103 v1.2.31-3-gec08dd7, XVincentX/Open103 887ff5a5, riclolsen/go-iecp5 v0.4.7 | 9 cases × 4 clients and 6 value/session checks × 4: 53 pass, 0 fail, 7 skipped (6 known client differences, all ARIEC103: 5 `ariec103-command-no-rii`, 1 `ariec103-clock-sync-cp32`; 1 feature the client does not declare: vitusdong measurands). Per client: goiecp5 15/15, Open103 15/15, vitusdong 14 + 1 undeclared, ARIEC103 9 + 6 known |
 | `iec103/client` against a reference server | vitusdong/iec103-dotnet v0.1.0 (the only reference server) | 4 pass (link start-up, clock synchronization, GI termination with the scan number, an idle line of 3 s and a second synchronization), 4 skipped as known server bugs (identification, GI answers, command, refused command) |
