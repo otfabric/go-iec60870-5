@@ -83,8 +83,9 @@ methods turn both forms of refusal into `*iec104.NegativeError`:
 | Cause 47 | `asdu.CauseUnknownIOA` | No such information object |
 
 `NegativeError.ASDU` is the station's answer in full. `Interrogate` and
-`CounterInterrogate` return the ASDUs collected so far together with the
-error.
+`CounterInterrogate` with `asdu.FreezeRead` return the ASDUs collected so
+far together with the error. `CounterInterrogate` with a freeze or reset
+qualifier returns at the confirmation and always with nil ASDUs.
 
 ## Connection-fatal errors
 

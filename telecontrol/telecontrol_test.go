@@ -7,6 +7,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -265,5 +266,30 @@ func TestTerminationAfterConfirmation(t *testing.T) {
 	}
 	if !slices.Equal(consumed, []bool{false, false}) {
 		t.Errorf("read: consumed %v", consumed)
+	}
+}
+
+// TestTestSequenceCounterStartsAtZero: the counter of C_TS_TA_1 starts at 0
+// and is incremented per command (IEC 60870-5-104 8.8).
+func TestTestSequenceCounterStartsAtZero(t *testing.T) {
+	var mu sync.Mutex
+	var seen []uint16
+	r := scripted(func(req *asdu.ASDU) []*asdu.ASDU {
+		if o, ok := req.First().(asdu.TestCommand); ok {
+			mu.Lock()
+			seen = append(seen, o.Counter)
+			mu.Unlock()
+		}
+		return []*asdu.ASDU{req.Reply(asdu.CauseActivationCon, false)}
+	})
+	for range 3 {
+		if err := r.TestCommand(context.Background(), 1, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 3 || seen[0] != 0 || seen[1] != 1 || seen[2] != 2 {
+		t.Errorf("counters %v, want [0 1 2]", seen)
 	}
 }

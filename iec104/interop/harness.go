@@ -29,20 +29,20 @@ type adapter struct {
 }
 
 // The reference images this version of go-iec60870-5 is qualified against:
-// the IEC 104 images of otfabric/iec60870-5-interop v0.3.0 (lib60870-C
+// the IEC 104 images of otfabric/iec60870-5-interop v0.4.0 (lib60870-C
 // v2.4.1, OpenMUC j60870 1.8.0, wendy512/iec104 v1.0.4 on go-iecp5 v1.2.6,
 // cB-Sigma/iec60870 v0.3.0 with IEC 62351-5, pascaldekloe/part5 v0.3.0),
 // pinned by digest so that a run is reproducible (the digests are those of
 // the release's manifest.json). Moving to another release means changing
 // these constants, and the Makefile and the interop workflow follow.
 const (
-	interopRelease       = "v0.3.0"
+	interopRelease       = "v0.4.0"
 	interopStandard      = "iec60870-5-104"
-	defaultLib60870Image = "ghcr.io/otfabric/iec60870-5-interop-iec104-lib60870@sha256:2f518140646bd68f44b04ce63d5d614565f060ec2f1d23b3794a335826aa073e"
-	defaultOpenMUCImage  = "ghcr.io/otfabric/iec60870-5-interop-iec104-openmuc@sha256:66d70899388076a56b3006d45951014421279bc5840e4da7b4ad31aa35d54a1e"
-	defaultWendy512Image = "ghcr.io/otfabric/iec60870-5-interop-iec104-wendy512@sha256:906b02db5f7e23eed1f761deb4927a9172d6c0b92ea882fe340844d03aab0d0d"
-	defaultCBSigmaImage  = "ghcr.io/otfabric/iec60870-5-interop-iec104-cbsigma@sha256:f231cc972e96f91a2ca49ef0f7eff0fd76f913b720ff891f1749c454791d88b6"
-	defaultPart5Image    = "ghcr.io/otfabric/iec60870-5-interop-iec104-part5@sha256:2f14454a393c090090b0160694995b46ae7e48237e34f3f20a8ef609d5e57d35"
+	defaultLib60870Image = "ghcr.io/otfabric/iec60870-5-interop-iec104-lib60870@sha256:adda416d5659671e28080bca361a7fb6708aa8dce1877cba8207008049d1bb04"
+	defaultOpenMUCImage  = "ghcr.io/otfabric/iec60870-5-interop-iec104-openmuc@sha256:a619fc3e15a44cff6793d1d17f6db3f8783fbb0557b79ff46bbb8280ee95e8e5"
+	defaultWendy512Image = "ghcr.io/otfabric/iec60870-5-interop-iec104-wendy512@sha256:03773fceb73cd6a6923209ad81fc5dbdcfff9cf538544b4067f1b21ee5b4a679"
+	defaultCBSigmaImage  = "ghcr.io/otfabric/iec60870-5-interop-iec104-cbsigma@sha256:f25d56f35badd81134813c6098ecf0cf63e6e8c9aec69f9e404f77cd2f626506"
+	defaultPart5Image    = "ghcr.io/otfabric/iec60870-5-interop-iec104-part5@sha256:6ff105c63340053a8365ce70373f0a72c514a847003046d48208a0df3f591ea6"
 
 	// readyFile is the readiness file of a server container (contract 2.0).
 	readyFile = "/run/iec60870-5-interop/ready"

@@ -56,28 +56,37 @@ func TestReferenceClientAgainstServer(t *testing.T) {
 				continue
 			}
 			t.Run(a.name+"/"+mode, func(t *testing.T) {
-				var ln net.Listener
-				var st *station
-				restart := func() {
-					if ln != nil {
+				// One station per set of link flags (contract 2.3: both ends of
+				// a line get the same field sizes); a case that changes the
+				// station gets a fresh one.
+				listeners := map[string]net.Listener{}
+				restart := func(key string, fs fields) net.Listener {
+					if ln := listeners[key]; ln != nil {
 						_ = ln.Close()
 					}
-					var err error
-					if ln, err = net.Listen("tcp", "0.0.0.0:0"); err != nil {
+					ln, err := net.Listen("tcp", "0.0.0.0:0")
+					if err != nil {
 						t.Fatal(err)
 					}
-					if st, err = newStation(f); err != nil {
+					st, err := newStation(f)
+					if err != nil {
 						t.Fatal(err)
 					}
-					serve(t, ln, params(mode), st)
+					serve(t, ln, paramsFor(mode, fs), uint16(fs.linkAddr), st)
+					listeners[key] = ln
+					return ln
 				}
-				restart()
 				for _, c := range cases(t) {
 					if c.needs != "-" && !satisfied(a, c.needs) {
 						continue
 					}
-					if c.state == "rw" {
-						restart()
+					fs, key := caseFields(c.op)
+					if !a.takes(fs, mode) || !a.clientCanSend(c.op, fs, mode) {
+						continue // the reference declares it cannot (contract 2.3)
+					}
+					ln := listeners[key]
+					if ln == nil || c.state == "rw" {
+						ln = restart(key, fs)
 					}
 					t.Run(c.id, func(t *testing.T) {
 						ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -87,6 +96,9 @@ func TestReferenceClientAgainstServer(t *testing.T) {
 							t.Fatal(err)
 						}
 						if got := r.summary(); got != c.summary || code != c.exit {
+							if bug := knownBug(t, a, "client", mode, c.op); bug != "" {
+								t.Skipf("known bug of %s %s: %s", a.name, a.caps.Upstream.Version, bug)
+							}
 							t.Errorf("%s:\n got  exit %d %s\n want exit %d %s", strings.Join(c.op, " "), code, got, c.exit, c.summary)
 						}
 					})

@@ -206,4 +206,4 @@ SetDelay sends the transmission delay d to the station: C\_CD\_NA\_1 with cause 
 func (r *Requester) TestCommand(ctx context.Context, ca asdu.CommonAddr, withTime bool) error
 ```
 
-TestCommand sends a test command. With withTime set it is C\_TS\_TA\_1 with a fresh test sequence counter and the current time (the only test command of IEC 60870-5-104); otherwise C\_TS\_NA\_1 with the fixed test bit pattern (IEC 60870-5-101).
+TestCommand sends a test command. With withTime set it is C\_TS\_TA\_1 with the test sequence counter, starting at 0 and incremented per command (IEC 60870-5-104 8.8), and the current time (the only test command of IEC 60870-5-104); otherwise C\_TS\_NA\_1 with the fixed test bit pattern (IEC 60870-5-101).

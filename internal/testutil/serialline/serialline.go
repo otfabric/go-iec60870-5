@@ -164,6 +164,15 @@ func (l *Line) intn(n int) int {
 	return l.rng.Intn(n)
 }
 
+// octet returns a random octet.
+func (l *Line) octet() byte {
+	v := l.intn(256)
+	if v < 0 || v > 255 {
+		return 0
+	}
+	return byte(v)
+}
+
 // End is one end of a line: an io.ReadWriteCloser. Closing either end
 // closes the line: reads return io.EOF, writes io.ErrClosedPipe.
 type End struct {
@@ -239,7 +248,7 @@ func (e *End) Write(b []byte) (int, error) {
 		for i := range noise {
 			// Not E5h: a single character is a whole frame, an ACK out of
 			// nothing that no checksum can catch.
-			for noise[i] = byte(l.intn(256)); noise[i] == 0xE5; noise[i] = byte(l.intn(256)) {
+			for noise[i] = l.octet(); noise[i] == 0xE5; noise[i] = l.octet() {
 			}
 		}
 		b = append(noise, b...)

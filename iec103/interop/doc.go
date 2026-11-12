@@ -4,8 +4,8 @@
 
 // Package interop runs the IEC 60870-5-103 stations of this module against
 // the independent implementations published by otfabric/iec60870-5-interop
-// (v0.3.0, contract 2.2; images pinned by digest in harness.go): every
-// reference client against this module's server
+// (contract 2.3; the images of the harness release v0.4.0, pinned by digest
+// in harness.go): every reference client against this module's server
 // (iec103/server, serving the harness's baseline fixture), and this
 // module's client (iec103/client) against the one reference server.
 //
@@ -13,8 +13,10 @@
 // (server and client), masarray/ARIEC103, XVincentX/Open103 and
 // riclolsen/go-iecp5 (clients only). Expected values come from the images
 // themselves (print-fixture) and from the harness's case table and known
-// bugs (testdata/cases.tsv, testdata/known-bugs.tsv), never from this
-// module.
+// bugs (testdata/cases.tsv, testdata/known-bugs.tsv and
+// testdata/known-bugs-consumer.tsv), never from this module. Contract 2.3
+// adds the generic services and the transmission of disturbance data
+// (services.go, services_test.go).
 //
 // A pairing whose failure the harness lists as a known bug of the
 // reference is skipped with the bug id; it never counts as a pass.

@@ -88,6 +88,7 @@ the library carries it) · **n/a**.
 | 7.6 | Clock synchronization C_CS act/actcon (optional); the actcon carries the station's time before synchronization and follows the stored time-tagged data; time tags flagged until synchronized | conforms / app | `client.ClockSync`; the content and ordering of the confirmation are the station application's |
 | 7.7 | Commands: select, break (deact), execute, actcon, deactcon, actterm, return information | conforms | `client.Command`, `Deactivate`; interop `TestClientSelectBeforeOperate`. The client's wait ends at actcon (Known deviations) |
 | 7.8 | Counter interrogation: C_CI act/actcon, deact/deactcon, M_IT, actterm | conforms | `client.CounterInterrogate`; `server.Mux` passes a C_CI deactivation |
+| 7.8 | A counter freeze or reset (A_MEMCNT, A_MEMINCR) is act/actcon only; the readings follow a separate counter request (IEC 60870-5-101:2003 7.4.8 mode C, figures 95, 96) | **fixed** (v0.4.0) | `client.CounterInterrogate` waited for a termination after a freeze or reset, so it timed out against a station that only confirms; it now returns at the confirmation. `TestCounterFreezeReturnsAtConfirmation`. The interop references refuse a freeze, so the confirmed path is unit-tested only |
 | 7.9 | Parameter loading: P_ME act/actcon (and spontaneous), P_AC act/actcon | **fixed** | `server.Mux` passed a deactivation of P_ME_NA/NB/NC_1 to the handler; now refused with cause 45. `TestMuxActivationOnlyTypes` |
 | 7.6, 7.10, 7.1 / 8.8 | Clock synchronization, test command and reset process are activated only; for C_TS_TA_1, 8.8 lists cause 6 alone in control direction | **fixed** | `server.Mux` passed a deactivation of C_CS_NA_1, C_TS_TA_1 and C_RP_NA_1 to the handler; now refused with cause 45. `TestMuxActivationOnlyTypes` |
 | 7.11 | File transfer in both directions, directory | conforms | `GetFile`, `PutFile`, `ListFiles`, `FileServer`; interop `TestClientFileTransfer`, `TestClientUpload`, `TestClientDirectory`, server tests |
@@ -480,14 +481,14 @@ Besides its own tests the library is run against five independent
 implementations, as client and as server, on every push and pull request that changes more
 than Markdown (Interop workflow). The reference
 builds are the IEC 104 images of
-[otfabric/iec60870-5-interop v0.3.0](https://github.com/otfabric/iec60870-5-interop/releases/tag/v0.3.0)
-(container contract 2.2, which for IEC 104 is contract 1.3 of the earlier
+[otfabric/iec60870-5-interop v0.4.0](https://github.com/otfabric/iec60870-5-interop/releases/tag/v0.4.0)
+(container contract 2.3, unchanged for IEC 104 since 2.2, which is contract 1.3 of the earlier
 otfabric/iec104-interop under new image names, entrypoint and readiness
 path), pinned by the digests of the release's `manifest.json`. Until
 2026-11-11 the suite ran against iec104-interop v0.5.0, which had the
 first four of them.
 
-| Reference | Version | client → reference server | reference client → server | Subtests passed / skipped (local run, 2026-11-11) |
+| Reference | Version | client → reference server | reference client → server | Subtests passed / skipped (local run, 2026-11-12) |
 |-----------|---------|---------------------------|---------------------------|------|
 | MZ Automation lib60870-C | v2.4.1 | pass | pass | 112 / 0 |
 | OpenMUC j60870 | 1.8.0 | pass ¹ ⁴ | pass ⁴ | 107 / 5 |
@@ -495,8 +496,9 @@ first four of them.
 | cB-Sigma/iec60870 | v0.3.0 | pass ³ | pass ³ | 132 / 0 |
 | pascaldekloe/part5 | v0.3.0 | pass ⁵ | pass ⁵ | 68 / 13 |
 
-The run: `IEC104_REQUIRE_INTEROP=1 make interop V=1`, Docker linux/arm64,
-31 top-level tests and 519 subtests passed, 35 skipped, 0 failed, 444 s.
+The run: `IEC104_REQUIRE_INTEROP=1 make interop V=1` on the v0.4.0 images,
+Docker linux/arm64, 31 top-level tests and 519 subtests passed, 35 skipped,
+0 failed, 441 s; the same counts as on the v0.3.0 images (2026-11-11).
 Every skip is a feature the image does not declare or the known j60870 bug;
 part5 needed no entry of its own in `known-bugs.tsv`.
 

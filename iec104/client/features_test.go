@@ -601,3 +601,29 @@ func TestGroupErrors(t *testing.T) {
 		t.Errorf("TestCommand: %v", err)
 	}
 }
+
+// TestCounterFreezeReturnsAtConfirmation: a counter freeze or reset is
+// only confirmed by the station (IEC 60870-5-104 7.8; IEC 60870-5-101:2003
+// 7.4.8 mode C, figures 95 and 96), so the call returns at the
+// confirmation, sends the command once, and returns no ASDUs.
+func TestCounterFreezeReturnsAtConfirmation(t *testing.T) {
+	for _, frz := range []uint8{asdu.FreezeWithoutReset, asdu.FreezeWithReset, asdu.FreezeResetOnly} {
+		st := newFlaky(t, 0)
+		c := dial(t, st.addr, client.WithRequestTimeout(5*time.Second),
+			client.WithRetry(client.Retry{Attempts: 3, Backoff: 10 * time.Millisecond}))
+		start := time.Now()
+		got, err := c.CounterInterrogate(context.Background(), 1, asdu.CounterGeneral, frz)
+		if err != nil {
+			t.Fatalf("freeze %d: %v", frz, err)
+		}
+		if len(got) != 0 {
+			t.Errorf("freeze %d: %d ASDUs, want none", frz, len(got))
+		}
+		if d := time.Since(start); d > 2*time.Second {
+			t.Errorf("freeze %d took %v: waited for a termination", frz, d)
+		}
+		if n := st.count(asdu.C_CI_NA_1); n != 1 {
+			t.Errorf("freeze %d sent %d times, want 1", frz, n)
+		}
+	}
+}

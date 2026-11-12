@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
 	"testing"
 	"time"
 
@@ -57,6 +58,7 @@ func clientScenario(t *testing.T, a adapter, f *fixture, mode string) {
 		t.Fatalf("link start-up: %v", err)
 	}
 	ca := asdu.CommonAddr(f.Station.CommonAddress)
+	skipKnownServerBug(ctx, t, a, mode, c, ca)
 
 	t.Run("interrogation", func(t *testing.T) {
 		data, err := c.Interrogate(ctx, ca, asdu.QOIStation)
@@ -183,4 +185,135 @@ func clientScenario(t *testing.T, a adapter, f *fixture, mode string) {
 			t.Fatalf("read after setpoint: %v %v", x, err)
 		}
 	})
+}
+
+// fieldSizeRuns are the sets of field sizes (contract 2.3 of
+// iec60870-5-interop) this module's client runs against every reference
+// server that takes them: every field other than the default, a two-octet cause
+// with one-octet common addresses, two-octet link and
+// common addresses alone, and no link address field (balanced only).
+var fieldSizeRuns = []struct {
+	name string
+	f    fields
+}{
+	{"2223", fields{addrSize: 2, cot: 2, ca: 2, ioa: 3, linkAddr: 300}},
+	{"1213", fields{addrSize: 1, cot: 2, ca: 1, ioa: 3, linkAddr: 1}},
+	{"2122", fields{addrSize: 2, cot: 1, ca: 2, ioa: 2, linkAddr: 1}},
+	{"0112", fields{addrSize: 0, cot: 1, ca: 1, ioa: 2, linkAddr: 0}},
+}
+
+// This module's client against the reference server of every stack with
+// field sizes other than the defaults: link start-up, interrogation, read, a refused read of an address that needs the
+// size, the broadcast common address of the size, and a command with its
+// report.
+func TestClientAgainstReferenceFieldSizes(t *testing.T) {
+	for _, a := range adapters(t) {
+		f := loadFixture(t, a)
+		for _, mode := range modes {
+			if !containsString(a.caps.LinkModes, mode) {
+				continue
+			}
+			for _, run := range fieldSizeRuns {
+				if !a.takes(run.f, mode) {
+					continue
+				}
+				t.Run(a.name+"/"+mode+"/"+run.name, func(t *testing.T) { fieldSizeScenario(t, a, f, mode, run.f) })
+			}
+		}
+	}
+}
+
+func fieldSizeScenario(t *testing.T, a adapter, f *fixture, mode string, fs fields) {
+	port := startServer(t, a, mode, "--link-address-size", strconv.Itoa(fs.addrSize), "--link-address", strconv.Itoa(fs.linkAddr),
+		"--cot-size", strconv.Itoa(fs.cot), "--ca-size", strconv.Itoa(fs.ca), "--ioa-size", strconv.Itoa(fs.ioa))
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := paramsFor(mode, fs)
+	reports := make(chan *asdu.ASDU, 32)
+	c, err := client.New(conn, client.Config{Params: p, LinkAddr: uint16(fs.linkAddr), OwnAddr: uint16(fs.linkAddr),
+		PollInterval: 20 * time.Millisecond,
+		Handler: func(x *asdu.ASDU) {
+			if x.Cause == asdu.CauseReturnRemote || x.Cause == asdu.CauseSpontaneous {
+				reports <- x
+			}
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if err := c.WaitUp(ctx); err != nil {
+		t.Fatalf("link start-up: %v", err)
+	}
+	ca := asdu.CommonAddr(f.Station.CommonAddress)
+	skipKnownServerBug(ctx, t, a, mode, c, ca)
+
+	interrogate := func(t *testing.T, to asdu.CommonAddr) {
+		t.Helper()
+		data, err := c.Interrogate(ctx, to, asdu.QOIStation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := 0
+		for _, x := range data {
+			if x.Cause != asdu.CauseInterrogatedStation || x.CommonAddr != ca {
+				t.Errorf("answer %v", x)
+			}
+			n += len(x.Objects)
+		}
+		if want := len(f.Points) - 1; n != want { // every point but the integrated total
+			t.Errorf("%d objects, want %d", n, want)
+		}
+	}
+	t.Run("interrogation", func(t *testing.T) { interrogate(t, ca) })
+	t.Run("broadcast interrogation", func(t *testing.T) {
+		interrogate(t, asdu.CommonAddr(1<<(8*fs.ca)-1))
+	})
+	t.Run("read", func(t *testing.T) {
+		x, err := c.Read(ctx, ca, 202)
+		if err != nil || valueOf(x.First()) != float64(float32(230.5)) {
+			t.Fatalf("%v %v", x, err)
+		}
+		unknown := asdu.IOA(999)
+		if fs.ioa == 3 {
+			unknown = 70000 // only a three-octet address carries it
+		}
+		var neg *telecontrol.NegativeError
+		if _, err := c.Read(ctx, ca, unknown); !errors.As(err, &neg) || neg.Cause() != asdu.CauseUnknownIOA {
+			t.Fatalf("unknown IOA %d: %v", unknown, err)
+		}
+	})
+	t.Run("command", func(t *testing.T) {
+		if err := c.Command(ctx, ca, asdu.SetpointFloat{IOA: 502, Value: 49.5}); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case x := <-reports:
+			if p, ok := x.First().(asdu.MeasuredFloat); !ok || x.Type != asdu.M_ME_TF_1 || p.IOA != 202 || p.Value != 49.5 {
+				t.Fatalf("report %v", x)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("no report")
+		}
+	})
+}
+
+// skipKnownServerBug skips the scenario when the reference server has a
+// known bug in the link mode (testdata/known-bugs.tsv) and it reproduces: an
+// interrogation does not complete. Without the bug the scenario runs.
+func skipKnownServerBug(ctx context.Context, t *testing.T, a adapter, mode string, c *client.Client, ca asdu.CommonAddr) {
+	t.Helper()
+	bug := knownBug(t, a, "server", mode, []string{"interrogate"})
+	if bug == "" {
+		return
+	}
+	probe, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if _, err := c.Interrogate(probe, ca, asdu.QOIStation); err != nil {
+		t.Skipf("known bug of %s %s (%v): %s", a.name, a.caps.Upstream.Version, err, bug)
+	}
+	t.Errorf("known bug of %s %s did not reproduce: %s", a.name, a.caps.Upstream.Version, bug)
 }

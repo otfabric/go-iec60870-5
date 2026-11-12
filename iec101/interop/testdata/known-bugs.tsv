@@ -1,0 +1,9 @@
+# Copied from otfabric/iec60870-5-interop tests/iec101/known-bugs.tsv at v0.4.0 (contract 2.3).
+# Known bugs of upstream versions for IEC 60870-5-101, for scripts/interop.sh.
+# Same columns and rules as tests/iec104/known-bugs.tsv. A bug is listed
+# only with evidence from a run (docs/COMPATIBILITY.md). Two additions for
+# the serial standards: column 1 may be "<adapter>@server" or
+# "<adapter>@client" (the entry applies to that role only), and the regex is
+# matched against the operation followed by " --link-mode <mode of the run>";
+# an entry whose regex names a link mode is active only in a run of that mode.
+digitalpetri@server	33e52b3	^(interrogate|counter-interrogate|read|clock-sync|test-command|command)( .*)? --link-mode balanced$	A balanced digitalpetri station never initializes its own primary direction: it sends user data (function 3, FCV 1) to the controlling station without request status of link (9) and reset of remote link (0) first, which IEC 60870-5-101:2003 clause 6 (figures 8 and 9) requires; a controlling station whose secondary keeps the "not reset" state (cB-Sigma) ignores the data, so no answer arrives	digitalpetri-balanced-server-no-link-reset	https://github.com/digitalpetri/iec60870/blob/33e52b360c0fa9bc6099eb0b0aa19eed1eff9ad0/iec60870-cs101/src/main/java/com/digitalpetri/iec60870/cs101/BalancedEngine.java

@@ -27,7 +27,7 @@ Evidence levels used below:
 Independent evidence for IEC 101 comes from `make interop-iec101`
 (`iec101/interop`), run locally on 2026-11-11 against the lib60870-C v2.4.1
 and cB-Sigma/iec60870 v0.3.0 images of otfabric/iec60870-5-interop
-(v0.3.0, contract 2.2, images pinned by digest in `iec101/interop/harness.go`), with the
+(v0.3.0, contract 2.2, then pinned by digest), with the
 contract's defaults (1-octet link address, COT 1, CA 1, IOA 2):
 
 - this module's client against each reference server, unbalanced and
@@ -52,10 +52,50 @@ IEC 60870-5-101:2003 6.2.1.2 (the receiver's address) interworks with it.
 cB-Sigma's adapter takes one link address for both directions and cannot
 show the difference. The harness itself runs equal addresses only.
 
-Not covered by independent runs: other field sizes, 2-octet and 0-octet
-link addresses, single character acknowledgement, multidrop, DFC set by
-the peer. cB-Sigma's IEC 101 was debugged against
-lib60870, so the two references are not fully independent of each other.
+Contract 2.3 of the harness (field sizes, a third stack) was run on the IEC 101
+images of otfabric/iec60870-5-interop v0.4.0 (lib60870-C v2.4.1,
+cB-Sigma/iec60870 v0.3.0, digitalpetri/iec60870 33e52b3), pinned by multi-arch
+index digest in `iec101/interop/harness.go`, locally on 2026-11-12 (Docker
+linux/arm64, `IEC101_REQUIRE_INTEROP=1`): 3 top-level tests, 490 subtests
+passed, 5 skipped (digitalpetri balanced, the known bug), 0 failed, 192 s.
+The Interop workflow runs the same suite (job `iec101`). The same results came
+from the `:dev` images of the harness branch on 2026-11-11:
+
+| Reference | This module's client, default sizes (scenarios) | This module's client, field sizes (subtests) | Reference client against this module's server (cases) |
+|---|---|---|---|
+| lib60870-C | 5 + 5 pass | 12 + 16 pass | 61 + 64 pass |
+| cB-Sigma | 5 + 5 pass | 12 + 16 pass | 61 + 64 pass |
+| digitalpetri | 5 + 0 pass (balanced: the scenario skipped, known upstream bug) | 12 + 0 pass (balanced: 4 runs skipped, known upstream bug) | 55 + 64 pass (unbalanced: 6 cases not run, `unbalancedCommonAddress` false) |
+
+(unbalanced + balanced). The field sizes are those of the harness: link
+address, cause, common address, object address 2/2/2/3 (link address 300),
+1/2/1/3 and 2/1/2/2 in both modes, 0/1/1/2 (no link address field) in balanced
+mode; the client runs interrogation, the broadcast common address of the size
+(255 or 65535), a read, a refused read of an address that needs the size
+(70000 with three octets) and a set point with its report. The reference
+clients replay the harness's 64 cases (33 with field sizes). Not run: the
+0/1/1/2 cases in unbalanced mode (no link address field is balanced only),
+and digitalpetri's unbalanced client on the 6 cases whose common address is
+not its link address (its master sends an ASDU to the station whose link
+address equals the common address; capability `unbalancedCommonAddress`
+false).
+
+The skips are the harness's known bug `digitalpetri-balanced-server-no-link-reset`
+(`iec101/interop/testdata/known-bugs.tsv`), reproduced by every run: a
+balanced digitalpetri station sends its user data without initializing its own
+primary direction (no request status of link, no reset of remote link), which
+IEC 60870-5-101:2003 clause 6, figures 8 and 9, requires; this module's
+balanced secondary keeps the "secondary link not reset" state and does not
+take the data (`link/balanced.go`), as cB-Sigma's does, so the station's
+answers never arrive. The suite skips those scenarios only after an
+interrogation has failed; lib60870-C and digitalpetri as controlling stations
+accept data on a link that was never reset. Not a defect of this module.
+
+Not covered by independent runs: a one-octet object address (the fixture's
+addresses need two), single character acknowledgement sent by this module,
+multidrop, DFC set by the peer. cB-Sigma's IEC 101 was debugged against
+lib60870, so those two references are not fully independent of each other;
+digitalpetri is.
 
 The implementation was checked clause by clause on 2026-11-11 against
 IEC 60870-5-101:2003 (GOST R IEC 60870-5-101-2006, an identical

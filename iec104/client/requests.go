@@ -13,6 +13,7 @@ import (
 
 	"github.com/otfabric/go-iec60870-5/asdu"
 	iec104 "github.com/otfabric/go-iec60870-5/iec104"
+	"github.com/otfabric/go-iec60870-5/telecontrol"
 )
 
 // exchange collects the ASDUs that answer one request. IEC 60870-5-104 has
@@ -86,54 +87,19 @@ func sameRequest(a, b *asdu.ASDU) bool {
 }
 
 // mirrored reports whether a is the controlled station's mirror of req: a
-// confirmation, termination or rejection.
+// confirmation, termination or rejection (the shared rules of
+// [telecontrol.Mirrored]: a confirmation answers the request of its own
+// kind, activation or deactivation; a refusal by role-based access control
+// of IEC TS 60870-5-7 is a mirror as well).
 func (c *Client) mirrored(req, a *asdu.ASDU) bool {
-	if a.Type != req.Type {
-		return false
-	}
-	if a.CommonAddr != req.CommonAddr && !c.opts.asduParams.IsBroadcast(req.CommonAddr) {
-		return false
-	}
-	// A confirmation answers the request of its own kind: the confirmation
-	// of a deactivation that was given up on must not pass for that of the
-	// activation which followed it, nor the other way round.
-	switch a.Cause {
-	case asdu.CauseActivationCon, asdu.CauseActivationTerm:
-		if req.Cause == asdu.CauseDeactivation {
-			return false
-		}
-	case asdu.CauseDeactivationCon:
-		if req.Cause != asdu.CauseDeactivation {
-			return false
-		}
-	case asdu.CauseUnknownType, asdu.CauseUnknownCause, asdu.CauseUnknownCommonAddr, asdu.CauseUnknownIOA:
-	case asdu.CauseNotAuthorized:
-		// Refused by role-based access control of IEC TS 60870-5-7.
-	default:
-		return false
-	}
-	f := a.First()
-	return f != nil && f.Address() == req.First().Address()
+	return telecontrol.Mirrored(c.opts.asduParams, req, a)
 }
 
 // fromStation reports whether a is monitor-direction data from the station
-// (or stations) req addressed. The parameters of measured values
-// (P_ME_NA_1..P_ME_NC_1) are control-direction types that a station also
-// reports in answer to an interrogation, with an "interrogated by ..."
-// cause (the type identification and cause of transmission assignments of
-// the IEC 60870-5-104 interoperability list: 110..112 with causes 20..36).
+// (or stations) req addressed, including parameters of measured values
+// sent in answer to an interrogation ([telecontrol.FromStation]).
 func (c *Client) fromStation(req, a *asdu.ASDU) bool {
-	if a.Type.InControlDirection() && !interrogatedParameter(a) {
-		return false
-	}
-	return a.CommonAddr == req.CommonAddr || c.opts.asduParams.IsBroadcast(req.CommonAddr)
-}
-
-// interrogatedParameter reports whether a is a parameter of a measured value
-// sent in answer to an interrogation.
-func interrogatedParameter(a *asdu.ASDU) bool {
-	return a.Type >= asdu.P_ME_NA_1 && a.Type <= asdu.P_ME_NC_1 &&
-		a.Cause >= asdu.CauseInterrogatedStation && a.Cause <= asdu.CauseInterrogatedGroup16
+	return telecontrol.FromStation(c.opts.asduParams, req, a)
 }
 
 // processData is fromStation for a request that is answered with process
@@ -409,16 +375,27 @@ func (c *Client) Interrogate(ctx context.Context, ca asdu.CommonAddr, qoi asdu.Q
 	return c.collect(ctx, req, qoi.Cause(), true)
 }
 
-// CounterInterrogate runs a counter interrogation (C_CI_NA_1) and collects
-// the integrated totals the station sends in answer, until the activation
-// termination arrives. request is [asdu.CounterGeneral] or a counter group
-// 1..4; freeze is one of the asdu.Freeze* qualifiers.
+// CounterInterrogate runs a counter interrogation (C_CI_NA_1). request is
+// [asdu.CounterGeneral] or a counter group 1..4; freeze is one of the
+// asdu.Freeze* qualifiers.
 //
-// It follows the same collection rules as [Client.Interrogate].
+// With [asdu.FreezeRead] it is a counter request: it collects the
+// integrated totals the station sends in answer until the activation
+// termination arrives, following the same collection rules as
+// [Client.Interrogate]. With a freeze or reset qualifier it is a counter
+// freeze command, which the station only confirms (IEC 60870-5-104 7.8;
+// IEC 60870-5-101:2003 7.4.8, mode C, figures 95 and 96): it returns at the
+// confirmation with no ASDUs and is never retried. Collect the frozen
+// values with a following request; a termination or totals a station
+// sends anyway reach the Handler.
 func (c *Client) CounterInterrogate(ctx context.Context, ca asdu.CommonAddr, request, freeze uint8) ([]*asdu.ASDU, error) {
 	obj := asdu.CounterInterrogation{Request: request, Freeze: freeze}
-	// A freeze or reset changes the counters: only a plain read is repeated.
-	return c.collect(ctx, asdu.New(asdu.CauseActivation, ca, obj), obj.Cause(), freeze == asdu.FreezeRead)
+	req := asdu.New(asdu.CauseActivation, ca, obj)
+	if freeze != asdu.FreezeRead {
+		// A freeze or reset changes the counters: it is not repeated.
+		return nil, c.confirmed(ctx, req, false)
+	}
+	return c.collect(ctx, req, obj.Cause(), true)
 }
 
 // Read requests the current value of one information object (C_RD_NA_1)

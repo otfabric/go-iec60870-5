@@ -39,7 +39,7 @@ iec103/client iec103/server  iec101/client  iec101/server        iec104/client  
 | `asdu` | 101, 104 | The telecontrol ASDU (type identifications 1..127 of IEC 60870-5-101 clause 7 and 104 clause 9) with configurable field sizes. IEC 102 and IEC 103 define different ASDUs and have their own codecs. |
 | `iec102` | 102 only | Its own ASDU (record address, integrated totals with a common time tag) and its own time formats (time a CP40Time2a, time b CP56Time2b), which are not IEC 60870-5-4 types and so not in `cp`. We do not hold the 102 text; sources and classification in docs/iec102/INTEROPERABILITY.md. The Spanish REE profile is `iec102/ree`, applied only through `iec102.Params.Profile` and its helpers. |
 | `iec103` | 103 only | Its own ASDU (one-octet data unit identifier, FUN/INF addressing, types 1-31), IEC 60870-5-103 cl. 7. |
-| `telecontrol` | 101 (104 later) | How a controlling station recognises the answers to its requests. Neither 101 nor 104 has a transaction identifier; both use the same matching rules. |
+| `telecontrol` | 101, 104 (rules only) | How a controlling station recognises the answers to its requests. Neither 101 nor 104 has a transaction identifier; both use the same matching rules (`Mirrored`, `FromStation`). `iec101/client` uses the whole `Requester`; `iec104/client` only the rules and keeps its own exchanges (started-period stamps, retries, metrics, its error types, file transfer). |
 | `iec104/...` | 104 only | APCI framing, sequence numbers, k/w, t0..t3, TLS, redundancy groups: nothing of it applies to a serial line. |
 | `sec` | 104 only | IEC TS 60870-5-7 profiles IEC 62351-5 for 101 and 104; it is wired into 104 only. `Config.Serial` selects the MAC lengths of serial links. The `Endpoint` also emits the statistic reports (M_IT_TB_1 Secure Data) with the output of the call that made them due, and refuses monitor-direction data for roles without MONITOR DATA in `Protect`, so the transport needs no extra wiring. |
 
@@ -62,7 +62,8 @@ APIs that follow their own application models.
   `link` and `internal/logx`.
 - `sec` imports `asdu`.
 - The `iec104` tree imports `asdu`, `sec`, `internal/logx` and the root
-  package; nothing outside `iec104/` imports it.
+  package, and `iec104/client` adds `telecontrol`; nothing outside
+  `iec104/` imports it.
 - The root package `iec60870` holds only the `Logger` interfaces; every
   package may import it.
 - Test infrastructure of the capture suites: `internal/pcapio` (pcap,
