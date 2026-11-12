@@ -1,4 +1,4 @@
-# Copied from otfabric/iec60870-5-interop tests/iec103/known-bugs-consumer.tsv, branch feat/iec103-generic-disturbance (contract 2.3, unreleased).
+# Copied from otfabric/iec60870-5-interop tests/iec103/known-bugs-consumer.tsv at v0.4.0 (contract 2.3).
 # Known bugs of upstream versions for IEC 60870-5-103 that no pairing of this
 # harness shows, because the only server here (vitusdong) shares or lacks the
 # behaviour: they were seen on the wire against a consumer's own station or

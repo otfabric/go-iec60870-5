@@ -2,7 +2,7 @@
 
 ## v0.4.0
 
-**Date:** not released (prepared)
+**Date:** 2026-11-12
 **Previous release:** v0.3.0
 
 More independent evidence for the serial standards: IEC 101 against a third
@@ -11,8 +11,8 @@ sizes; IEC 103 generic services and disturbance data against the harness's
 contract 2.3, with the server's disturbance data transfer evidenced by
 Open103. `iec104/client` returns from a counter freeze or reset at the
 confirmation and shares the matching rules of `telecontrol`. SAST stays at
-zero. The interop suites run against local `:dev` images of
-iec60870-5-interop contract 2.3 until its release pins them by digest.
+zero. All interop suites pin the images of iec60870-5-interop v0.4.0
+(contract 2.3) by digest.
 
 ### Fixed
 
@@ -43,6 +43,14 @@ iec60870-5-interop contract 2.3 until its release pins them by digest.
 
 ### Tests
 
+- All interop suites pin the images of otfabric/iec60870-5-interop v0.4.0
+  (contract 2.3) by multi-arch index digest (`iec101`, `iec102`, `iec103`
+  and `iec104/interop/harness.go`, the Makefile, the Interop workflow); the
+  testdata copies of its case and known-bug tables are those of v0.4.0. On
+  those images (2026-11-12, linux/arm64): IEC 101 490 subtests passed and 5
+  skipped (known bug), IEC 102 18 passed, IEC 103 75 passed and 38 skipped
+  (known bugs, undeclared features), IEC 104 519 passed and 35 skipped, the
+  cB-Sigma IEC 62351-5 tests pass; 0 failures.
 - `iec101/interop`: digitalpetri/iec60870 as third reference, and the field
   sizes 2/2/2/3, 1/2/1/3, 2/1/2/2 and (balanced) 0/1/1/2 (link address,
   cause, common address, object address). This module's client: 5 + 5

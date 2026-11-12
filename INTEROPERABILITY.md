@@ -27,7 +27,7 @@ Evidence levels used below:
 Independent evidence for IEC 101 comes from `make interop-iec101`
 (`iec101/interop`), run locally on 2026-11-11 against the lib60870-C v2.4.1
 and cB-Sigma/iec60870 v0.3.0 images of otfabric/iec60870-5-interop
-(v0.3.0, contract 2.2, images pinned by digest in `iec101/interop/harness.go`), with the
+(v0.3.0, contract 2.2, then pinned by digest), with the
 contract's defaults (1-octet link address, COT 1, CA 1, IOA 2):
 
 - this module's client against each reference server, unbalanced and
@@ -52,12 +52,14 @@ IEC 60870-5-101:2003 6.2.1.2 (the receiver's address) interworks with it.
 cB-Sigma's adapter takes one link address for both directions and cannot
 show the difference. The harness itself runs equal addresses only.
 
-Contract 2.3 of the harness (field sizes, a third stack) was run locally on
-2026-11-11 against `:dev` images of all three references built from the
-harness branch `feat/iec101-digitalpetri` (lib60870-C v2.4.1, cB-Sigma/iec60870
-v0.3.0, digitalpetri/iec60870 33e52b3; the images are to be pinned by digest
-after that harness release, see the TODO in `iec101/interop/harness.go`),
-`IEC101_REQUIRE_INTEROP=1`, 0 failures:
+Contract 2.3 of the harness (field sizes, a third stack) was run on the IEC 101
+images of otfabric/iec60870-5-interop v0.4.0 (lib60870-C v2.4.1,
+cB-Sigma/iec60870 v0.3.0, digitalpetri/iec60870 33e52b3), pinned by multi-arch
+index digest in `iec101/interop/harness.go`, locally on 2026-11-12 (Docker
+linux/arm64, `IEC101_REQUIRE_INTEROP=1`): 3 top-level tests, 490 subtests
+passed, 5 skipped (digitalpetri balanced, the known bug), 0 failed, 192 s.
+The Interop workflow runs the same suite (job `iec101`). The same results came
+from the `:dev` images of the harness branch on 2026-11-11:
 
 | Reference | This module's client, default sizes (scenarios) | This module's client, field sizes (subtests) | Reference client against this module's server (cases) |
 |---|---|---|---|

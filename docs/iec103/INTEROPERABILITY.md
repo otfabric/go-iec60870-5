@@ -13,28 +13,27 @@ IEC 60870-5-103-2005.
 | annex | the octet example of annex B, encoded and decoded |
 | e2e | `iec103/client` against `iec103/server` over `net.Pipe`, also over a line that drops frames, or one of the two against a bare `link.Primary`, a scripted handler or a hostile raw peer, and both over a faulty line (`iec103/e2e`) |
 | fuzz | `FuzzDecode` in `iec103`: decode, encode, decode, encode is stable; `server.FuzzDispatch` and `client.FuzzReceive` for the stations' receive paths |
-| independent | a passing run against an independent implementation: the reference images of otfabric/iec60870-5-interop (contract 2.3, local `:dev` images of its branch feat/iec103-generic-disturbance until the release; v0.3.0 and contract 2.2 for the rest), `make interop-iec103` ([below](#independent-implementations)) |
+| independent | a passing run against an independent implementation: the reference images of otfabric/iec60870-5-interop v0.4.0 (contract 2.3), pinned by digest, `make interop-iec103` ([below](#independent-implementations)) |
 | recorded | frames of other implementations captured by others ([iec103/testdata/captures](../../iec103/testdata/captures/README.md)): three SEL RTAC serial-line excerpts (level B) decoded, re-encoded byte for byte and compared with Wireshark; not replayed against the client or server |
 
 ## Independent implementations
 
 `iec103/interop` (build tag `interop`, `make interop-iec103`) runs this
 module against the IEC 103 images of otfabric/iec60870-5-interop
-(contract 2.3: for now the `:dev` images built from its branch
-feat/iec103-generic-disturbance, to be pinned by digest in
-`iec103/interop/harness.go` after its release; the v0.3.0 digests of
-contract 2.2 are kept there in a comment). Expected outcomes are the
+v0.4.0 (contract 2.3), pinned by multi-arch index digest in
+`iec103/interop/harness.go` (`IEC103_INTEROP_<STACK>_IMAGE` selects another
+build). Expected outcomes are the
 harness's own: its case table (`testdata/cases.tsv`), its value and
 session checks (`scripts/interop-iec103.sh`) and the fixture the images
 print; known bugs of the references (`testdata/known-bugs.tsv` and
 `testdata/known-bugs-consumer.tsv`, the bugs no harness pairing shows) are
 skipped with their id, never counted as passes.
 
-| Direction | References | Result (2026-11-11, linux/arm64 images) |
+| Direction | References | Result (2026-11-11, linux/arm64 images; the whole suite repeated 2026-11-12 on the pinned v0.4.0 images: 4 top-level tests, 75 subtests passed, 38 skipped as known bugs or undeclared features, 0 failed) |
 |---|---|---|
 | reference client against `iec103/server` | vitusdong/iec103-dotnet v0.1.0, masarray/ARIEC103 v1.2.31-3-gec08dd7, XVincentX/Open103 887ff5a5, riclolsen/go-iecp5 v0.4.7 | 9 cases × 4 clients and 6 value/session checks × 4: 53 pass, 0 fail, 7 skipped (6 known client differences, all ARIEC103: 5 `ariec103-command-no-rii`, 1 `ariec103-clock-sync-cp32`; 1 feature the client does not declare: vitusdong measurands). Per client: goiecp5 15/15, Open103 15/15, vitusdong 14 + 1 undeclared, ARIEC103 9 + 6 known |
 | `iec103/client` against a reference server | vitusdong/iec103-dotnet v0.1.0 (the only reference server) | 4 pass (link start-up, clock synchronization, GI termination with the scan number, an idle line of 3 s and a second synchronization), 4 skipped as known server bugs (identification, GI answers, command, refused command) |
-| contract 2.3, reference client against `iec103/server` (2026-11-11, linux/arm64, `:dev` images) | vitusdong (generic services, list, transfer), Open103 (transfer); ARIEC103 and go-iecp5 have neither | 7 cases × the clients that declare them and 5 value checks: Open103 `case.disturbance-transfer` pass, `values.disturbance-transfer` description, tags and channel ratings pass, its values a known bug (`open103-asdu30-nfe`); vitusdong `case.disturbance-list` pass, its list values a known bug (`vitusdong-sof-bits`), the 5 generic cases, the transfer and 3 value checks known bugs (`vitusdong-generic-command-inf`, `vitusdong-disturbance-procedure`) |
+| contract 2.3, reference client against `iec103/server` (2026-11-11 on the `:dev` images, repeated 2026-11-12 on the pinned v0.4.0 images with the same results, linux/arm64) | vitusdong (generic services, list, transfer), Open103 (transfer); ARIEC103 and go-iecp5 have neither | 7 cases × the clients that declare them and 5 value checks: Open103 `case.disturbance-transfer` pass, `values.disturbance-transfer` description, tags and channel ratings pass, its values a known bug (`open103-asdu30-nfe`); vitusdong `case.disturbance-list` pass, its list values a known bug (`vitusdong-sof-bits`), the 5 generic cases, the transfer and 3 value checks known bugs (`vitusdong-generic-command-inf`, `vitusdong-disturbance-procedure`) |
 | contract 2.3, `iec103/client` against a reference server | vitusdong | generic read, generic write and the list: known server bugs (`vitusdong-generic-answer-inf`, `vitusdong-disturbance-list-asdu23`), asserted on the octets; the transfer skipped (vitusdong cannot serve the fixture's records: `disturbanceDataServer` false) |
 
 The server side has the real evidence: four independent clients (three

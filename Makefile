@@ -34,17 +34,17 @@ COVER_PKGS := $(shell go list ./... | grep -v -e '/examples' -e '/internal/testu
 INTEROP_TAGS := interop
 
 # Reference implementations for 'make interop': the IEC 104 images of
-# otfabric/iec60870-5-interop v0.3.0 (contract 2.2; lib60870-C v2.4.1,
+# otfabric/iec60870-5-interop v0.4.0 (contract 2.3; lib60870-C v2.4.1,
 # OpenMUC j60870 1.8.0, wendy512/iec104 v1.0.4 on go-iecp5 v1.2.6,
 # cB-Sigma/iec60870 v0.3.0 with IEC 62351-5, pascaldekloe/part5 v0.3.0),
 # pinned by multi-arch index digest (manifest.json of the release).
 # Keep in step with iec104/interop/harness.go. Override to test other builds, e.g.
 #   make interop IEC104_INTEROP_OPENMUC_IMAGE=ghcr.io/otfabric/iec60870-5-interop-iec104-openmuc:dev
-IEC104_INTEROP_LIB60870_IMAGE ?= ghcr.io/otfabric/iec60870-5-interop-iec104-lib60870@sha256:2f518140646bd68f44b04ce63d5d614565f060ec2f1d23b3794a335826aa073e
-IEC104_INTEROP_OPENMUC_IMAGE  ?= ghcr.io/otfabric/iec60870-5-interop-iec104-openmuc@sha256:66d70899388076a56b3006d45951014421279bc5840e4da7b4ad31aa35d54a1e
-IEC104_INTEROP_WENDY512_IMAGE ?= ghcr.io/otfabric/iec60870-5-interop-iec104-wendy512@sha256:906b02db5f7e23eed1f761deb4927a9172d6c0b92ea882fe340844d03aab0d0d
-IEC104_INTEROP_CBSIGMA_IMAGE  ?= ghcr.io/otfabric/iec60870-5-interop-iec104-cbsigma@sha256:f231cc972e96f91a2ca49ef0f7eff0fd76f913b720ff891f1749c454791d88b6
-IEC104_INTEROP_PART5_IMAGE    ?= ghcr.io/otfabric/iec60870-5-interop-iec104-part5@sha256:2f14454a393c090090b0160694995b46ae7e48237e34f3f20a8ef609d5e57d35
+IEC104_INTEROP_LIB60870_IMAGE ?= ghcr.io/otfabric/iec60870-5-interop-iec104-lib60870@sha256:adda416d5659671e28080bca361a7fb6708aa8dce1877cba8207008049d1bb04
+IEC104_INTEROP_OPENMUC_IMAGE  ?= ghcr.io/otfabric/iec60870-5-interop-iec104-openmuc@sha256:a619fc3e15a44cff6793d1d17f6db3f8783fbb0557b79ff46bbb8280ee95e8e5
+IEC104_INTEROP_WENDY512_IMAGE ?= ghcr.io/otfabric/iec60870-5-interop-iec104-wendy512@sha256:03773fceb73cd6a6923209ad81fc5dbdcfff9cf538544b4067f1b21ee5b4a679
+IEC104_INTEROP_CBSIGMA_IMAGE  ?= ghcr.io/otfabric/iec60870-5-interop-iec104-cbsigma@sha256:f25d56f35badd81134813c6098ecf0cf63e6e8c9aec69f9e404f77cd2f626506
+IEC104_INTEROP_PART5_IMAGE    ?= ghcr.io/otfabric/iec60870-5-interop-iec104-part5@sha256:6ff105c63340053a8365ce70373f0a72c514a847003046d48208a0df3f591ea6
 
 all: build ## Default target: build the examples
 

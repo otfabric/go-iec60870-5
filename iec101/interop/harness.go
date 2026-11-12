@@ -25,19 +25,14 @@ import (
 	"github.com/otfabric/go-iec60870-5/iec101/server"
 )
 
-// The references: otfabric/iec60870-5-interop contract 2.3 (field sizes),
-// lib60870-C v2.4.1, cB-Sigma/iec60870 v0.3.0 and digitalpetri/iec60870
-// 33e52b3.
-//
-// TODO(pin): the images below are local ":dev" builds of the harness branch
-// feat/iec101-digitalpetri (make image-iec101-lib60870 image-iec101-cbsigma
-// image-iec101-digitalpetri). Pin each one by its multi-arch index digest
-// (the release's manifest.json) once that harness release is published, as
-// v0.3.0 was pinned before.
+// The references: the IEC 101 images of otfabric/iec60870-5-interop v0.4.0
+// (contract 2.3, field sizes): lib60870-C v2.4.1, cB-Sigma/iec60870 v0.3.0
+// and digitalpetri/iec60870 33e52b3, pinned by multi-arch index digest (the
+// release's manifest.json).
 var stacks = []struct{ name, env, image string }{
-	{"lib60870", "IEC101_INTEROP_LIB60870_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec101-lib60870:dev"},
-	{"cbsigma", "IEC101_INTEROP_CBSIGMA_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec101-cbsigma:dev"},
-	{"digitalpetri", "IEC101_INTEROP_DIGITALPETRI_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec101-digitalpetri:dev"},
+	{"lib60870", "IEC101_INTEROP_LIB60870_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec101-lib60870@sha256:a8ccc0696c7f49d0a7495bc8a1fee7e66b072e79524f99ffce157d0f7d5c242a"},
+	{"cbsigma", "IEC101_INTEROP_CBSIGMA_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec101-cbsigma@sha256:0a06ed357cd9029004451685f809f8e52da7107b6ca2eb0ee1ec4df6747b0a12"},
+	{"digitalpetri", "IEC101_INTEROP_DIGITALPETRI_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec101-digitalpetri@sha256:25b4fd07759fe5f68151ee2c936567859c187cd54542d4a8a7888d2fb9a06852"},
 }
 
 var modes = []string{"unbalanced", "balanced"}

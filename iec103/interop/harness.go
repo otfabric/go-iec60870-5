@@ -29,23 +29,14 @@ import (
 	"github.com/otfabric/go-iec60870-5/iec103/server"
 )
 
-// The references: otfabric/iec60870-5-interop, contract 2.3.
-//
-// TODO: pin these by multi-arch index digest from the manifest.json of the
-// harness release that carries contract 2.3 (the generic services and the
-// transmission of disturbance data); until then they are the local images
-// built from the harness branch (make image-iec103-<stack>, tag dev). The
-// v0.3.0 digests (contract 2.2) were:
-//
-//	vitusdong sha256:a00e8ef368d96846c80223e87418b973be16d763f09211aa052ac61227f412a7
-//	ariec103  sha256:95f94fce044dff5973b8859da75063d2ff8d3f1f8a26d433705575b487771cd9
-//	open103   sha256:b632442d67ce8f247b224819308ec8c0711b91260e5ebefa0f6cc91f3327f68d
-//	goiecp5   sha256:43368aca1dd9dc2822f9fc3fced3215fa5a69ed5d5a4f41f372a9aaf273aae6a
+// The references: the IEC 103 images of otfabric/iec60870-5-interop v0.4.0
+// (contract 2.3: generic services and the transmission of disturbance data),
+// pinned by multi-arch index digest (the release's manifest.json).
 var stacks = []struct{ name, env, image string }{
-	{"vitusdong", "IEC103_INTEROP_VITUSDONG_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-vitusdong:dev"},
-	{"ariec103", "IEC103_INTEROP_ARIEC103_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-ariec103:dev"},
-	{"open103", "IEC103_INTEROP_OPEN103_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-open103:dev"},
-	{"goiecp5", "IEC103_INTEROP_GOIECP5_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-goiecp5:dev"},
+	{"vitusdong", "IEC103_INTEROP_VITUSDONG_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-vitusdong@sha256:866a1d43eb9cedbdb79691fa6becb63cb71febe096e7107a98b50e4067393e08"},
+	{"ariec103", "IEC103_INTEROP_ARIEC103_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-ariec103@sha256:3b847f31d2e321e1a26309d619c540baaae2da480b7fd31d761f428691a5eb6e"},
+	{"open103", "IEC103_INTEROP_OPEN103_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-open103@sha256:8e848d426d1b98542810dbf06f63f78c54a40334dd72003da0ef07ae7d322ee0"},
+	{"goiecp5", "IEC103_INTEROP_GOIECP5_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-goiecp5@sha256:c429dd18938e1ce046231d476ec9d69c4edd3626cf99231512f7e0fae2439598"},
 }
 
 type adapter struct {

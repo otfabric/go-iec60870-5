@@ -198,10 +198,10 @@ profile. Nothing shows that the client agrees with an independent meter.
 ## Independent evidence: gisce/iec870ree
 
 `iec102/interop` (build tag `interop`, `make interop-iec102`) runs the
-`iec102-gisce` image of otfabric/iec60870-5-interop (contract 2.2):
+`iec102-gisce` image of otfabric/iec60870-5-interop (contract 2.2 for IEC 102, unchanged in 2.3):
 gisce/iec870ree v0.14.1 (commit `993242da`, AGPL-3.0, Python), a master of
 the Spanish REE profile, in a container of its own; nothing of it is linked
-into this module. The image of the harness release v0.3.0 is pinned by
+into this module. The image of the harness release v0.4.0 is pinned by
 digest in `iec102/interop/harness.go` (`IEC102_INTEROP_GISCE_IMAGE`
 selects another).
 

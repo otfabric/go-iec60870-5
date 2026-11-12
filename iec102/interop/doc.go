@@ -5,8 +5,8 @@
 // Package interop runs the IEC 60870-5-102 integrated total station of this
 // module (iec102/server with the REE profile of iec102/ree) against the
 // independent controlling station published by otfabric/iec60870-5-interop
-// (contract 2.2): gisce/iec870ree, a Python master of the Spanish REE
-// profile, in the Docker image of the harness release v0.3.0, pinned by
+// (contract 2.3): gisce/iec870ree, a Python master of the Spanish REE
+// profile, in the Docker image of the harness release v0.4.0, pinned by
 // digest in harness.go. The station serves the harness's baseline
 // fixture, which the suite reads from the image (print-fixture); every
 // result document is checked against the fixture's values, never against
