@@ -100,7 +100,7 @@ make interop-iec101 interop-iec103 interop-iec102  # the serial standards (Docke
 
 Independent reference implementations live in
 [otfabric/iec60870-5-interop](https://github.com/otfabric/iec60870-5-interop)
-(IEC 101/102/103/104). All four suites run against its v0.4.0 images
+(IEC 101/102/103/104). All four suites run against its v0.5.0 images
 (contract 2.3), pinned by digest. The Self-interop workflow also runs them,
 by hand, against `ghcr.io/otfabric/iec60870-5-interop-<standard>-otfabric:latest`
 ([INTEROPERABILITY.md](INTEROPERABILITY.md#self-interop-not-independent));

@@ -1,5 +1,43 @@
 # Release notes
 
+## v0.5.2
+
+**Date:** 2026-11-12
+**Previous release:** v0.5.1
+
+The interop suites of all four standards move to the reference images of
+otfabric/iec60870-5-interop v0.5.0 (was v0.4.0). No change to the library's
+code or API.
+
+### Changed
+
+- Interop pin: iec60870-5-interop v0.5.0 (contract 2.3, unchanged; the same
+  upstream revisions as v0.4.0, rebuilt), its 13 reference images pinned by
+  multi-arch index digest in `iec101/interop/harness.go`,
+  `iec102/interop/harness.go`, `iec103/interop/harness.go`,
+  `iec104/interop/harness.go`, the Makefile and the Interop workflow. The
+  copied harness tables (`testdata/cases.tsv`, `known-bugs.tsv`,
+  `known-bugs-consumer.tsv`) are refreshed from v0.5.0.
+- `iec103/interop`: `known-bugs-consumer.tsv` entries may name a role
+  (`vitusdong@client`, `vitusdong@server`, `open103@client`), as the harness
+  writes them since v0.5.0. The suite strips the role after checking that it
+  agrees with its own table of client bugs; a disagreement fails the run.
+- Docs (README, TESTING, LIMITATIONS, INTEROPERABILITY, docs/FEATURE-STATUS,
+  docs/iec102, docs/iec103, docs/iec104) name the v0.5.0 images.
+
+### Verified
+
+Locally on linux/arm64 (Docker on macOS), 2026-11-12, on the pinned v0.5.0
+images: IEC 101 3 top-level tests, 490 subtests passed, 5 skipped (the
+digitalpetri balanced known bug), 0 failed; IEC 102 2 top-level tests, 19
+subtests passed, 0 failed; IEC 103 4 top-level tests, 75 subtests passed, 38
+skipped (known bugs and undeclared features), 0 failed; IEC 104 31 top-level
+tests, 519 subtests passed, 35 skipped (undeclared features and the j60870
+known bug), 0 failed.
+The same counts as on the v0.4.0 images.
+
+---
+
 ## v0.5.1
 
 **Date:** 2026-11-12

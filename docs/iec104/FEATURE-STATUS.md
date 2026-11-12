@@ -1,6 +1,6 @@
 # Feature status
 
-What the IEC 60870-5-104 packages of this module (`iec104`, `iec104/apci`, `iec104/client`, `iec104/server`, with `asdu` and `sec`) implement and what evidence backs it, at v0.4.0. The interop suite runs against the IEC 104 images of [iec60870-5-interop v0.4.0](https://github.com/otfabric/iec60870-5-interop/releases/tag/v0.4.0). The type identifications and causes, clause by clause, are in [INTEROPERABILITY.md](INTEROPERABILITY.md); what is out of scope is in [LIMITATIONS.md](LIMITATIONS.md); the status of the other companion standards is in [docs/FEATURE-STATUS.md](../FEATURE-STATUS.md).
+What the IEC 60870-5-104 packages of this module (`iec104`, `iec104/apci`, `iec104/client`, `iec104/server`, with `asdu` and `sec`) implement and what evidence backs it, at v0.5.2. The interop suite runs against the IEC 104 images of [iec60870-5-interop v0.5.0](https://github.com/otfabric/iec60870-5-interop/releases/tag/v0.5.0). The type identifications and causes, clause by clause, are in [INTEROPERABILITY.md](INTEROPERABILITY.md); what is out of scope is in [LIMITATIONS.md](LIMITATIONS.md); the status of the other companion standards is in [docs/FEATURE-STATUS.md](../FEATURE-STATUS.md).
 
 None of this is a conformance claim: nothing is certified, and nothing has been run against certified test equipment or field devices.
 
@@ -8,7 +8,8 @@ None of this is a conformance claim: nothing is certified, and nothing has been 
 
 | go-iec60870-5 | Go | IEC 104 interop references | Supported |
 |---|---|---|---|
-| **v0.4.0** | 1.26 or later (CI: 1.26 and 1.27) | IEC 104 images of iec60870-5-interop v0.4.0 (five references) | see [SECURITY.md](../../SECURITY.md#supported-versions) |
+| **v0.5.2** | 1.26 or later (CI: 1.26 and 1.27) | IEC 104 images of iec60870-5-interop v0.5.0 (five references) | see [SECURITY.md](../../SECURITY.md#supported-versions) |
+| v0.4.0 to v0.5.1 | 1.26 or later (CI: 1.26 and 1.27) | IEC 104 images of iec60870-5-interop v0.4.0 (five references) | see [SECURITY.md](../../SECURITY.md#supported-versions) |
 | v0.3.0 | 1.26 or later (CI: 1.26 and 1.27) | IEC 104 images of iec60870-5-interop v0.3.0 (five references) | see [SECURITY.md](../../SECURITY.md#supported-versions) |
 | v0.1.0, v0.2.0 | 1.26 or later | images of iec104-interop v0.5.0 (four references) | see [SECURITY.md](../../SECURITY.md#supported-versions) |
 

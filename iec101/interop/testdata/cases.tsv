@@ -1,4 +1,4 @@
-# Copied from otfabric/iec60870-5-interop tests/iec101/cases.tsv at v0.4.0 (contract 2.3).
+# Copied from otfabric/iec60870-5-interop tests/iec101/cases.tsv at v0.5.0 (contract 2.3).
 # Refresh it with the harness version pinned in harness.go.
 # Self-test cases of IEC 60870-5-101 for scripts/interop.sh, against the
 # baseline fixture (fixtures/iec101/baseline), run once per link mode

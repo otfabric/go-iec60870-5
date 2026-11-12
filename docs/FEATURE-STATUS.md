@@ -16,7 +16,7 @@ library against itself), **independent** (pinned reference images),
 |---|---|---|---|---|
 | Standard text held ([STANDARDS.md](STANDARDS.md)) | 2003 (Amd. 1 not) | no: vendor documentation, recorded traffic | 1997 | edition 1 (2000) only |
 | Controlling station | yes: unit, e2e, independent (3 stacks; balanced not against digitalpetri, an upstream defect), recorded | yes: unit, e2e, recorded (meter responses); no independent peer (no open meter found) | yes: unit, annex B, e2e, recorded, independent (1 stack, link start-up, clock and GI termination; its other answers deviate) | yes: unit, e2e, independent (5 stacks), recorded |
-| Controlled station | yes: unit, e2e, independent (3 stacks), recorded | yes: unit, e2e, independent (1 stack: gisce/iec870ree, REE profile; session, C_CI_NT_2/NU_2, clock read and set, product, tariff; image of iec60870-5-interop v0.4.0) | yes: unit, annex B, e2e, independent (4 client stacks) | yes: unit, e2e, independent, recorded |
+| Controlled station | yes: unit, e2e, independent (3 stacks), recorded | yes: unit, e2e, independent (1 stack: gisce/iec870ree, REE profile; session, C_CI_NT_2/NU_2, clock read and set, product, tariff; image of iec60870-5-interop v0.5.0) | yes: unit, annex B, e2e, independent (4 client stacks) | yes: unit, e2e, independent, recorded |
 | Transport | any io.ReadWriter (serial, terminal server TCP stream) | any io.ReadWriter | any io.ReadWriter | TCP, TLS |
 | Link: unbalanced | yes: recorded, link states per 101:2003 figures 5-9 | yes (link address 0, 1, 2 octets) | yes (1-octet address, FC 7): recorded | n/a |
 | Link: balanced | yes | - | - | n/a |

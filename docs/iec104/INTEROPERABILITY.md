@@ -481,7 +481,7 @@ Besides its own tests the library is run against five independent
 implementations, as client and as server, on every push and pull request that changes more
 than Markdown (Interop workflow). The reference
 builds are the IEC 104 images of
-[otfabric/iec60870-5-interop v0.4.0](https://github.com/otfabric/iec60870-5-interop/releases/tag/v0.4.0)
+[otfabric/iec60870-5-interop v0.5.0](https://github.com/otfabric/iec60870-5-interop/releases/tag/v0.5.0)
 (container contract 2.3, unchanged for IEC 104 since 2.2, which is contract 1.3 of the earlier
 otfabric/iec104-interop under new image names, entrypoint and readiness
 path), pinned by the digests of the release's `manifest.json`. Until
@@ -498,7 +498,8 @@ first four of them.
 
 The run: `IEC104_REQUIRE_INTEROP=1 make interop V=1` on the v0.4.0 images,
 Docker linux/arm64, 31 top-level tests and 519 subtests passed, 35 skipped,
-0 failed, 441 s; the same counts as on the v0.3.0 images (2026-11-11).
+0 failed, 441 s; the same counts as on the v0.3.0 images (2026-11-11), and
+again on the pinned v0.5.0 images (2026-11-12, 624 s).
 Every skip is a feature the image does not declare or the known j60870 bug;
 part5 needed no entry of its own in `known-bugs.tsv`.
 

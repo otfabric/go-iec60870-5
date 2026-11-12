@@ -70,7 +70,9 @@ index digest in `iec101/interop/harness.go`, locally on 2026-11-12 (Docker
 linux/arm64, `IEC101_REQUIRE_INTEROP=1`): 3 top-level tests, 490 subtests
 passed, 5 skipped (digitalpetri balanced, the known bug), 0 failed, 192 s.
 The Interop workflow runs the same suite (job `iec101`). The same results came
-from the `:dev` images of the harness branch on 2026-11-11:
+from the `:dev` images of the harness branch on 2026-11-11, and from the
+images of iec60870-5-interop v0.5.0 (the same upstream revisions, rebuilt;
+now pinned) on 2026-11-12: 490 passed, 5 skipped, 0 failed, 331 s:
 
 | Reference | This module's client, default sizes (scenarios) | This module's client, field sizes (subtests) | Reference client against this module's server (cases) |
 |---|---|---|---|
