@@ -156,10 +156,13 @@ type port struct {
 	errMu     sync.Mutex
 	readErr   error // the transport error that stopped the station
 	readDone  chan struct{}
+	// writeDone is closed when the writer goroutine has returned: close
+	// waits for it, so no frame is written or traced after Close.
+	writeDone chan struct{}
 }
 
 func newPort(rw io.ReadWriter, cfg Config) *port {
-	p := &port{cfg: cfg, rw: rw, tx: make(chan ft12.Frame, 16), done: make(chan struct{}), readDone: make(chan struct{})}
+	p := &port{cfg: cfg, rw: rw, tx: make(chan ft12.Frame, 16), done: make(chan struct{}), readDone: make(chan struct{}), writeDone: make(chan struct{})}
 	go p.writer()
 	return p
 }
@@ -168,12 +171,20 @@ func newPort(rw io.ReadWriter, cfg Config) *port {
 // station never blocks its own receive path on a full transport (balanced
 // stations answer from the reader while their peer does the same).
 func (p *port) writer() {
+	defer close(p.writeDone)
 	var buf []byte
 	for {
 		select {
 		case <-p.done:
 			return
 		case f := <-p.tx:
+			// select picks at random among ready cases: a frame queued
+			// before the station stopped is not sent after it.
+			select {
+			case <-p.done:
+				return
+			default:
+			}
 			buf, _ = f.Append(buf[:0], p.cfg.FT12) // validated by write
 			if p.cfg.OnFrame != nil {
 				p.cfg.OnFrame(true, f)
@@ -260,6 +271,7 @@ func (p *port) close() error {
 		err = c.Close()
 	}
 	<-p.readDone
+	<-p.writeDone
 	return err
 }
 

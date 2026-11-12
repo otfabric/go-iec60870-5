@@ -178,7 +178,7 @@ TestCommand sends C\_TS\_NA\_1 with the fixed test bit pattern.
 func (c *Client) WaitUp(ctx context.Context) error
 ```
 
-WaitUp waits until the link is initialized and OnState has been told (Config.OnState).
+WaitUp waits until the link is initialized and OnState has been told (Config.OnState). It returns the transport error when the transport fails first (closed by the peer, say): the client does not reopen a transport, so the link cannot come up on it.
 
 ### type Config
 

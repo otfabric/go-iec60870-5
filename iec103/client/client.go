@@ -183,6 +183,13 @@ func New(rw io.ReadWriter, cfg Config) (*Client, error) {
 	return c, nil
 }
 
+// Done is closed when the transport failed or the client was closed.
+func (c *Client) Done() <-chan struct{} { return c.pri.Done() }
+
+// Err returns the transport error that stopped the client, nil while it
+// runs or after Close.
+func (c *Client) Err() error { return c.pri.Err() }
+
 // State returns the link state.
 func (c *Client) State() iec103.State {
 	c.mu.Lock()
@@ -194,7 +201,9 @@ func (c *Client) State() iec103.State {
 func (c *Client) CommonAddr() uint8 { return c.ca }
 
 // WaitUp waits until the link is initialized and OnState has been told
-// (Config.OnState).
+// (Config.OnState). It returns the transport error when the transport fails
+// first (closed by the peer, say): the client does not reopen a transport,
+// so the link cannot come up on it.
 func (c *Client) WaitUp(ctx context.Context) error {
 	for {
 		c.mu.Lock()
@@ -211,6 +220,12 @@ func (c *Client) WaitUp(ctx context.Context) error {
 		case <-ctx.Done():
 			return fmt.Errorf("iec103: waiting for link: %w", ctx.Err())
 		case <-c.ctx.Done():
+			return iec103.ErrClosed
+		case <-c.pri.Done():
+			// The transport failed: the link cannot come up again on it.
+			if err := c.pri.Err(); err != nil && c.ctx.Err() == nil {
+				return fmt.Errorf("iec103: waiting for link: %w", err)
+			}
 			return iec103.ErrClosed
 		}
 	}
@@ -504,6 +519,11 @@ func (c *Client) run() {
 			st, err := c.initLink()
 			if err != nil {
 				c.log.Debug("link init failed", "error", err)
+				select {
+				case <-c.pri.Done():
+					return // the transport failed: nothing to initialize
+				default:
+				}
 				if !c.sleep(c.cfg.RetryInterval) {
 					return
 				}
