@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -78,47 +79,63 @@ func docker(ctx context.Context, args ...string) ([]byte, error) {
 }
 
 var (
-	gisceOnce sync.Once
-	gisce     adapter
-	gisceErr  error
+	adaptersOnce sync.Once
+	adapterList  []adapter
+	adapterErr   error
 )
 
-// reference returns the gisce image and its capabilities.
-func reference(t *testing.T) adapter {
+// adapters returns the images under test with their capabilities: gisce
+// (IEC102_INTEROP_GISCE_IMAGE, default gisceImage; empty leaves it out) and,
+// only when IEC102_INTEROP_OTFABRIC_IMAGE names an image, otfabric: OT
+// Fabric's own stack as published by iec60870-5-interop (ADR-0012), not a
+// reference, which shows compatibility between releases of this module and
+// not independent verification (the Self-interop workflow).
+// IEC102_INTEROP_ADAPTERS restricts the run to a comma-separated subset.
+func adapters(t *testing.T) []adapter {
 	t.Helper()
-	gisceOnce.Do(func() {
+	adaptersOnce.Do(func() {
+		if _, err := exec.LookPath("docker"); err != nil {
+			adapterErr = err
+			return
+		}
 		img := gisceImage
 		if v, ok := os.LookupEnv("IEC102_INTEROP_GISCE_IMAGE"); ok {
 			img = v
 		}
-		if img == "" {
-			gisceErr = errors.New("IEC102_INTEROP_GISCE_IMAGE is empty")
-			return
-		}
-		if _, err := exec.LookPath("docker"); err != nil {
-			gisceErr = err
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
-		out, err := docker(ctx, "run", "--rm", img, "print-capabilities")
-		if err != nil {
-			gisceErr = err
-			return
-		}
-		gisce = adapter{name: "gisce", image: img}
-		if err := json.Unmarshal(out, &gisce.caps); err != nil {
-			gisceErr = fmt.Errorf("gisce capabilities: %w", err)
-			return
-		}
-		if gisce.caps.Standard != "iec60870-5-102" || !gisce.caps.Roles.Client {
-			gisceErr = fmt.Errorf("%s is not an IEC 102 client image: %s", img, out)
+		only := os.Getenv("IEC102_INTEROP_ADAPTERS")
+		for _, s := range []struct{ name, image string }{
+			{"gisce", img},
+			{"otfabric", os.Getenv("IEC102_INTEROP_OTFABRIC_IMAGE")},
+		} {
+			if s.image == "" || (only != "" && !slices.Contains(strings.Split(only, ","), s.name)) {
+				continue
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			out, err := docker(ctx, "run", "--rm", s.image, "print-capabilities")
+			cancel()
+			if err != nil {
+				adapterErr = err
+				return
+			}
+			a := adapter{name: s.name, image: s.image}
+			if err := json.Unmarshal(out, &a.caps); err != nil {
+				adapterErr = fmt.Errorf("%s capabilities: %w", s.name, err)
+				return
+			}
+			if a.caps.Standard != "iec60870-5-102" {
+				adapterErr = fmt.Errorf("%s is %q, not an IEC 102 image", s.image, a.caps.Standard)
+				return
+			}
+			adapterList = append(adapterList, a)
 		}
 	})
-	if gisceErr != nil {
-		skipOrFail(t, "reference unavailable: %v", gisceErr)
+	if adapterErr != nil {
+		skipOrFail(t, "references unavailable: %v", adapterErr)
 	}
-	return gisce
+	if len(adapterList) == 0 {
+		skipOrFail(t, "no reference selected")
+	}
+	return adapterList
 }
 
 // fixture is the IEC 102 baseline fixture as the reference prints it

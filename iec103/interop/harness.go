@@ -37,6 +37,11 @@ var stacks = []struct{ name, env, image string }{
 	{"ariec103", "IEC103_INTEROP_ARIEC103_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-ariec103@sha256:3b847f31d2e321e1a26309d619c540baaae2da480b7fd31d761f428691a5eb6e"},
 	{"open103", "IEC103_INTEROP_OPEN103_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-open103@sha256:8e848d426d1b98542810dbf06f63f78c54a40334dd72003da0ef07ae7d322ee0"},
 	{"goiecp5", "IEC103_INTEROP_GOIECP5_IMAGE", "ghcr.io/otfabric/iec60870-5-interop-iec103-goiecp5@sha256:c429dd18938e1ce046231d476ec9d69c4edd3626cf99231512f7e0fae2439598"},
+	// OT Fabric's own stack, as published by iec60870-5-interop (ADR-0012):
+	// not a reference. It runs only when IEC103_INTEROP_OTFABRIC_IMAGE names
+	// an image, and shows compatibility between releases of this module, not
+	// independent verification (the Self-interop workflow).
+	{"otfabric", "IEC103_INTEROP_OTFABRIC_IMAGE", ""},
 }
 
 type adapter struct {

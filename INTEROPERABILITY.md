@@ -8,6 +8,17 @@ covers IEC 60870-5-101. IEC 60870-5-103 is in
 results against four independent IEC 103 clients and one server
 (`make interop-iec103`).
 
+## Self-interop (not independent)
+
+OT Fabric's own stack is published by otfabric/iec60870-5-interop as
+`ghcr.io/otfabric/iec60870-5-interop-<standard>-otfabric` (IEC 101, 102, 103
+and 104, both roles; ADR-0012), so that other implementations can test against
+it. The manual **Self-interop** workflow runs each interop suite of this
+commit against the `:latest` of those images, with the adapter `otfabric`
+(`IEC10x_INTEROP_OTFABRIC_IMAGE`, never set by default). It finds a change on
+the wire that breaks an earlier release. Being this library against itself,
+it is never independent evidence and no claim on this page rests on it.
+
 Evidence levels used below:
 
 - **unit**: codec or procedure tests in this repository
