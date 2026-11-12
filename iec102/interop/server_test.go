@@ -15,14 +15,22 @@ import (
 	"time"
 )
 
-// TestGisceAgainstServer runs every client operation of gisce/iec870ree
-// (contract 2.2, "IEC 102 client") against this module's integrated total
-// station serving the baseline fixture, and checks each result document
-// against the fixture. The steps share one station, as the contract's
-// stations keep their clock across connections, and run in order: set-time
-// changes the clock that the last read-time reads back.
-func TestGisceAgainstServer(t *testing.T) {
-	a := reference(t)
+// TestReferenceClientAgainstServer runs every client operation of the client
+// images (gisce/iec870ree; otfabric when it is selected) (contract 2.2, "IEC
+// 102 client") against this module's integrated total station serving the
+// baseline fixture, and checks each result document against the fixture.
+// The steps share one station, as the contract's stations keep their clock
+// across connections, and run in order: set-time changes the clock that the
+// last read-time reads back.
+func TestReferenceClientAgainstServer(t *testing.T) {
+	for _, a := range adapters(t) {
+		if a.caps.Roles.Client {
+			t.Run(a.name, func(t *testing.T) { clientAgainstServer(t, a) })
+		}
+	}
+}
+
+func clientAgainstServer(t *testing.T, a adapter) {
 	f := loadFixture(t, a)
 	st := newStation(t, f)
 	ln, err := net.Listen("tcp", "0.0.0.0:0")

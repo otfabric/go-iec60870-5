@@ -3,8 +3,8 @@
 > The IEC 104 packages of this module (`iec104`, `iec104/apci`,
 > `iec104/client`, `iec104/server`, with `asdu` and `sec` at the module root)
 > and this guide were carried over from go-iec104 v0.3.0 (commit 4a375b3).
-> go-iec104 is maintained separately and unchanged; what differs since is in
-> [IEC104_PARITY.md](../IEC104_PARITY.md).
+> go-iec104 is deprecated (read-only maintenance, to be deleted); what
+> differs since is in [IEC104_PARITY.md](../IEC104_PARITY.md).
 
 A pure Go implementation of IEC 60870-5-104, the TCP/IP telecontrol protocol
 between control centres and substations, RTUs and generation assets. No cgo,

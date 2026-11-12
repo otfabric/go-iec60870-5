@@ -105,11 +105,12 @@ Independent reference implementations live in
 
 ## Relation to go-iec104
 
-[go-iec104](https://github.com/otfabric/go-iec104) stays maintained and
-unchanged; this module does not import it. The `iec104` packages here began
-as a copy of go-iec104 v0.3.0 so that IEC 101 could share its ASDU model.
-How the two relate, and what a migration would involve, is in
-[docs/MIGRATION_AUDIT.md](docs/MIGRATION_AUDIT.md).
+[go-iec104](https://github.com/otfabric/go-iec104) is deprecated: it is
+kept in read-only maintenance mode and will be deleted later, together with
+iec104-interop and iec104ctl. This module replaces it and does not import it.
+The `iec104` packages here began as a copy of go-iec104 v0.3.0 so that IEC 101
+could share its ASDU model. How the two relate, and what a migration involves,
+is in [docs/MIGRATION_AUDIT.md](docs/MIGRATION_AUDIT.md).
 
 ## License
 

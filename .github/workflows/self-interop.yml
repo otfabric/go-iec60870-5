@@ -1,0 +1,78 @@
+name: Self-interop
+run-name: "Self-interop against iec60870-5-interop-<standard>-otfabric:latest, by @${{ github.actor }} on ${{ github.ref_name }}"
+
+# Manual only. This commit against the latest published images of
+# go-iec60870-5 itself (ghcr.io/otfabric/iec60870-5-interop-<standard>-otfabric:latest,
+# built by otfabric/iec60870-5-interop's "Own stack (go-iec60870-5)" workflow
+# from the latest release), for IEC 101, 102, 103 and 104, in both roles. The
+# e2e tests run both sides from one commit; this one finds a change on the wire
+# that breaks an earlier release.
+#
+# Not part of the Interop workflow, which runs against the independent
+# references, and never a required check. Nothing is pinned or committed, so it
+# cannot ask for a release. A pass is not independent verification
+# (INTEROPERABILITY.md).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  self-interop:
+    name: ${{ matrix.standard }} against iec60870-5-interop-${{ matrix.standard }}-otfabric:latest
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        standard: [iec101, iec102, iec103, iec104]
+    env:
+      IMAGE: ghcr.io/otfabric/iec60870-5-interop-${{ matrix.standard }}-otfabric:latest
+      STANDARD: ${{ matrix.standard }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Pull the image
+        run: docker pull "${IMAGE}"
+
+      - name: Versions
+        id: versions
+        env:
+          SHA: ${{ github.sha }}
+          REF: ${{ github.ref_name }}
+        run: |
+          digest=$(docker inspect --format '{{index .RepoDigests 0}}' "${IMAGE}")
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Versions (${STANDARD})"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| go-iec60870-5 under test | \`${REF}\` at \`${SHA}\` (\`$(git describe --tags --always)\`) |"
+            echo "| Go | \`$(go env GOVERSION)\` |"
+            echo "| Image | \`${IMAGE}\` |"
+            echo "| Image digest | \`${digest}\` |"
+            echo "| Image reports | \`$(docker run --rm "${IMAGE}" version)\` |"
+            docker run --rm "${IMAGE}" print-capabilities | jq -r '"| go-iec60870-5 in the image | `\(.upstream.version)` at `\(.upstream.revision)` |"'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Run the interop suite
+        env:
+          DIGEST: ${{ steps.versions.outputs.digest }}
+        run: |
+          set -o pipefail
+          prefix=$(echo "${STANDARD}" | tr '[:lower:]' '[:upper:]')
+          export "${prefix}_INTEROP_OTFABRIC_IMAGE=${DIGEST}" "${prefix}_INTEROP_ADAPTERS=otfabric" "${prefix}_REQUIRE_INTEROP=1"
+          GOWORK=off go test -v -tags interop -count=1 -timeout 40m "./${STANDARD}/interop/" 2>&1 | tee interop.log
+          {
+            echo "## Result (${STANDARD})"
+            echo
+            echo "- $(grep -c -- '--- PASS' interop.log) passed, $(grep -c -- '--- SKIP' interop.log) skipped, $(grep -c -- '--- FAIL' interop.log) failed"
+          } | tee -a "$GITHUB_STEP_SUMMARY"

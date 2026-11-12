@@ -44,8 +44,10 @@ make interop
 # The serial standards against the references of iec60870-5-interop (needs Docker)
 make interop-iec101 interop-iec103 interop-iec102
 
-# IEC 104 against an image of an own-stack build (no workflow sets it)
-IEC104_INTEROP_ADAPTERS=otfabric IEC104_INTEROP_OTFABRIC_IMAGE=<image> make interop
+# Any standard against an own-stack image of iec60870-5-interop (the manual
+# Self-interop workflow does this with :latest; not independent evidence)
+IEC104_INTEROP_ADAPTERS=otfabric IEC104_INTEROP_OTFABRIC_IMAGE=ghcr.io/otfabric/iec60870-5-interop-iec104-otfabric:latest make interop
+IEC101_INTEROP_ADAPTERS=otfabric IEC101_INTEROP_OTFABRIC_IMAGE=ghcr.io/otfabric/iec60870-5-interop-iec101-otfabric:latest make interop-iec101
 ```
 
 Run `make` (or `make help`) for the full list of targets.
