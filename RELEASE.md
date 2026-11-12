@@ -1,5 +1,29 @@
 # Release notes
 
+## v0.4.1
+
+**Date:** not released (prepared)
+**Previous release:** v0.4.0
+
+`iec103/client` keeps every identification a station sends after a reset,
+so the one with cause 4 is not lost behind a start/restart (cause 5).
+
+### Added
+
+- `iec103/client`: `Client.IdentificationFor(cause)` returns the last
+  identification (ASDU 5) with that cause (IEC 60870-5-103:1997 7.4.1,
+  table 8). `Identification` still returns the last one of any cause.
+
+### Fixed
+
+- `iec103/interop`: the identification case reads the cause 4
+  identification with `IdentificationFor`. A station that follows clause
+  7.4.1 and sends start/restart (cause 5) after it, as the fixed
+  vitusdong/iec103-dotnet (vitusdong/iec103-dotnet#10) does, failed the
+  case.
+
+---
+
 ## v0.4.0
 
 **Date:** 2026-11-12

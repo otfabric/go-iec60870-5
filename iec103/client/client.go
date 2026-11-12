@@ -120,6 +120,7 @@ type Client struct {
 	downCh  chan struct{} // closed when the link goes down after being up
 	kick    chan struct{}
 	ident   *iec103.ASDU
+	idents  map[iec103.Cause]*iec103.ASDU // last ASDU 5 per cause
 	waiters map[*waiter]struct{}
 	counter uint8 // RII and SCN
 
@@ -223,6 +224,18 @@ func (c *Client) Identification() *iec103.ASDU {
 	return c.ident
 }
 
+// IdentificationFor returns the last identification (ASDU 5) the protection
+// equipment sent with the given cause, or nil: [iec103.CauseResetFCB],
+// [iec103.CauseResetCU], [iec103.CauseStartRestart] or [iec103.CausePowerOn]
+// (clause 7.4.1, table 8). A station may send more than one after a reset,
+// for example the identification with cause 4 followed by start/restart with
+// cause 5, so [Client.Identification] alone can miss the one asked for.
+func (c *Client) IdentificationFor(cause iec103.Cause) *iec103.ASDU {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.idents[cause]
+}
+
 // Close stops the station. Outstanding requests fail with
 // [iec103.ErrClosed].
 func (c *Client) Close() error {
@@ -299,6 +312,10 @@ func (c *Client) receive(data []byte) {
 	c.mu.Lock()
 	if a.Type == iec103.TypeIdentification {
 		c.ident = a
+		if c.idents == nil {
+			c.idents = make(map[iec103.Cause]*iec103.ASDU)
+		}
+		c.idents[a.Cause] = a
 	}
 	for w := range c.waiters {
 		if w.match(a) {

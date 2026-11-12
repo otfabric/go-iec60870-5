@@ -43,6 +43,8 @@ type Client struct {
 	// OnState(StateUp) returned for the current up period
 	// closed when the link goes down after being up
 
+	// last ASDU 5 per cause
+
 	// RII and SCN
 
 }
@@ -176,6 +178,14 @@ func (c *Client) Identification() *iec103.ASDU
 ```
 
 Identification returns the last identification (ASDU 5) the protection equipment sent, after a reset or a start/restart (clause 7.4.1), or nil.
+
+#### func (Client) IdentificationFor
+
+```go
+func (c *Client) IdentificationFor(cause iec103.Cause) *iec103.ASDU
+```
+
+IdentificationFor returns the last identification (ASDU 5) the protection equipment sent with the given cause, or nil: [iec103.CauseResetFCB](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#CauseResetFCB), [iec103.CauseResetCU](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#CauseResetCU), [iec103.CauseStartRestart](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#CauseStartRestart) or [iec103.CausePowerOn](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#CausePowerOn) (clause 7.4.1, table 8). A station may send more than one after a reset, for example the identification with cause 4 followed by start/restart with cause 5, so [Client.Identification](#func-client-identification) alone can miss the one asked for.
 
 #### func (Client) Interrogate
 
