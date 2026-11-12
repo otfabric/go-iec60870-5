@@ -140,6 +140,22 @@ func (c *Client) DisturbanceList(ctx context.Context, fun iec103.FunctionType) (
 
 DisturbanceList requests the list of recorded disturbances of function type fun (ASDU 24 with TOO 24, clause 7.2.6.26) and returns the faults of the ASDU 23 the equipment answers with. The equipment also sends ASDU 23 on its own (a new disturbance, after a transfer, after a general interrogation, clause 7.4.7); those reach the Handler.
 
+#### func (Client) Done
+
+```go
+func (c *Client) Done() <-chan struct{}
+```
+
+Done is closed when the transport failed or the client was closed.
+
+#### func (Client) Err
+
+```go
+func (c *Client) Err() error
+```
+
+Err returns the transport error that stopped the client, nil while it runs or after Close.
+
 #### func (Client) GenericInterrogation
 
 ```go
@@ -249,7 +265,7 @@ State returns the link state.
 func (c *Client) WaitUp(ctx context.Context) error
 ```
 
-WaitUp waits until the link is initialized and OnState has been told (Config.OnState).
+WaitUp waits until the link is initialized and OnState has been told (Config.OnState). It returns the transport error when the transport fails first (closed by the peer, say): the client does not reopen a transport, so the link cannot come up on it.
 
 ### type Config
 

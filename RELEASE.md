@@ -1,5 +1,41 @@
 # Release notes
 
+## v0.5.0
+
+**Date:** 2026-11-12
+**Previous release:** v0.4.1
+
+Two lifecycle fixes, found by otfabric/iec60870ctl's tests: a link station
+no longer outlives its Close, and the IEC 101 and IEC 103 clients no longer
+wait in vain for a link whose transport has failed.
+
+### Added
+
+- `iec103/client`: `Client.Done` and `Client.Err`, as `iec101/client` has
+  them: Done is closed when the transport failed or the client was closed,
+  Err returns the transport error.
+
+### Fixed
+
+- `link`: `Close` of a `Primary`, `Secondary` or `Balanced` waits for the
+  writer goroutine as well as the reader. `Config.OnFrame` is no longer
+  called, and no frame is written, after `Close` returned; a frame queued
+  before the station stopped is not sent after it.
+- `iec101/client`, `iec103/client`: `WaitUp` returns the transport error
+  when the transport fails before the link came up (a peer that closed the
+  connection, say), instead of waiting until its context ended; it returns
+  `ErrClosed` after `Close`. The client stops initializing the link on a
+  failed transport instead of retrying every `RetryInterval`.
+  (`iec102/client.Init` already returned the error.)
+
+### Tests
+
+- `link`: `TestCloseWaitsForTheWriter`; `iec101/client`, `iec103/client`:
+  `TestWaitUpTransportClosedBeforeLinkUp`, `TestWaitUpCloseWhileWaiting`.
+  Each fails on v0.4.1.
+
+---
+
 ## v0.4.1
 
 **Date:** 2026-11-12

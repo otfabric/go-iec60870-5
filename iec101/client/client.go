@@ -191,7 +191,9 @@ func (c *Client) State() iec101.State {
 }
 
 // WaitUp waits until the link is initialized and OnState has been told
-// (Config.OnState).
+// (Config.OnState). It returns the transport error when the transport fails
+// first (closed by the peer, say): the client does not reopen a transport,
+// so the link cannot come up on it.
 func (c *Client) WaitUp(ctx context.Context) error {
 	for {
 		c.mu.Lock()
@@ -208,6 +210,12 @@ func (c *Client) WaitUp(ctx context.Context) error {
 		case <-ctx.Done():
 			return fmt.Errorf("iec101: waiting for link: %w", ctx.Err())
 		case <-c.ctx.Done():
+			return iec101.ErrClosed
+		case <-c.Done():
+			// The transport failed: the link cannot come up again on it.
+			if err := c.Err(); err != nil && c.ctx.Err() == nil {
+				return fmt.Errorf("iec101: waiting for link: %w", err)
+			}
 			return iec101.ErrClosed
 		}
 	}
@@ -394,6 +402,11 @@ func (c *Client) runUnbalanced() {
 			st, err := c.pri.Init(c.ctx, addr)
 			if err != nil {
 				c.log.Debug("link init failed", "error", err)
+				select {
+				case <-c.Done():
+					return // the transport failed: nothing to initialize
+				default:
+				}
 				if !c.sleep(c.cfg.RetryInterval) {
 					return
 				}
@@ -470,6 +483,11 @@ func (c *Client) runBalanced() {
 		if c.State() != iec101.StateUp {
 			if err := c.bal.Init(c.ctx); err != nil {
 				c.log.Debug("link init failed", "error", err)
+				select {
+				case <-c.Done():
+					return // the transport failed: nothing to initialize
+				default:
+				}
 				if !c.sleep(c.cfg.RetryInterval) {
 					return
 				}
