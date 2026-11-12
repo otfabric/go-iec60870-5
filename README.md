@@ -101,7 +101,12 @@ make interop-iec101 interop-iec103 interop-iec102  # the serial standards (Docke
 Independent reference implementations live in
 [otfabric/iec60870-5-interop](https://github.com/otfabric/iec60870-5-interop)
 (IEC 101/102/103/104). All four suites run against its v0.4.0 images
-(contract 2.3), pinned by digest.
+(contract 2.3), pinned by digest. The Self-interop workflow also runs them,
+by hand, against `ghcr.io/otfabric/iec60870-5-interop-<standard>-otfabric:latest`
+([INTEROPERABILITY.md](INTEROPERABILITY.md#self-interop-not-independent));
+iec60870-5-interop publishes those images only from a manual workflow
+(`own-go-iec60870-5.yml`), so their tags can lag the latest go-iec60870-5
+release.
 
 ## Relation to go-iec104
 
