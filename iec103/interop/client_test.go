@@ -136,10 +136,10 @@ func clientScenario(t *testing.T, a adapter, f *fixture) {
 		// Clause 7.4.1, table 8: ASDU 5, cause 4, INF 3, COL, eight
 		// characters and four octets of software after reset CU.
 		deadline := time.Now().Add(3 * time.Second)
-		for c.Identification() == nil && find(w.all(), iec103.TypeIdentification, iec103.CauseResetCU) == nil && time.Now().Before(deadline) {
+		for c.IdentificationFor(iec103.CauseResetCU) == nil && find(w.all(), iec103.TypeIdentification, iec103.CauseResetCU) == nil && time.Now().Before(deadline) {
 			time.Sleep(20 * time.Millisecond)
 		}
-		if id := c.Identification(); id != nil && id.Cause == iec103.CauseResetCU {
+		if id := c.IdentificationFor(iec103.CauseResetCU); id != nil {
 			b := id.Body.(iec103.Identification)
 			want := f.Station.Identification
 			if int(id.Fun) != want.Fun || id.Inf != iec103.InfResetCU || int(b.COL) != want.Col || b.Manufacturer() != want.ASCII ||

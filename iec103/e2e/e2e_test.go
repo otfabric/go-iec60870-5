@@ -348,6 +348,17 @@ func TestInitialization(t *testing.T) {
 	if r.c.Identification() == nil || r.sync.Load() != 1 || r.s.Now().Invalid {
 		t.Fatalf("identification %v, %d syncs, server time invalid %v", r.c.Identification(), r.sync.Load(), r.s.Now().Invalid)
 	}
+	// Both identifications are kept, each under its cause; Identification is
+	// the last one.
+	if id := r.c.IdentificationFor(iec103.CauseResetCU); id == nil || id.Inf != iec103.InfResetCU {
+		t.Fatalf("identification for reset CU %v", id)
+	}
+	if id := r.c.IdentificationFor(iec103.CausePowerOn); id == nil || id.Inf != iec103.InfPowerOn || r.c.Identification() != id {
+		t.Fatalf("identification for power on %v, last %v", id, r.c.Identification())
+	}
+	if id := r.c.IdentificationFor(iec103.CauseResetFCB); id != nil {
+		t.Fatalf("identification for reset FCB %v, none was sent", id)
+	}
 	if r.c.State() != iec103.StateUp || r.s.State() != iec103.StateUp || r.c.CommonAddr() != 3 {
 		t.Fatal("states")
 	}
