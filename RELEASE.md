@@ -2,7 +2,7 @@
 
 ## v0.4.1
 
-**Date:** not released (prepared)
+**Date:** 2026-11-12
 **Previous release:** v0.4.0
 
 `iec103/client` keeps every identification a station sends after a reset,
