@@ -1,5 +1,44 @@
 # Release notes
 
+## v0.5.1
+
+**Date:** 2026-11-12
+**Previous release:** v0.5.0
+
+Fixes a silent loss of data on a noisy line in every serial standard (IEC
+101, 102, 103): the FT 1.2 decoder could take an E5 octet inside the user
+data of a corrupted frame for a single-character answer.
+
+### Fixed
+
+- `ft12`: after rejecting a frame, `Decoder` resynchronized on the next
+  start character inside the rejected octets. A single character (E5) has
+  no checksum, so an E5 in the user data of a corrupted variable frame was
+  returned as a frame: the controlling station took it for "no data"
+  (or a positive acknowledgement), toggled FCB on its next request, and the
+  message the corrupted frame carried was lost while the procedure ended
+  successfully (otfabric/iec60870ctl's chaos test: 7 of 8 general
+  interrogation messages). Since v0.1.0. Now a rejected variable frame
+  whose two length octets agree is dropped whole (4 + L + 2 octets, also
+  when the rest arrives in later reads), and after any other error a
+  single character is accepted only from octets that arrive after a pause
+  of `ErrorIdle` (10 ms), the line idle IEC 60870-5-1 asks for after an
+  error. A real answer follows a request sent after the error, so it is
+  not affected; a frame dropped in error is repeated by the link layer.
+
+### Added
+
+- `ft12.ErrorIdle`.
+
+### Tests
+
+- `ft12`: `TestDecoderNoSingleFromRejectedFrame` (five corruptions, one read
+  and one octet per read), `TestDecoderDropsTheRestOfARejectedFrame`,
+  `TestDecoderSingleAfterIdle`; `TestDecoderResync` now expects the E5 read
+  with a rejected header to be dropped.
+
+---
+
 ## v0.5.0
 
 **Date:** 2026-11-12

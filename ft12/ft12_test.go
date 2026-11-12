@@ -8,6 +8,7 @@ import (
 	"io"
 	"testing"
 	"testing/iotest"
+	"time"
 )
 
 // Frames from IEC 60870-5-101 traffic: request status of link (FC 9) to
@@ -152,8 +153,11 @@ func TestDecoderResync(t *testing.T) {
 		}
 	}
 	// The truncated header 68 05 is followed by E5, 68 09 09 68...: the
-	// decoder must not lose the single character or the frame after it.
-	want := []Kind{KindFixed, KindSingle, KindVariable}
+	// decoder must not lose the frame after it. The E5, read before the
+	// error was seen, is dropped with the rejected octets: a single
+	// character has no checksum, and one taken from rejected octets was
+	// taken for an answer (see TestDecoderNoSingleFromRejectedFrame).
+	want := []Kind{KindFixed, KindVariable}
 	if len(kinds) != len(want) {
 		t.Fatalf("frames %v, want %v", kinds, want)
 	}
@@ -214,4 +218,111 @@ func FuzzDecode(f *testing.F) {
 			}
 		}
 	})
+}
+
+// a variable frame of four octets of user data, the third of which is E5.
+var withE5 = Frame{Kind: KindVariable, Control: 0x28, Addr: 1, Data: []byte{0x7E, 0xE5, 0x90, 0x0E}}
+
+// A corrupted variable frame whose user data holds E5 must not yield a
+// single character: the receiver took it for an answer ("no data") and
+// lost the message the frame carried (iec60870ctl chaos test, 7 of 8 GI
+// messages). Each case is decoded in one read and one octet per read.
+func TestDecoderNoSingleFromRejectedFrame(t *testing.T) {
+	p := Params{AddrSize: 1}
+	good, err := withE5.Encode(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, _ := Frame{Kind: KindFixed, Control: 0x20, Addr: 1}.Encode(p)
+	for name, corrupt := range map[string]func([]byte){
+		"second start character": func(b []byte) { b[3] ^= 0x55 },
+		"checksum":               func(b []byte) { b[len(b)-2] ^= 0x55 },
+		"user data":              func(b []byte) { b[4] ^= 0x55 },
+		"stop character":         func(b []byte) { b[len(b)-1] ^= 0x55 },
+		"length octet":           func(b []byte) { b[1] ^= 0x55 },
+	} {
+		for _, oneByte := range []bool{false, true} {
+			b := bytes.Clone(good)
+			corrupt(b)
+			stream := append(b, next...)
+			var r io.Reader = bytes.NewReader(stream)
+			if oneByte {
+				r = iotest.OneByteReader(r)
+			}
+			d := NewDecoder(r, p)
+			var kinds []Kind
+			for {
+				f, err := d.Next()
+				if err != nil {
+					break
+				}
+				kinds = append(kinds, f.Kind)
+			}
+			if len(kinds) != 1 || kinds[0] != KindFixed {
+				t.Errorf("%s (one octet per read %v): frames %v, want only the fixed frame after it", name, oneByte, kinds)
+			}
+		}
+	}
+}
+
+// A rejected variable frame is dropped whole also when the rest of it
+// arrives in later reads: the E5 in its user data is never a frame.
+func TestDecoderDropsTheRestOfARejectedFrame(t *testing.T) {
+	p := Params{AddrSize: 1}
+	b, _ := withE5.Encode(p)
+	b[3] ^= 0x55 // detected after four octets
+	next, _ := Frame{Kind: KindFixed, Control: 0x20, Addr: 1}.Encode(p)
+	r := &chunks{parts: [][]byte{b[:4], b[4:], next}}
+	d := NewDecoder(r, p)
+	var discarded int
+	d.OnDiscard = func(b []byte, _ error) { discarded += len(b) }
+	f, err := d.Next()
+	if err != nil || f.Kind != KindFixed {
+		t.Fatalf("%v %v, want the fixed frame", f, err)
+	}
+	if discarded != len(b) {
+		t.Errorf("discarded %d octets, want %d", discarded, len(b))
+	}
+}
+
+// After an error, a single character that arrives after a pause of
+// ErrorIdle is a frame again; one that arrives at once is not.
+func TestDecoderSingleAfterIdle(t *testing.T) {
+	p := Params{AddrSize: 1}
+	r := &chunks{parts: [][]byte{{0x00, 0xE5}, {0xE5}}, pause: map[int]time.Duration{1: 2 * ErrorIdle}}
+	d := NewDecoder(r, p)
+	var discarded []byte
+	d.OnDiscard = func(b []byte, _ error) { discarded = append(discarded, b...) }
+	f, err := d.Next()
+	if err != nil || f.Kind != KindSingle {
+		t.Fatalf("%v %v, want the single character after the pause", f, err)
+	}
+	if !bytes.Equal(discarded, []byte{0x00, 0xE5}) {
+		t.Errorf("discarded % X, want the noise and the E5 that came with it", discarded)
+	}
+}
+
+// chunks returns one part per Read, pausing before the parts pause names
+// (by index).
+type chunks struct {
+	parts [][]byte
+	pause map[int]time.Duration
+	n     int
+}
+
+func (c *chunks) Read(b []byte) (int, error) {
+	if len(c.parts) == 0 {
+		return 0, io.EOF
+	}
+	if d := c.pause[c.n]; d > 0 && len(c.parts[0]) > 0 {
+		time.Sleep(d)
+		delete(c.pause, c.n)
+	}
+	n := copy(b, c.parts[0])
+	c.parts[0] = c.parts[0][n:]
+	if len(c.parts[0]) == 0 {
+		c.parts = c.parts[1:]
+		c.n++
+	}
+	return n, nil
 }
