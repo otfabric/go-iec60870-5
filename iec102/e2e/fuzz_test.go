@@ -59,7 +59,7 @@ func FuzzClientAnswers(f *testing.F) {
 			if len(stream) < 2 {
 				return ans
 			}
-			n := min(int(stream[0]), len(stream)-2)
+			n := min(int(stream[0]), len(stream)-2, p2.MaxData())
 			acd := stream[1]&1 != 0
 			d := stream[2 : 2+n]
 			stream = stream[2+n:]
