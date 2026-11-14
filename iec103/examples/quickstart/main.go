@@ -30,6 +30,8 @@ func main() {
 		Fun:            fun,
 		Identification: iec103.IdentificationOf(iec103.COLWithGeneric, "OTFABRIC", [4]byte{0, 1, 0, 0}),
 		Handler: server.HandlerFunc(func(s *server.Server, a *iec103.ASDU) {
+			// Dispatch on the body, not on a.Type: a request with a
+			// private cause of transmission decodes as iec103.Raw.
 			switch b := a.Body.(type) {
 			case iec103.GIInit:
 				// The GI state of "protection active" (table 9, INF 18).
@@ -57,8 +59,10 @@ func main() {
 		LinkAddr: 1,
 		NoInitGI: true, // run it explicitly below
 		Handler: func(a *iec103.ASDU) {
-			if a.Type == iec103.TypeIdentification {
-				fmt.Printf("identification: %s, %q\n", a.Cause, a.Body.(iec103.Identification).Manufacturer())
+			// Dispatch on the body: an ASDU with a private cause of
+			// transmission decodes as iec103.Raw whatever its type.
+			if id, ok := a.Body.(iec103.Identification); ok {
+				fmt.Printf("identification: %s, %q\n", a.Cause, id.Manufacturer())
 			}
 		},
 	})

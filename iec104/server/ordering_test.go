@@ -139,11 +139,24 @@ func TestOrderingConcurrentServerClose(t *testing.T) {
 		<-gate
 		running.Store(false)
 	}))
-	c := connect(t, addr)
+	// The first Close shuts the session's connection down once it has
+	// begun closing the server; the client sees the connection end.
+	var closing atomic.Bool
+	lost := make(chan struct{})
+	c := connect(t, addr, client.WithStateHandler(func(st iec104.State, _ error) {
+		if st == iec104.StateDisconnected && closing.CompareAndSwap(true, false) {
+			close(lost)
+		}
+	}))
 	_ = c.Send(context.Background(), asdu.New(asdu.CauseActivation, 1, asdu.SingleCommand{IOA: 1, Value: true}))
 	<-entered
+	closing.Store(true)
 	go func() { _ = srv.Close() }()
-	time.Sleep(100 * time.Millisecond) // the first Close is waiting for the Handler
+	select {
+	case <-lost: // the first Close is waiting for the Handler
+	case <-time.After(5 * time.Second):
+		t.Fatal("the first Server.Close did not close the connection")
+	}
 	second := make(chan struct{})
 	go func() { _ = srv.Close(); close(second) }()
 	select {

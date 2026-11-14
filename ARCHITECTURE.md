@@ -146,12 +146,17 @@ responses with either address.
   reset of remote link), sends queued user data, and polls class 1 while
   the station reports ACD, class 2 otherwise, pausing `PollInterval` when
   the station has nothing; DFC holds back user data;
-- balanced: a supervisor that initializes this station's direction and
-  sends the test function for link when idle.
+- balanced: a supervisor that initializes this station's direction, sends
+  the user data of requests and sends the test function for link every
+  `TestInterval`. Every primary exchange runs on it under the client's own
+  context, so a request that ends at its deadline does not abandon an
+  exchange half way and the FCB stays in step.
 
 Received ASDUs go to `telecontrol.Requester.Dispatch`; what no request
 consumes is delivered to the application's handler on a goroutine of its
-own, in order, so a handler may issue requests.
+own, in order, through a queue of 256. A request issued from the handler
+waits for answers that cannot pass the handler's queue while it runs, so
+requests are issued from other goroutines.
 
 `iec101/server` holds class 1 and class 2 queues (unbalanced) or a send
 queue (balanced). Control-direction ASDUs are queued to a handler goroutine;

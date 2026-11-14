@@ -21,6 +21,7 @@ import (
 	"github.com/otfabric/go-iec60870-5/iec104/internal/station"
 	"github.com/otfabric/go-iec60870-5/iec104/internal/testutil"
 	"github.com/otfabric/go-iec60870-5/iec104/server"
+	"github.com/otfabric/go-iec60870-5/internal/testutil/leakcheck"
 )
 
 // The hostile tests put a peer that does not follow the protocol on the
@@ -289,25 +290,6 @@ func (p *rawPeer) expectReply(typ asdu.TypeID, cause asdu.Cause, negative bool) 
 		p.t.Fatalf("reply %s, want cause %s negative %v", a, cause, negative)
 	}
 	return a
-}
-
-// goroutines returns a function that fails t when goroutines started since
-// the call are still running a while after everything was closed, the
-// pattern of the chaos test.
-func goroutines(t testing.TB) func() {
-	baseline := runtime.NumGoroutine()
-	return func() {
-		t.Helper()
-		deadline := time.Now().Add(5 * time.Second)
-		for runtime.NumGoroutine() > baseline+2 && time.Now().Before(deadline) {
-			time.Sleep(10 * time.Millisecond)
-		}
-		if n := runtime.NumGoroutine(); n > baseline+2 {
-			buf := make([]byte, 1<<16)
-			buf = buf[:runtime.Stack(buf, true)]
-			t.Errorf("%d goroutines before, %d after everything was closed:\n%s", baseline, n, buf)
-		}
-	}
 }
 
 // legitimateInterrogation proves the station still serves: a go-iec60870-5
@@ -651,7 +633,7 @@ func hostileServerCases() []hostileCase {
 func TestHostileControllingStation(t *testing.T) {
 	for _, tc := range hostileServerCases() {
 		t.Run(tc.name, func(t *testing.T) {
-			leaks := goroutines(t)
+			leaks := leakcheck.Check(t)
 			fx := station.Baseline(t)
 			st := station.Start(t, fx, server.WithParams(hostileParams()))
 			ca := fx.Station.CommonAddr
@@ -691,7 +673,7 @@ func TestHostileControllingStation(t *testing.T) {
 // still served. The connection is an in-memory pipe, which buffers
 // nothing: over TCP the kernel's buffers would absorb megabytes first.
 func TestHostileTestFrameFloodNeverRead(t *testing.T) {
-	leaks := goroutines(t)
+	leaks := leakcheck.Check(t)
 	srv, err := server.New(nil, server.WithParams(hostileParams()))
 	if err != nil {
 		t.Fatal(err)
@@ -750,7 +732,7 @@ func TestHostileTestFrameFloodNeverRead(t *testing.T) {
 // that announces and sends nothing must not make the station reserve the
 // announced octets.
 func TestHostileUploadAnnouncementsReserveNothing(t *testing.T) {
-	leaks := goroutines(t)
+	leaks := leakcheck.Check(t)
 	fx := station.Baseline(t)
 	st := station.Start(t, fx, server.WithParams(hostileParams()))
 	ca := fx.Station.CommonAddr
@@ -778,6 +760,53 @@ func TestHostileUploadAnnouncementsReserveNothing(t *testing.T) {
 	if grew := int64(after) - int64(before); grew > limit {
 		t.Errorf("the heap grew by %d MiB for %d announced files that sent no data, want less than %d MiB",
 			grew>>20, files, limit>>20)
+	}
+
+	_ = p.conn.Close()
+	legitimateInterrogation(t, st, fx)
+	if err := st.Server.Close(); err != nil {
+		t.Errorf("server Close: %v", err)
+	}
+	leaks()
+}
+
+// Each announced section costs the station a bounded number of octets
+// before its data arrives: 64 sections announced at the largest length,
+// with no data, grow the live heap by less than 4 KiB each.
+func TestHostileSectionAnnouncementBudget(t *testing.T) {
+	leaks := leakcheck.Check(t)
+	fx := station.Baseline(t)
+	st := station.Start(t, fx, server.WithParams(hostileParams()))
+	ca := fx.Station.CommonAddr
+	p := dialRaw(t, st.Loopback())
+	p.startDT()
+
+	heap := func() uint64 {
+		runtime.GC()
+		var ms runtime.MemStats
+		runtime.ReadMemStats(&ms)
+		return ms.HeapAlloc
+	}
+	const files, budget = 64, 4 << 10
+	announce := func(first asdu.IOA) {
+		for i := range asdu.IOA(files) {
+			ioa := first + i
+			p.mustSendASDU(asdu.New(asdu.CauseFileTransfer, ca, asdu.FileReady{IOA: ioa, Name: 1, Length: asdu.MaxFileLength}))
+			p.expect("the call of the file", func(a *asdu.ASDU) bool { return a.Type == asdu.F_SC_NA_1 && !a.Negative })
+			p.mustSendASDU(asdu.New(asdu.CauseFileTransfer, ca,
+				asdu.SectionReady{IOA: ioa, Name: 1, Section: 1, Length: asdu.MaxFileLength}))
+			p.expect("the call of the section", func(a *asdu.ASDU) bool { return a.Type == asdu.F_SC_NA_1 && !a.Negative })
+		}
+	}
+	// A first round brings the session's maps and buffers to their size,
+	// so that the second one measures the announcements alone.
+	announce(station.FirstUploadIOA + 1000)
+	before := heap()
+	announce(station.FirstUploadIOA + 2000)
+	after := heap()
+	if grew := int64(after) - int64(before); grew > files*budget {
+		t.Errorf("the heap grew by %d octets for %d sections announced without data, want at most %d (%d each)",
+			grew, files, files*budget, budget)
 	}
 
 	_ = p.conn.Close()
@@ -986,7 +1015,7 @@ func TestHostileStationFileTransfer(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			leaks := goroutines(t)
+			leaks := leakcheck.Check(t)
 			script := &fileScript{ready: asdu.FileReady{IOA: ioa, Name: name, Length: tt.length},
 				request: tt.request, section: tt.section, after: tt.after, acks: make(chan asdu.FileAck, 4)}
 			rogue := startRogue(t, script.serve)
@@ -1027,7 +1056,7 @@ func TestHostileStationFileTransfer(t *testing.T) {
 // A station that announces section after section, each empty and each
 // acknowledged, never ends the file: the caller's context bounds it.
 func TestHostileStationEndlessSections(t *testing.T) {
-	leaks := goroutines(t)
+	leaks := leakcheck.Check(t)
 	const ioa, name = 30000, 1
 	ready := func(nos uint8) []asdu.InformationObject {
 		return []asdu.InformationObject{asdu.SectionReady{IOA: ioa, Name: name, Section: nos%250 + 1}}
@@ -1064,7 +1093,7 @@ func TestHostileStationEndlessSections(t *testing.T) {
 // terminates it: the request timeout ends the call, and the client stays
 // usable.
 func TestHostileStationEndlessConfirmations(t *testing.T) {
-	leaks := goroutines(t)
+	leaks := leakcheck.Check(t)
 	stop := make(chan struct{})
 	var streams sync.WaitGroup
 	rogue := startRogue(t, func(p *rawPeer, a *asdu.ASDU) {
@@ -1135,7 +1164,7 @@ func TestHostileStationBreaksAPCI(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			leaks := goroutines(t)
+			leaks := leakcheck.Check(t)
 			rogue := startRogue(t, func(p *rawPeer, a *asdu.ASDU) {
 				if a.Type == asdu.C_IC_NA_1 {
 					tt.answer(p, a)
@@ -1177,7 +1206,7 @@ func TestHostileStationBreaksAPCI(t *testing.T) {
 // A station that sends what only a controlling station sends, or confirms
 // what was never asked: ignored, and the client keeps working.
 func TestHostileStationUnsolicitedControl(t *testing.T) {
-	leaks := goroutines(t)
+	leaks := leakcheck.Check(t)
 	rogue := startRogue(t, func(p *rawPeer, a *asdu.ASDU) {
 		if a.Type != asdu.C_IC_NA_1 {
 			return

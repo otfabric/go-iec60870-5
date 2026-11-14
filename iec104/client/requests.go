@@ -197,8 +197,9 @@ func retryable(parent context.Context, err error) bool {
 }
 
 // run executes one request: it bounds every attempt by the request timeout,
-// repeats an idempotent request as configured by WithRetry, and reports to
-// the metrics and the log. attempt performs a single try.
+// repeats an idempotent request as configured by WithRetry, with
+// exponential backoff and equal jitter, and reports to the metrics and the
+// log. attempt performs a single try.
 func (c *Client) run(ctx context.Context, req *asdu.ASDU, idempotent bool, attempt func(ctx context.Context) error) error {
 	rm, _ := c.opts.metrics.(iec104.RequestMetrics)
 	remote := c.remoteAddr()
@@ -220,12 +221,13 @@ func (c *Client) run(ctx context.Context, req *asdu.ASDU, idempotent bool, attem
 		if err == nil || i >= attempts || !retryable(ctx, err) {
 			break
 		}
+		pause := c.opts.jitter(delay)
 		c.log.WarnContext(ctx, "request failed, retrying", "type", req.Type.String(),
-			"ca", req.CommonAddr, "attempt", i, "retry_in", delay.String(), "error", err)
+			"ca", req.CommonAddr, "attempt", i, "retry_in", pause.String(), "error", err)
 		if rm != nil {
 			rm.OnRetry(remote, req.Type, req.CommonAddr, i, err)
 		}
-		timer := time.NewTimer(delay)
+		timer := time.NewTimer(pause)
 		select {
 		case <-timer.C:
 		case <-ctx.Done():
@@ -366,10 +368,10 @@ func (c *Client) collectOnce(ctx context.Context, req *asdu.ASDU, cause asdu.Cau
 // [asdu.QOIGroup](n) for one group. With ca set to [asdu.Broadcast] the
 // answers of all stations are collected until the first termination.
 //
-// The collected ASDUs are also delivered to the [Handler]. A large station
-// can take longer than the default request timeout: pass a context with a
-// suitable deadline. On error the ASDUs collected so far are returned
-// alongside it.
+// The collected ASDUs are also delivered to the [Handler]: the same values,
+// shared, so neither side may modify them. A large station can take longer
+// than the default request timeout: pass a context with a suitable
+// deadline. On error the ASDUs collected so far are returned alongside it.
 func (c *Client) Interrogate(ctx context.Context, ca asdu.CommonAddr, qoi asdu.QOI) ([]*asdu.ASDU, error) {
 	req := asdu.New(asdu.CauseActivation, ca, asdu.Interrogation{Qualifier: qoi})
 	return c.collect(ctx, req, qoi.Cause(), true)
@@ -400,7 +402,9 @@ func (c *Client) CounterInterrogate(ctx context.Context, ca asdu.CommonAddr, req
 
 // Read requests the current value of one information object (C_RD_NA_1)
 // and returns the ASDU the station sends with cause "request" for that
-// address. An unknown address is reported as [*iec104.NegativeError].
+// address. An unknown address is reported as [*iec104.NegativeError]. The
+// ASDU is also delivered to the [Handler], the same value, shared: neither
+// side may modify it.
 func (c *Client) Read(ctx context.Context, ca asdu.CommonAddr, ioa asdu.IOA) (*asdu.ASDU, error) {
 	req := asdu.New(asdu.CauseRequest, ca, asdu.Read{IOA: ioa})
 	var answer *asdu.ASDU

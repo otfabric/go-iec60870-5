@@ -23,6 +23,7 @@ import (
 	"github.com/otfabric/go-iec60870-5/iec104/apci"
 	"github.com/otfabric/go-iec60870-5/iec104/client"
 	"github.com/otfabric/go-iec60870-5/iec104/server"
+	"github.com/otfabric/go-iec60870-5/internal/testutil/leakcheck"
 )
 
 // The chaos test does not look for one bug. It lets everything happen at
@@ -317,7 +318,7 @@ func TestChaos(t *testing.T) {
 }
 
 func chaos(t *testing.T, seed int64, duration time.Duration) {
-	baseline := runtime.NumGoroutine()
+	leaks := leakcheck.Check(t)
 	network := &chaosNet{rng: &lockedRand{r: rand.New(rand.NewSource(seed))}, conns: map[*chaosConn]struct{}{}}
 	st := &chaosStation{executed: map[asdu.IOA]int16{}, uploads: map[asdu.IOA][]byte{}, sessions: map[uint64]*trace{}}
 
@@ -741,15 +742,7 @@ func chaos(t *testing.T, seed int64, duration time.Duration) {
 	}
 
 	// Goroutines: everything the run started is gone.
-	leakDeadline := time.Now().Add(5 * time.Second)
-	for runtime.NumGoroutine() > baseline+2 && time.Now().Before(leakDeadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if n := runtime.NumGoroutine(); n > baseline+2 {
-		buf := make([]byte, 1<<16)
-		buf = buf[:runtime.Stack(buf, true)]
-		t.Errorf("seed %d: %d goroutines before, %d after everything was closed:\n%s", seed, baseline, n, buf)
-	}
+	leaks()
 
 	if okOps.Load() < 50 || network.cuts.Load() == 0 || nSessions < 3 || want == 0 {
 		t.Errorf("seed %d: the run exercised too little: %d of %d calls succeeded, %d cuts, %d sessions, %d events",

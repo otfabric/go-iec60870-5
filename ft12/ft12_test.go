@@ -8,6 +8,7 @@ import (
 	"io"
 	"testing"
 	"testing/iotest"
+	"testing/synctest"
 	"time"
 )
 
@@ -286,20 +287,23 @@ func TestDecoderDropsTheRestOfARejectedFrame(t *testing.T) {
 }
 
 // After an error, a single character that arrives after a pause of
-// ErrorIdle is a frame again; one that arrives at once is not.
+// ErrorIdle is a frame again; one that arrives at once is not. The pause
+// runs on the fake clock of testing/synctest.
 func TestDecoderSingleAfterIdle(t *testing.T) {
-	p := Params{AddrSize: 1}
-	r := &chunks{parts: [][]byte{{0x00, 0xE5}, {0xE5}}, pause: map[int]time.Duration{1: 2 * ErrorIdle}}
-	d := NewDecoder(r, p)
-	var discarded []byte
-	d.OnDiscard = func(b []byte, _ error) { discarded = append(discarded, b...) }
-	f, err := d.Next()
-	if err != nil || f.Kind != KindSingle {
-		t.Fatalf("%v %v, want the single character after the pause", f, err)
-	}
-	if !bytes.Equal(discarded, []byte{0x00, 0xE5}) {
-		t.Errorf("discarded % X, want the noise and the E5 that came with it", discarded)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		p := Params{AddrSize: 1}
+		r := &chunks{parts: [][]byte{{0x00, 0xE5}, {0xE5}}, pause: map[int]time.Duration{1: 2 * ErrorIdle}}
+		d := NewDecoder(r, p)
+		var discarded []byte
+		d.OnDiscard = func(b []byte, _ error) { discarded = append(discarded, b...) }
+		f, err := d.Next()
+		if err != nil || f.Kind != KindSingle {
+			t.Fatalf("%v %v, want the single character after the pause", f, err)
+		}
+		if !bytes.Equal(discarded, []byte{0x00, 0xE5}) {
+			t.Errorf("discarded % X, want the noise and the E5 that came with it", discarded)
+		}
+	})
 }
 
 // chunks returns one part per Read, pausing before the parts pause names

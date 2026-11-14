@@ -33,7 +33,7 @@ type Client struct {
 	// unbalanced
 	// balanced
 
-	// unbalanced: user data for the poller
+	// user data for the poller or the supervisor
 
 	// closed while the link is up and OnState was told
 	// OnState(StateUp) returned for the current up period
@@ -50,7 +50,7 @@ Client is a controlling station.
 func New(rw io.ReadWriter, cfg Config) (*Client, error)
 ```
 
-New starts a controlling station on rw. Close stops it and closes rw when it is an io.Closer.
+New starts a controlling station on rw. Close stops it and closes rw when it is an io.Closer; rw's Close must unblock its Read for Close to return.
 
 #### func (Client) ClockSync
 
@@ -66,7 +66,7 @@ ClockSync synchronizes the station's clock (C\_CS\_NA\_1).
 func (c *Client) Close() error
 ```
 
-Close stops the station. Outstanding requests fail with [iec101.ErrClosed](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec101#ErrClosed).
+Close stops the station and waits for its goroutines. Outstanding requests fail with [iec101.ErrClosed](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec101#ErrClosed). Close is safe to call more than once and from several goroutines: the first call closes the transport and returns its error; later calls return nil. It must not be called from Config.Handler or Config.OnState (see there).
 
 #### func (Client) Command
 
@@ -146,7 +146,7 @@ ResetProcess sends a reset process command (C\_RP\_NA\_1).
 func (c *Client) Send(ctx context.Context, a *asdu.ASDU) error
 ```
 
-Send transmits a in the control direction without waiting for an application answer. It returns when the link layer confirmed it, or at the deadline of ctx: in unbalanced transmission the poller then still finishes the exchange, repeating the frame until it is answered or Link.Retries ran out. Answers reach the Handler.
+Send transmits a in the control direction without waiting for an application answer. It returns when the link layer confirmed it, or at the deadline of ctx: the client's own goroutine (the poller in unbalanced transmission, the supervisor in balanced) then still finishes the exchange, repeating the frame until it is answered or Link.Retries ran out. Answers reach the Handler.
 
 #### func (Client) SetDelay
 
@@ -210,13 +210,28 @@ type Config struct {
 	// Handler receives every monitor-direction ASDU that is not a mirror of
 	// a request: spontaneous and cyclic data, and the data that answers an
 	// interrogation or read (also returned by those calls). It runs on a
-	// goroutine of its own, in order; it may issue requests.
+	// goroutine of its own, in order, and the ASDUs wait for it in a queue
+	// of 256 (in balanced transmission the link refuses user data, DFC
+	// set, while more than half of them wait).
+	//
+	// The Handler must not wait for the station. While it runs nothing
+	// empties the queue, so a request made from it waits for answers that
+	// cannot get in once the queue is full (unbalanced: the poller waits
+	// for room; balanced: the link refuses them), and fails at its
+	// deadline when the station sends more ASDUs than that first (an
+	// interrogation of more than 256 objects, say). In unbalanced
+	// transmission Send waits for the poller in the same way. Make such
+	// calls from another goroutine. The Handler must not call Close
+	// either: Close waits for its goroutine. Call it in a new goroutine
+	// (go c.Close()); it returns once the Handler has returned.
 	Handler func(a *asdu.ASDU)
 	// OnState is called with each change of the link state, from the
-	// goroutine that changed it. WaitUp returns only after OnState for the
-	// change to StateUp has returned, so what the callback sets up is in
-	// place when WaitUp returns. State reports a change before OnState
-	// for it is called.
+	// goroutine that changed it: one of the client's own goroutines, or
+	// Close. WaitUp returns only after OnState for the change to StateUp
+	// has returned, so what the callback sets up is in place when WaitUp
+	// returns. State reports a change before OnState for it is called.
+	// OnState must not call Close, which waits for those goroutines: call
+	// it in a new goroutine.
 	OnState func(s iec101.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger

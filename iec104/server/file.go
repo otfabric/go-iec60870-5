@@ -359,9 +359,9 @@ func (f *FileServer) receive(s *Session, a *asdu.ASDU) error {
 			return refuse()
 		}
 		u.open, u.nos, u.want = true, o.Section, int(o.Length)
-		// The length is the peer's claim: memory grows with the data that
-		// arrives, from at most 64 KiB reserved.
-		u.sections = append(u.sections, make([]byte, 0, min(o.Length, 64<<10)))
+		// The length is the peer's claim: nothing is reserved for it, and
+		// memory grows only with the data that arrives.
+		u.sections = append(u.sections, []byte{})
 		return f.send(s, a.CommonAddr, asdu.FileCall{IOA: o.IOA, Name: o.Name, Section: o.Section, Qualifier: asdu.SectionRequest})
 
 	case asdu.FileSegment:

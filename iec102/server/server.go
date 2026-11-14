@@ -43,7 +43,14 @@ import (
 )
 
 // Handler handles the control-direction ASDUs the server does not answer
-// itself. Calls are made one at a time from a goroutine of the server.
+// itself. Calls are made one at a time from a goroutine of the server; the
+// handler answers through the Server, whose methods it may call, all but
+// Close. Close waits for the goroutine that calls the handler: a handler
+// that stops the station calls Close in a new goroutine (go s.Close()),
+// which returns once the handler has returned.
+//
+// The ASDU is the handler's own: a new one is decoded for each call and the
+// server keeps no reference to it, so the handler may keep or modify it.
 type Handler interface {
 	HandleASDU(s *Server, a *iec102.ASDU)
 }
@@ -89,7 +96,11 @@ type Config struct {
 	Handler Handler
 	// QueueSize bounds the class 2 queue. Zero means [DefaultQueueSize].
 	QueueSize int
-	// OnState is called with each change of the link state.
+	// OnState is called with each change of the link state: from the
+	// station's link goroutine on a reset of remote link, and from Close
+	// for StateClosed. It must return quickly and must not call Close,
+	// which waits for that goroutine; call Close in a new goroutine
+	// instead.
 	OnState func(s iec102.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger
@@ -110,6 +121,9 @@ type Server struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // New starts a server on rw. Close stops it and closes rw when it is an
@@ -150,19 +164,23 @@ func New(rw io.ReadWriter, cfg Config) (*Server, error) {
 	return s, nil
 }
 
-// Close stops the station.
+// Close stops the station. Close is safe to call more than once and from
+// several goroutines: the first call closes the transport and returns its
+// error; later calls return nil. It must not be called from the Handler or
+// OnState (see [Handler]).
 func (s *Server) Close() error {
-	s.mu.Lock()
-	if s.state == iec102.StateClosed {
-		s.mu.Unlock()
-		return nil
+	first := false
+	s.closeOnce.Do(func() {
+		first = true
+		s.cancel()
+		s.closeErr = s.sec.Close()
+		s.wg.Wait()
+		s.setState(iec102.StateClosed, nil)
+	})
+	if first {
+		return s.closeErr
 	}
-	s.mu.Unlock()
-	s.cancel()
-	err := s.sec.Close()
-	s.wg.Wait()
-	s.setState(iec102.StateClosed, nil)
-	return err
+	return nil
 }
 
 // Done is closed when the station stops: after Close or a transport

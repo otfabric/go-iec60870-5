@@ -537,6 +537,12 @@ type Endpoint struct {
 
 	// controlled: the session keys are of an earlier connection
 
+	// connections that do not carry the association (see bind.go)
+	// controlled: the candidate of each connection
+	// parent is the Endpoint a candidate belongs to, nil for others. A
+	// candidate counts in the statistics of its parent; authenticated is set
+	// by the first count of a success, authBy names it.
+
 }
 ```
 

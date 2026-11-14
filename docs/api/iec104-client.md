@@ -51,6 +51,14 @@ type Client struct {
 	// callbacks: the Handler is not called again. A Close from elsewhere
 	// waits instead, until the Handler has seen what was received.
 
+	// The start handlers (WithStartHandler) that run, which Close waits
+	// for: live counts them, closing those that are inside Close
+	// themselves, which Close does not wait for; starters maps the
+	// goroutine of each to whether it is closing.
+	// watchers counts the goroutines that end their contexts.
+
+	// on startMu: signalled when live or closing changes
+
 }
 ```
 
@@ -96,7 +104,7 @@ func (c *Client) Close() error
 
 Close closes the connection and stops reconnecting. Pending requests fail with [iec104.ErrClosed](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#ErrClosed). When Close returns the [Handler](#type-handler) and the state handler have been called for the last time: a call in progress has returned and none follows. Before that the Handler is given what the connection had received, and acknowledged to the station, up to the moment of the call.
 
-Called from the Handler or the state handler, Close cannot wait for that call: it returns at once, the Handler is not called again, and "disconnected" is reported after the call has returned. Close is idempotent; every caller outside a callback returns when the client is closed.
+Called from the Handler or the state handler, Close cannot wait for that call: it returns at once, the Handler is not called again, and "disconnected" is reported after the call has returned. Close also waits for the start handlers ([WithStartHandler](#func-withstarthandler)) to return, whose contexts it cancels; called from a start handler, it waits for everything else and returns. Close is safe to call more than once and from several goroutines; every caller outside a callback returns when the client is closed.
 
 #### func (Client) Command
 
@@ -162,7 +170,7 @@ Interrogate runs an interrogation (C\_IC\_NA\_1): it sends the command, waits fo
 
 qoi is [asdu.QOIStation](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#QOIStation) for a general interrogation or [asdu.QOIGroup](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#QOIGroup)(n) for one group. With ca set to [asdu.Broadcast](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#Broadcast) the answers of all stations are collected until the first termination.
 
-The collected ASDUs are also delivered to the [Handler](#type-handler). A large station can take longer than the default request timeout: pass a context with a suitable deadline. On error the ASDUs collected so far are returned alongside it.
+The collected ASDUs are also delivered to the [Handler](#type-handler): the same values, shared, so neither side may modify them. A large station can take longer than the default request timeout: pass a context with a suitable deadline. On error the ASDUs collected so far are returned alongside it.
 
 #### func (Client) ListFiles
 
@@ -192,7 +200,7 @@ A station that refuses the file, or answers a section or the file with a negativ
 func (c *Client) Read(ctx context.Context, ca asdu.CommonAddr, ioa asdu.IOA) (*asdu.ASDU, error)
 ```
 
-Read requests the current value of one information object (C\_RD\_NA\_1) and returns the ASDU the station sends with cause "request" for that address. An unknown address is reported as [\*iec104.NegativeError](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#NegativeError).
+Read requests the current value of one information object (C\_RD\_NA\_1) and returns the ASDU the station sends with cause "request" for that address. An unknown address is reported as [\*iec104.NegativeError](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#NegativeError). The ASDU is also delivered to the [Handler](#type-handler), the same value, shared: neither side may modify it.
 
 #### func (Client) ResetProcess
 
@@ -457,6 +465,8 @@ HandleASDU is called from a single goroutine per connection, in the order the AS
 
 It may call [Client.Send](#func-client-send), [Client.State](#func-client-state) and [Client.Close](#func-client-close). It must not call the request methods ([Client.Command](#func-client-command), [Client.Interrogate](#func-client-interrogate), [Client.Read](#func-client-read) and the like): their answers are delivered by the very goroutine the handler is running on, so they would only time out. Start a goroutine for work that needs them.
 
+The \*asdu.ASDU is shared: an ASDU that a request collects is the same value the request returns to its caller, on another goroutine, and the client reads it while it matches answers. Treat it as read-only; copy what you need to change.
+
 ### type HandlerFunc
 
 ```go
@@ -503,7 +513,7 @@ WithAutoStart controls whether STARTDT is sent as part of connecting and reconne
 func WithDialer(d Dialer) Option
 ```
 
-WithDialer replaces the transport dialer, for example to bind a local address, go through a proxy or connect over an in-memory pipe in tests. When combined with [WithTLS](#func-withtls) the TLS handshake runs on top of the connection the dialer returns.
+WithDialer replaces the transport dialer, for example to bind a local address, go through a proxy or connect over an in-memory pipe in tests. When combined with [WithTLS](#func-withtls) the TLS handshake runs on top of the connection the dialer returns. A dialer that returns neither a connection nor an error fails the connect with [iec104.ErrConnectFailed](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#ErrConnectFailed).
 
 #### func WithHandler
 
@@ -595,7 +605,7 @@ func WithStartHandler(f func(ctx context.Context, c *Client)) Option
 
 WithStartHandler registers a function that runs each time the client has established a connection and started data transfer on it: after [Client.Connect](#func-client-connect) and after every automatic reconnect. It is the place for what a controlling station does on a fresh connection, typically a general interrogation and a clock synchronization.
 
-f runs on its own goroutine and may call any method of the client. ctx is cancelled when that connection ends or the client is closed.
+f runs on its own goroutine and may call any method of the client, [Client.Close](#func-client-close) included. ctx is cancelled when that connection ends or the client is closed. [Client.Close](#func-client-close) waits for f to return, except when f itself calls it.
 
 #### func WithStateHandler
 
@@ -635,7 +645,7 @@ type Reconnect struct {
 }
 ```
 
-Reconnect configures automatic reconnection.
+Reconnect configures automatic reconnection. The delay starts at MinDelay and doubles after every failed attempt up to MaxDelay; each wait is chosen at random between half the delay and the delay (equal jitter).
 
 ### type Retry
 
@@ -652,4 +662,4 @@ type Retry struct {
 }
 ```
 
-Retry configures automatic retries of idempotent requests.
+Retry configures automatic retries of idempotent requests. Each wait before another attempt is chosen at random between half the delay and the delay (equal jitter).

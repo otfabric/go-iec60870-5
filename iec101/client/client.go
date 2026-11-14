@@ -70,13 +70,28 @@ type Config struct {
 	// Handler receives every monitor-direction ASDU that is not a mirror of
 	// a request: spontaneous and cyclic data, and the data that answers an
 	// interrogation or read (also returned by those calls). It runs on a
-	// goroutine of its own, in order; it may issue requests.
+	// goroutine of its own, in order, and the ASDUs wait for it in a queue
+	// of 256 (in balanced transmission the link refuses user data, DFC
+	// set, while more than half of them wait).
+	//
+	// The Handler must not wait for the station. While it runs nothing
+	// empties the queue, so a request made from it waits for answers that
+	// cannot get in once the queue is full (unbalanced: the poller waits
+	// for room; balanced: the link refuses them), and fails at its
+	// deadline when the station sends more ASDUs than that first (an
+	// interrogation of more than 256 objects, say). In unbalanced
+	// transmission Send waits for the poller in the same way. Make such
+	// calls from another goroutine. The Handler must not call Close
+	// either: Close waits for its goroutine. Call it in a new goroutine
+	// (go c.Close()); it returns once the Handler has returned.
 	Handler func(a *asdu.ASDU)
 	// OnState is called with each change of the link state, from the
-	// goroutine that changed it. WaitUp returns only after OnState for the
-	// change to StateUp has returned, so what the callback sets up is in
-	// place when WaitUp returns. State reports a change before OnState
-	// for it is called.
+	// goroutine that changed it: one of the client's own goroutines, or
+	// Close. WaitUp returns only after OnState for the change to StateUp
+	// has returned, so what the callback sets up is in place when WaitUp
+	// returns. State reports a change before OnState for it is called.
+	// OnState must not call Close, which waits for those goroutines: call
+	// it in a new goroutine.
 	OnState func(s iec101.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger
@@ -91,7 +106,7 @@ type Client struct {
 	pri *link.Primary  // unbalanced
 	bal *link.Balanced // balanced
 
-	sends   chan sendReq // unbalanced: user data for the poller
+	sends   chan sendReq // user data for the poller or the supervisor
 	handled chan *asdu.ASDU
 
 	mu     sync.Mutex
@@ -111,7 +126,8 @@ type sendReq struct {
 }
 
 // New starts a controlling station on rw. Close stops it and closes rw
-// when it is an io.Closer.
+// when it is an io.Closer; rw's Close must unblock its Read for Close to
+// return.
 func New(rw io.ReadWriter, cfg Config) (*Client, error) {
 	p, err := cfg.Normalize()
 	if err != nil {
@@ -221,8 +237,11 @@ func (c *Client) WaitUp(ctx context.Context) error {
 	}
 }
 
-// Close stops the station. Outstanding requests fail with
-// [iec101.ErrClosed].
+// Close stops the station and waits for its goroutines. Outstanding
+// requests fail with [iec101.ErrClosed]. Close is safe to call more than
+// once and from several goroutines: the first call closes the transport
+// and returns its error; later calls return nil. It must not be called
+// from Config.Handler or Config.OnState (see there).
 func (c *Client) Close() error {
 	c.mu.Lock()
 	if c.state == iec101.StateClosed {
@@ -336,13 +355,6 @@ func (c *Client) send(ctx context.Context, a *asdu.ASDU) error {
 	if err != nil {
 		return err
 	}
-	if c.bal != nil {
-		if err := c.bal.Send(ctx, raw); err != nil {
-			c.linkFailed(err)
-			return err
-		}
-		return nil
-	}
 	r := sendReq{data: raw, done: make(chan error, 1)}
 	select {
 	case c.sends <- r:
@@ -351,10 +363,10 @@ func (c *Client) send(ctx context.Context, a *asdu.ASDU) error {
 	case <-c.ctx.Done():
 		return iec101.ErrClosed
 	}
-	// The poller finishes the exchange it started (a primary repeats a
-	// message until it is answered or Config.Retries ran out; giving up
-	// half way would leave the FCB in doubt), but the request ends at its
-	// deadline.
+	// The poller (unbalanced) or the supervisor (balanced) finishes the
+	// exchange it started (a primary repeats a message until it is
+	// answered or Config.Retries ran out; giving up half way would leave
+	// the FCB in doubt), but the request ends at its deadline.
 	select {
 	case err := <-r.done:
 		return err
@@ -367,7 +379,8 @@ func (c *Client) send(ctx context.Context, a *asdu.ASDU) error {
 
 // Send transmits a in the control direction without waiting for an
 // application answer. It returns when the link layer confirmed it, or at
-// the deadline of ctx: in unbalanced transmission the poller then still
+// the deadline of ctx: the client's own goroutine (the poller in
+// unbalanced transmission, the supervisor in balanced) then still
 // finishes the exchange, repeating the frame until it is answered or
 // Link.Retries ran out. Answers reach the Handler.
 func (c *Client) Send(ctx context.Context, a *asdu.ASDU) error { return c.send(ctx, a) }
@@ -477,8 +490,20 @@ func (c *Client) runUnbalanced() {
 	}
 }
 
+// runBalanced is the supervisor of a balanced link: it initializes the
+// link, sends the user data of the requests and tests the link every
+// TestInterval. Every primary exchange runs here, under the client's own
+// context, so a request whose context ends does not abandon an exchange
+// half way.
 func (c *Client) runBalanced() {
 	defer c.wg.Done()
+	var test *time.Timer
+	var testC <-chan time.Time
+	if c.cfg.TestInterval > 0 {
+		test = time.NewTimer(c.cfg.TestInterval)
+		defer test.Stop()
+		testC = test.C
+	}
 	for c.ctx.Err() == nil {
 		if c.State() != iec101.StateUp {
 			if err := c.bal.Init(c.ctx); err != nil {
@@ -494,18 +519,25 @@ func (c *Client) runBalanced() {
 				continue
 			}
 			c.setState(iec101.StateUp, nil)
-		}
-		if c.cfg.TestInterval < 0 {
-			if !c.sleep(c.cfg.RetryInterval) {
-				return
+			if test != nil {
+				test.Reset(c.cfg.TestInterval) // the first test one interval after the link came up
 			}
-			continue
 		}
-		if !c.sleep(c.cfg.TestInterval) {
+		select {
+		case r := <-c.sends:
+			err := c.bal.Send(c.ctx, r.data)
+			r.done <- err
+			if err != nil {
+				c.linkFailed(err)
+			}
+		case <-testC:
+			if err := c.bal.Test(c.ctx); err != nil {
+				c.linkFailed(err)
+			}
+			test.Reset(c.cfg.TestInterval)
+		case <-c.kick:
+		case <-c.ctx.Done():
 			return
-		}
-		if err := c.bal.Test(c.ctx); err != nil {
-			c.linkFailed(err)
 		}
 	}
 }

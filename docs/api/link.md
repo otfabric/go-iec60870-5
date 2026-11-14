@@ -136,7 +136,9 @@ NewBalanced starts a balanced station on rw. Close stops it; rw is closed when i
 func (b *Balanced) Close() error
 ```
 
-Close stops the station.
+Close stops the station and waits for its goroutines. It closes rw when rw is an io.Closer; the reader goroutine returns only when that Close unblocks Read, so a transport whose Close does not leaves Close waiting. Close is safe to call more than once and from several goroutines: the first call closes the transport and returns its error; later calls return nil.
+
+A handler must not call Close: Close waits for the reader goroutine that runs the handler. Call it in a new goroutine (go b.Close()); it returns once the handler has returned.
 
 #### func (Balanced) Done
 
@@ -186,6 +188,8 @@ func (b *Balanced) Send(ctx context.Context, data []byte) error
 
 Send sends user data with confirmation. When the peer's last response had DFC set it first requests status of link until DFC is clear ("secondary link busy", IEC 60870-5-101:2003 figure 8) and fails with ErrDataFlow when it stays set. Empty data fails with ErrNoData.
 
+The frame refers to data without copying it: data must not be modified after the call, since a frame queued before ctx ended is still sent. When ctx ends during the exchange the frame count bit of the message is spent although no confirmation came: if the message did not reach the peer, the peer takes the next message with the same user data for a repetition of the last one it accepted and does not deliver it. Run an exchange that must not lose its message under a context that outlives it, as the iec101 client does.
+
 #### func (Balanced) Test
 
 ```go
@@ -227,7 +231,7 @@ type BalancedHandler interface {
 }
 ```
 
-BalancedHandler is the user of a balanced station: it receives the peer's user data. Calls come from the station's reader goroutine, one at a time, and must return quickly.
+BalancedHandler is the user of a balanced station: it receives the peer's user data. Calls come from the station's reader goroutine, one at a time, and must return quickly. They run with the station's secondary state locked, so the handler must not call Close, which waits for that goroutine: call it in a new goroutine (go b.Close()), which returns once the handler has returned. The handler may call Send and the other primary methods only from another goroutine: their answers arrive on the goroutine the handler blocks. The data passed to UserData is a copy the handler may keep; the station also keeps it to recognise a repetition, so it must not be modified.
 
 ### type Class
 
@@ -293,11 +297,16 @@ type Config struct {
 	FrameGap time.Duration
 
 	// OnFrame, when set, is called for every frame sent (tx true) and
-	// received. It runs on the station's goroutines and must not block.
+	// received. It runs on the station's goroutines and must not block
+	// or call Close, which waits for those goroutines. f.Data of a sent
+	// frame is the caller's data, of a received one the copy the
+	// station delivers: neither may be modified.
 	OnFrame func(tx bool, f ft12.Frame)
 
 	// OnDiscard, when set, is called for octets that do not form a
-	// valid frame (line noise, checksum errors).
+	// valid frame (line noise, checksum errors). It runs on the
+	// station's reader goroutine and must not call Close. b is the
+	// decoder's buffer, valid only during the call: copy what is kept.
 	OnDiscard func(b []byte, err error)
 }
 ```
@@ -442,6 +451,10 @@ type Primary struct {
 
 Primary is the primary station of unbalanced transmission: it is the only station that initiates messages, and polls the secondaries addressed by link address. Methods are safe for concurrent use; the exchanges are serialized because the line carries one at a time.
 
+The frames refer to the caller's user data without copying it: data passed to SendConfirm or SendNoReply must not be modified after the call. SendNoReply returns once the frame is queued, and a frame queued before the context of SendConfirm ended is still sent. The user data RequestData returns is the caller's.
+
+When the context of SendConfirm ends during the exchange the frame count bit of the message is spent although no confirmation came: if the message did not reach the peer, the peer takes the next message with the same user data for a repetition of the last one it accepted and does not deliver it. Run an exchange that must not lose its message under a context that outlives it, as the iec101 client does.
+
 #### func NewPrimary
 
 ```go
@@ -456,7 +469,7 @@ NewPrimary starts a primary station on rw. Close stops it; rw is closed when it 
 func (pr *Primary) Close() error
 ```
 
-Close stops the station.
+Close stops the station and waits for its goroutines. It closes rw when rw is an io.Closer; the reader goroutine returns only when that Close unblocks Read, so a transport whose Close does not leaves Close waiting. Close is safe to call more than once and from several goroutines: the first call closes the transport and returns its error; later calls return nil.
 
 #### func (Primary) Done
 
@@ -564,7 +577,9 @@ NewSecondary starts a secondary station with link address addr on rw. Close stop
 func (s *Secondary) Close() error
 ```
 
-Close stops the station.
+Close stops the station and waits for its goroutines. It closes rw when rw is an io.Closer; the reader goroutine returns only when that Close unblocks Read, so a transport whose Close does not leaves Close waiting. Close is safe to call more than once and from several goroutines: the first call closes the transport and returns its error; later calls return nil.
+
+A handler must not call Close: Close waits for the reader goroutine that runs the handler. Call it in a new goroutine (go s.Close()); it returns once the handler has returned.
 
 #### func (Secondary) Done
 
@@ -604,7 +619,9 @@ type SecondaryHandler interface {
 }
 ```
 
-SecondaryHandler is the user of a secondary station: it receives the primary's user data and supplies the data the primary polls. Calls come from the station's reader goroutine, one at a time, and must return quickly: the primary is waiting for the response.
+SecondaryHandler is the user of a secondary station: it receives the primary's user data and supplies the data the primary polls. Calls come from the station's reader goroutine, one at a time, and must return quickly: the primary is waiting for the response. They run with the station's state locked, so the handler must not call Close, which waits for that goroutine: call it in a new goroutine (go s.Close()), which returns once the handler has returned.
+
+The station keeps what Class1 and Class2 return, to send it again when the primary repeats its request (FCB not toggled): the handler must not modify it afterwards. The data passed to UserData is a copy the handler may keep; the station also keeps it to recognise a repetition, so it must not be modified.
 
 ### type Status
 

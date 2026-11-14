@@ -342,7 +342,7 @@ WithLogger sets the logger. Nil, the default, disables logging.
 func WithMaxSessions(n int) Option
 ```
 
-WithMaxSessions limits the number of simultaneous connections. Further connections are closed immediately after accept. Zero, the default, means no limit.
+WithMaxSessions limits the number of simultaneous connections. A connection whose TLS handshake ([WithTLS](#func-withtls)) is still in progress counts. Further connections are closed immediately after accept. Zero, the default, means no limit.
 
 #### func WithMetrics
 
@@ -378,7 +378,9 @@ func WithSecurity(newEndpoint func(group string, aim uint16) (*sec.Endpoint, err
 
 WithSecurity applies the application-layer security of IEC 62351-5 (IEC TS 60870-5-7) to every connection.
 
-The station keeps one association per controlling station, which names itself by the AIM in every security message. newEndpoint makes the association when a controlling station is first heard in a redundancy group ("default" without [WithRedundancyGroups](#func-withredundancygroups)); it must return an endpoint with the role sec.Controlled, or an error to refuse that AIM. Give each AIM a sec.Trust that accepts only that station's certificate (sec.Trust.Subjects or a pinned certificate), and the sec.Config.Roles it may exercise. The connections of one controlling station in a group (a client redundancy group) share its association, carried by the one with data transfer started; other controlling stations have their own. A connection is bound to an association by the first security message it carries; until then the station sends nothing on it.
+The station keeps one association per controlling station, which names itself by the AIM in every security message. newEndpoint makes the association when a controlling station is first heard in a redundancy group ("default" without [WithRedundancyGroups](#func-withredundancygroups)); it must return an endpoint with the role sec.Controlled, or an error to refuse that AIM. Give each AIM a sec.Trust that accepts only that station's certificate (sec.Trust.Subjects or a pinned certificate), and the sec.Config.Roles it may exercise. The connections of one controlling station in a group (a client redundancy group) share its association, carried by the one with data transfer started; other controlling stations have their own.
+
+A connection is bound to the association its first security message names once a message on it is authenticated for that association: a Station Association or Session Key Change that completes, or Secure Data under the current session keys. Until then the station answers the key management on that connection, runs it apart from the association, and sends nothing else: the connection that carries the association keeps it, and what the other connection sends changes nothing of it. Bound, the connection takes the association over. An association that no message has authenticated is kept only while a connection waits for it; newEndpoint makes it again when that station is heard next.
 
 With security, an ASDU that is not protected is discarded, the [Handler](#type-handler) sees only the verified application data, and what the station sends waits until the controlling station has established a session. A request that the roles of the association do not permit is answered with a negative confirmation with cause [asdu.CauseNotAuthorized](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#CauseNotAuthorized) before it reaches the Handler. Security can be combined with [WithTLS](#func-withtls).
 
@@ -477,7 +479,7 @@ The sessions are served one after the other. A session whose send window is full
 func (s *Server) Close() error
 ```
 
-Close stops listening and closes every session, as [Session.Close](#func-session-close) does: when it returns no handler is running or will run. Serve returns ErrServerClosed. Close is idempotent.
+Close stops listening and closes every session, as [Session.Close](#func-session-close) does: when it returns no handler is running or will run. The event queues of the redundancy groups ([Server.Enqueue](#func-server-enqueue)) stop sending at Close; the goroutine of each ends when the send it may be in has ended, which Close does not wait for. Serve returns ErrServerClosed. Close is safe to call more than once and from several goroutines; called from a callback of a session it returns at once and the close completes when the callback has returned.
 
 #### func (Server) Dropped
 
@@ -523,7 +525,7 @@ Pending returns the number of events a redundancy group holds: queued, or sent a
 func (s *Server) Serve(ln net.Listener) error
 ```
 
-Serve accepts connections on ln and serves them until the server is closed. It takes ownership of ln and always returns a non-nil error: ErrServerClosed after [Server.Close](#func-server-close). Serve may be called on several listeners.
+Serve accepts connections on ln and serves them until the server is closed. It takes ownership of ln and always returns a non-nil error: ErrServerClosed after [Server.Close](#func-server-close), or the error of a listener that was closed elsewhere ([net.ErrClosed](https://pkg.go.dev/net#ErrClosed)). Any other accept error, such as running out of file descriptors, is logged and retried after a pause that doubles from 5 ms up to 1 s. Serve may be called on several listeners.
 
 #### func (Server) Sessions
 
@@ -651,7 +653,7 @@ Reply mirrors req back with the given cause of transmission and P/N bit. [Sessio
 func (s *Session) Security() *sec.Endpoint
 ```
 
-Security returns the association of the controlling station on this session: nil without [WithSecurity](#func-withsecurity), and until the station's first security message has bound the session to its association. Every ASDU a Handler sees has been verified by it.
+Security returns the association of the controlling station on this session: nil without [WithSecurity](#func-withsecurity), and until a message on the session has been authenticated for that association, which binds the session to it. Every ASDU a Handler sees has been verified by it.
 
 #### func (Session) Send
 

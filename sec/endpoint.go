@@ -161,6 +161,15 @@ type Endpoint struct {
 	keyUses  uint32
 	txSeq    uint32
 	rxSeq    uint32
+
+	// connections that do not carry the association (see bind.go)
+	cands map[any]*Endpoint // controlled: the candidate of each connection
+	// parent is the Endpoint a candidate belongs to, nil for others. A
+	// candidate counts in the statistics of its parent; authenticated is set
+	// by the first count of a success, authBy names it.
+	parent        *Endpoint
+	authenticated bool
+	authBy        Stat
 }
 
 // New returns an Endpoint for cfg. It loads the association kept in
@@ -243,6 +252,17 @@ func (e *Endpoint) unlock() {
 }
 
 func (e *Endpoint) inc(s Stat, err error) {
+	if p := e.parent; p != nil {
+		switch s {
+		case StatSuccessfulAssociations, StatSuccessfulSessionKeyChanges, StatSuccessfulDataAuthentications:
+			if !e.authenticated {
+				e.authenticated, e.authBy = true, s
+			}
+		default:
+		}
+		p.inc(s, err)
+		return
+	}
 	e.stats[s] = (e.stats[s] + 1) & StatMax
 	if r, ok := e.cfg.Reports[s]; ok && !e.reporting && !e.due[s] &&
 		(e.stats[s]-e.reported[s])&StatMax >= r.Threshold {
@@ -427,6 +447,7 @@ func (e *Endpoint) Attach(owner any, now time.Time) [][]byte {
 func (e *Endpoint) Detach(owner any) {
 	e.mu.Lock()
 	defer e.unlock()
+	delete(e.cands, owner)
 	if e.up && e.owner == owner {
 		e.down()
 		e.owner = nil

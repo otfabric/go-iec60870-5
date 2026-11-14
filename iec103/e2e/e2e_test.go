@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	iec60870 "github.com/otfabric/go-iec60870-5"
 	"github.com/otfabric/go-iec60870-5/cp"
 	"github.com/otfabric/go-iec60870-5/iec103"
 	"github.com/otfabric/go-iec60870-5/iec103/client"
@@ -239,6 +240,7 @@ type options struct {
 	noDist   bool           // no disturbance source
 	timeout  time.Duration  // client request timeout
 	onState  func(iec103.State, error)
+	logger   iec60870.Logger // the client's
 	// server is applied to the server configuration; wrap to the client's
 	// side of the line.
 	server func(*server.Config)
@@ -286,7 +288,7 @@ func start(t *testing.T, o options) *rig {
 	r.c, err = client.New(cl, client.Config{
 		Link: lc, LinkAddr: 3, ResetFCB: o.resetFCB, NoInitGI: o.noInit, NoInitTimeSync: o.noInit,
 		PollInterval: 5 * time.Millisecond, RetryInterval: 50 * time.Millisecond, RequestTimeout: o.timeout,
-		Handler: func(a *iec103.ASDU) { r.got <- a }, OnState: o.onState,
+		Handler: func(a *iec103.ASDU) { r.got <- a }, OnState: o.onState, Logger: o.logger,
 	})
 	if err != nil {
 		t.Fatal(err)

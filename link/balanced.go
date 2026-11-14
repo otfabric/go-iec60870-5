@@ -13,7 +13,14 @@ import (
 
 // BalancedHandler is the user of a balanced station: it receives the
 // peer's user data. Calls come from the station's reader goroutine, one at
-// a time, and must return quickly.
+// a time, and must return quickly. They run with the station's secondary
+// state locked, so the handler must not call Close, which waits for that
+// goroutine: call it in a new goroutine (go b.Close()), which returns once
+// the handler has returned. The handler may call Send and the other
+// primary methods only from another goroutine: their answers arrive on
+// the goroutine the handler blocks. The data passed to UserData is a copy
+// the handler may keep; the station also keeps it to recognise a
+// repetition, so it must not be modified.
 type BalancedHandler interface {
 	// UserData delivers user data from the peer. Returning false refuses
 	// it: the station answers NACK with DFC set.
@@ -76,7 +83,16 @@ func NewBalanced(rw io.ReadWriter, cfg Config, bc BalancedConfig, h BalancedHand
 	return b, nil
 }
 
-// Close stops the station.
+// Close stops the station and waits for its goroutines. It closes rw when
+// rw is an io.Closer; the reader goroutine returns only when that Close
+// unblocks Read, so a transport whose Close does not leaves Close waiting.
+// Close is safe to call more than once and from several goroutines: the
+// first call closes the transport and returns its error; later calls
+// return nil.
+//
+// A handler must not call Close: Close waits for the reader goroutine that
+// runs the handler. Call it in a new goroutine (go b.Close()); it returns
+// once the handler has returned.
 func (b *Balanced) Close() error { return b.p.close() }
 
 // Done is closed when the station stops.
@@ -235,6 +251,15 @@ func (b *Balanced) Test(ctx context.Context) error {
 // had DFC set it first requests status of link until DFC is clear
 // ("secondary link busy", IEC 60870-5-101:2003 figure 8) and fails with
 // [ErrDataFlow] when it stays set. Empty data fails with [ErrNoData].
+//
+// The frame refers to data without copying it: data must not be modified
+// after the call, since a frame queued before ctx ended is still sent.
+// When ctx ends during the exchange the frame count bit of the message is
+// spent although no confirmation came: if the message did not reach the
+// peer, the peer takes the next message with the same user data for a
+// repetition of the last one it accepted and does not deliver it. Run an
+// exchange that must not lose its message under a context that outlives
+// it, as the iec101 client does.
 func (b *Balanced) Send(ctx context.Context, data []byte) error {
 	if len(data) == 0 {
 		return ErrNoData

@@ -98,6 +98,13 @@ IEC 102 is request driven: the client polls only while a request is open.
 `Request(ctx, a, until)` sends an ASDU and polls until the answer is
 complete: the first reply (`UntilReply`), the activation confirmation
 (`UntilConfirmation`) or the activation termination (`UntilTermination`).
+An answer belongs to the request when it mirrors it: the same type
+identification, common address, record address and information object
+(the requested addresses and time range). A request that ends before its
+answer is complete (its context ended, or the link failed) leaves the rest
+of that answer at the station; the next request first polls until the
+station has no more data and drops that rest
+([application procedures](INTEROPERABILITY.md#application-procedures)).
 A refusal (cause 13..18 or P/N) returns `*iec102.RefusedError`. The typed
 helpers are `ReadProductSpec`, `ReadTime`, `ReadTotals` (any of the 20 read
 commands C_CI_NA_2 .. C_CI_NU_2) and `ReadSinglePoints`.

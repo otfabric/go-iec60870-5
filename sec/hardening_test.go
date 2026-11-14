@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/otfabric/go-iec60870-5/asdu"
@@ -126,4 +127,88 @@ func TestLoadIdentityPaths(t *testing.T) {
 	if _, err := LoadIdentity(kf, cf); err == nil {
 		t.Error("loaded a key as the certificate")
 	}
+}
+
+// A reassembled message is at most a data unit identifier and
+// maxMessageFields octets: one of exactly that length completes; in a longer
+// one the segment that crosses the bound abandons the series, and it and
+// every later segment of the series count as discarded.
+func TestReassemblyLengthLimit(t *testing.T) {
+	head := Header{Type: asdu.S_AQ_NA_1, Cause: asdu.CauseAssociation, CommonAddr: 1}.append(nil, asdu.IEC104)
+	for _, c := range []struct {
+		fields int
+		whole  bool
+	}{
+		{1, true},
+		{maxMessageFields - 1, true},
+		{maxMessageFields, true},
+		{maxMessageFields + 1, false},
+		{2 * maxMessageFields, false},
+	} {
+		msg := append(bytes.Clone(head), seq(c.fields, 0x5a)...)
+		segs, _, err := Segment(msg, asdu.IEC104, 249, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var discarded int
+		r := reassembler{p: asdu.IEC104, discarded: func() { discarded++ }}
+		var got []byte
+		fields, want := 0, 0
+		for _, s := range segs {
+			if fields += len(s) - len(head) - 1; fields > maxMessageFields {
+				want++
+			}
+			if w := r.add(s); w != nil {
+				got = w
+			}
+			if len(r.buf) > maxMessageFields {
+				t.Fatalf("%d octets: %d octets kept", c.fields, len(r.buf))
+			}
+		}
+		switch {
+		case c.whole && (!bytes.Equal(got, msg) || discarded != 0):
+			t.Errorf("%d octets of fields: reassembled %d octets, %d discarded, want the message", c.fields, len(got), discarded)
+		case !c.whole && (got != nil || discarded != want || r.busy):
+			t.Errorf("%d octets of fields: reassembled %d octets, %d discarded, busy %v, want the series abandoned and %d discarded",
+				c.fields, len(got), discarded, r.busy, want)
+		}
+	}
+}
+
+// A series of segments that never ends is abandoned at maxMessageFields:
+// what a controlled station allocates for it stays within a small multiple
+// of that bound, however many segments follow, and the series is counted as
+// discarded.
+func TestReassemblyAllocationBudget(t *testing.T) {
+	p := newPair(t, nil)
+	p.up()
+	p.mustReady()
+	const segments = 20000 // about 4.8 MB of fields, 70 times the bound
+	head := Header{Type: asdu.S_AQ_NA_1, Cause: asdu.CauseAssociation, CommonAddr: 0x1234}.append(nil, asdu.IEC104)
+	n := len(head)
+	seg := append(append(bytes.Clone(head), 0), seq(249-n-1, 0x33)...)
+	before := p.b.count(StatDiscardedMessages)
+	var ms runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&ms)
+	start := ms.TotalAlloc
+	for i := range segments {
+		seg[n] = ASC{FIR: i == 0, Seq: uint8(i)}.Byte()
+		if data, _, _ := p.b.e.Receive(p.now, seg); data != nil {
+			t.Fatalf("segment %d completed a message", i)
+		}
+	}
+	runtime.ReadMemStats(&ms)
+	allocated := ms.TotalAlloc - start
+	if budget := uint64(8 * maxMessageFields); allocated > budget {
+		t.Errorf("%d segments without FIN allocated %d octets, want at most %d", segments, allocated, budget)
+	}
+	if kept := len(p.b.e.reasm.buf); kept > maxMessageFields {
+		t.Errorf("%d octets kept, want at most %d", kept, maxMessageFields)
+	}
+	if got := p.b.count(StatDiscardedMessages) - before; got == 0 {
+		t.Error("the abandoned series was not counted as discarded")
+	}
+	// The association goes on.
+	p.exchange()
 }

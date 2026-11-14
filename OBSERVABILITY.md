@@ -96,7 +96,8 @@ identifiers. `NewSlogLogger` implements it through
 | Warn | `reconnect failed` (client) | `retry_in`, `error` |
 | Warn | `connection terminated` (`t1` or a protocol violation) | `error` |
 | Warn | `dropping undecodable ASDU` | `error` |
-| Warn | `connection rejected`, `accept failed` (server) | `remote`, `reason` or `error` |
+| Warn | `connection rejected` (server) | `remote`, `reason` |
+| Warn | `accept failed` (server; Serve retries after `retry_in`) | `retry_in`, `error` |
 | Warn | `event queue full, dropping the oldest events` (server; once per overflow) | `group`, `size` |
 | Info | `redundancy group switched over` (server) | `group`, `session`, `previous` |
 | Warn | `ignoring unsolicited confirmation`, `ignoring U frame from controlled station` | `function` |

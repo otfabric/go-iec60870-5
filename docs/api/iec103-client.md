@@ -98,7 +98,7 @@ ClockSync synchronizes the clock of the protection equipment with an addressed A
 func (c *Client) Close() error
 ```
 
-Close stops the station. Outstanding requests fail with [iec103.ErrClosed](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#ErrClosed).
+Close stops the station. Outstanding requests fail with [iec103.ErrClosed](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#ErrClosed). Close is safe to call more than once and from several goroutines: the first call closes the transport and returns its error; later calls return nil. It must not be called from the Handler or OnState (see [Config](#type-config)).
 
 #### func (Client) Command
 
@@ -131,6 +131,8 @@ Disturbance transfers the recorded disturbance fan of function type fun with the
  5. the ASDU 31 "end of disturbance data", acknowledged by ASDU 25: negative when tags or a channel were, or when fewer channels came than NOC announced.
 
 A negative acknowledgement returns the record with an error wrapping [iec103.ErrNegative](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#ErrNegative); clause 7.4.7 lets the equipment then offer the transfer again. An abortion of the whole transfer by the equipment (TOO 34) is acknowledged negatively and returns [iec103.ErrAborted](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#ErrAborted). The ctx should allow for the whole transfer; on its expiry the transfer is left as it is (no abortion order is sent). One transfer at a time.
+
+The record holds at most what the ASDU 26 announced: NOC channels of NOE values each (clauses 7.2.6.10, 7.2.6.11). A value beyond NOE in a channel, or a channel beyond NOC, ends the transfer at once with the record so far and an error wrapping [iec103.ErrInvalid](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#ErrInvalid); as on the expiry of ctx, no order is sent for it.
 
 #### func (Client) DisturbanceList
 
@@ -308,13 +310,30 @@ type Config struct {
 
 	// Handler receives every monitor-direction ASDU, the answers to
 	// requests included (they are also returned by the request). It runs
-	// on a goroutine of its own, in order; it may issue requests.
+	// on a goroutine of its own, in order, through a queue of 256 ASDUs;
+	// while the queue is full the link loop waits, and with it every
+	// request. So the Handler must not wait for the client: a request
+	// issued from it (Interrogate, Command, ClockSync, the generic
+	// services, DisturbanceList, Disturbance, also Send) stalls once the
+	// queue fills behind it, and ends only at its deadline. Issue requests
+	// from another goroutine. The Handler may call the methods that do
+	// not wait (State, CommonAddr, Identification, IdentificationFor), and
+	// must not call Close, which waits for the Handler's goroutine: call
+	// it in a new goroutine (go c.Close()), which returns once the Handler
+	// has returned.
+	//
+	// The ASDU is shared: the same value is returned by the request that
+	// collects it and by Identification and IdentificationFor. Treat it as
+	// read-only, and copy what the Handler keeps beyond the call if it may
+	// be modified elsewhere.
 	Handler func(a *iec103.ASDU)
 	// OnState is called with each change of the link state, from the
-	// goroutine that changed it. WaitUp returns only after OnState for the
-	// change to StateUp has returned, so what the callback sets up is in
-	// place when WaitUp returns. State reports a change before OnState
-	// for it is called.
+	// goroutine that changed it: the link loop, or Close for StateClosed.
+	// WaitUp returns only after OnState for the change to StateUp has
+	// returned, so what the callback sets up is in place when WaitUp
+	// returns. State reports a change before OnState for it is called.
+	// While OnState runs the link loop waits: it must not wait for a
+	// request, and must not call Close; start either in a new goroutine.
 	OnState func(s iec103.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger

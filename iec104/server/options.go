@@ -69,9 +69,10 @@ func WithMetrics(m iec104.Metrics) Option {
 	return func(o *options) { o.metrics = m }
 }
 
-// WithMaxSessions limits the number of simultaneous connections. Further
-// connections are closed immediately after accept. Zero, the default,
-// means no limit.
+// WithMaxSessions limits the number of simultaneous connections. A
+// connection whose TLS handshake ([WithTLS]) is still in progress counts.
+// Further connections are closed immediately after accept. Zero, the
+// default, means no limit.
 func WithMaxSessions(n int) Option {
 	return func(o *options) { o.maxSessions = n }
 }
@@ -121,8 +122,17 @@ func WithStateHandler(f func(s *Session, state iec104.State, err error)) Option 
 // it may exercise. The connections of one controlling station in a group
 // (a client redundancy group) share its association, carried by the one
 // with data transfer started; other controlling stations have their own.
-// A connection is bound to an association by the first security message
-// it carries; until then the station sends nothing on it.
+//
+// A connection is bound to the association its first security message
+// names once a message on it is authenticated for that association: a
+// Station Association or Session Key Change that completes, or Secure Data
+// under the current session keys. Until then the station answers the key
+// management on that connection, runs it apart from the association, and
+// sends nothing else: the connection that carries the association keeps
+// it, and what the other connection sends changes nothing of it. Bound,
+// the connection takes the association over. An association that no
+// message has authenticated is kept only while a connection waits for it;
+// newEndpoint makes it again when that station is heard next.
 //
 // With security, an ASDU that is not protected is discarded, the
 // [Handler] sees only the verified application data, and what the station

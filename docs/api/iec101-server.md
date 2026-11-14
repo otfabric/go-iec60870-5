@@ -81,7 +81,10 @@ type Config struct {
 	// initialization: [asdu.InitLocalPowerOn] by default.
 	InitCause uint8
 
-	// OnState is called with each change of the link state.
+	// OnState is called with each change of the link state, from the
+	// goroutine that changed it: the link's reader (unbalanced), the
+	// server's supervisor (balanced), or Close. It must not call Close,
+	// which waits for those goroutines: call it in a new goroutine.
 	OnState func(s iec101.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger
@@ -98,7 +101,7 @@ type Handler interface {
 }
 ```
 
-Handler handles the control-direction ASDUs of the controlling station. Calls are made one at a time from a goroutine of the server; a handler answers through the Server (Confirm, Terminate, Send, ...).
+Handler handles the control-direction ASDUs of the controlling station. Calls are made one at a time from a goroutine of the server; a handler answers through the Server (Confirm, Terminate, Send, ...), which only queues. It must not call Close: Close waits for the handler's goroutine. Call it in a new goroutine (go s.Close()); it returns once the handler has returned.
 
 ### type HandlerFunc
 
@@ -140,7 +143,7 @@ Server is a controlled station.
 func New(rw io.ReadWriter, cfg Config) (*Server, error)
 ```
 
-New starts a controlled station on rw. Close stops it and closes rw when it is an io.Closer.
+New starts a controlled station on rw. Close stops it and closes rw when it is an io.Closer; rw's Close must unblock its Read for Close to return.
 
 #### func (Server) Close
 
@@ -148,7 +151,7 @@ New starts a controlled station on rw. Close stops it and closes rw when it is a
 func (s *Server) Close() error
 ```
 
-Close stops the station.
+Close stops the station and waits for its goroutines. Close is safe to call more than once and from several goroutines: the first call closes the transport and returns its error; later calls return nil. It must not be called from the Handler or Config.OnState (see there).
 
 #### func (Server) Confirm
 
