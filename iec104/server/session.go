@@ -173,9 +173,9 @@ func (s *Session) onASDU(raw []byte) {
 }
 
 // Security returns the association of the controlling station on this
-// session: nil without [WithSecurity], and until the station's first
-// security message has bound the session to its association. Every ASDU a
-// Handler sees has been verified by it.
+// session: nil without [WithSecurity], and until a message on the session
+// has been authenticated for that association, which binds the session to
+// it. Every ASDU a Handler sees has been verified by it.
 func (s *Session) Security() *sec.Endpoint {
 	if s.sec == nil {
 		return nil

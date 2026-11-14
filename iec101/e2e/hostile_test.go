@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/otfabric/go-iec60870-5/asdu"
@@ -72,6 +73,9 @@ func hostileServer(t *testing.T, mode iec101.Mode, mod func(*server.Config)) (*s
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A case that fails before done still stops the station (Close is
+	// idempotent), so that its bubble ends.
+	t.Cleanup(func() { _ = s.Close(); _ = b.Close() })
 	peer := serialline.NewPeer(t, b, ft12.Params{AddrSize: 1})
 	rp := serialline.NewRawPrimary(peer, 3)
 	rp.Timeout = 200 * time.Millisecond
@@ -105,10 +109,13 @@ func decode(t testing.TB, raw []byte) *asdu.ASDU {
 }
 
 // legitimate checks that the server serves a primary that behaves: it
-// initializes the link and runs an interrogation to its termination.
+// initializes the link and runs an interrogation to its termination. It
+// runs in a testing/synctest bubble: once every goroutine of the bubble is
+// blocked, the station has answered what came before, and those answers
+// are drained.
 func legitimate(t *testing.T, rp *serialline.RawPrimary) {
 	t.Helper()
-	time.Sleep(50 * time.Millisecond) // late answers to what came before
+	synctest.Wait()
 	rp.Drain()
 	rp.Init()
 	rp.PollAll(4096)
@@ -247,7 +254,7 @@ func TestHostileServer(t *testing.T) {
 				}
 			}
 			waitCount(t, st, 500, 1)
-			time.Sleep(50 * time.Millisecond)
+			synctest.Wait() // the station has handled every repetition
 			if n := st.count(500); n != 1 {
 				t.Fatalf("repeated command executed %d times", n)
 			}
@@ -330,6 +337,18 @@ func TestHostileServer(t *testing.T) {
 			time.Sleep(250 * time.Millisecond)
 			legitimate(t, rp)
 		}},
+		{"half-open line after a rejected header", nil, func(t *testing.T, _ *server.Server, rp *serialline.RawPrimary, _ *counted) {
+			// A variable header with L = 255 whose fourth octet is not a
+			// start character, then a pause longer than the frame gap:
+			// the first request after the pause is answered at once.
+			rp.MustRaw([]byte{0x68, 0xFF, 0xFF, 0x00})
+			time.Sleep(250 * time.Millisecond)
+			tries := rp.Tries
+			rp.Tries = 1
+			rp.Expect(link.FuncRequestStatus, nil, int(link.FuncStatus))
+			rp.Tries = tries
+			legitimate(t, rp)
+		}},
 		{"slow drip", nil, func(t *testing.T, _ *server.Server, rp *serialline.RawPrimary, _ *counted) {
 			for _, c := range frame(t, link.FuncRequestStatus, false, false, 3, nil) {
 				rp.MustRaw([]byte{c})
@@ -345,7 +364,7 @@ func TestHostileServer(t *testing.T) {
 			rp.Init()
 			rp.PollAll(16)
 			rp.Expect(link.FuncUserDataConf, giReq(t), 0, -1)
-			time.Sleep(50 * time.Millisecond)
+			synctest.Wait() // the answers of the interrogation are queued
 			rp.Poll(1)
 			// Reset of remote link keeps the queued data; reset of user
 			// process discards it and announces end of initialization.
@@ -373,9 +392,13 @@ func TestHostileServer(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			s, rp, st, done := hostileServer(t, iec101.ModeUnbalanced, tc.mod)
-			tc.run(t, s, rp, st)
-			done()
+			// The station's timers and the pauses of the cases run on
+			// the fake clock of the bubble.
+			synctest.Test(t, func(t *testing.T) {
+				s, rp, st, done := hostileServer(t, iec101.ModeUnbalanced, tc.mod)
+				tc.run(t, s, rp, st)
+				done()
+			})
 		})
 	}
 }
@@ -443,10 +466,9 @@ func TestHostileBalancedServer(t *testing.T) {
 			cmd := frame(t, link.FuncUserDataConf, true, true, 3, encode(t, asdu.New(asdu.CauseActivation, ca, asdu.SingleCommand{IOA: 500, Select: true})))
 			for range 5 {
 				rp.MustRaw(cmd)
-				time.Sleep(20 * time.Millisecond)
+				synctest.Wait() // handled before the next repetition
 			}
 			waitCount(t, st, 500, 1)
-			time.Sleep(50 * time.Millisecond)
 			if n := st.count(500); n != 1 {
 				t.Fatalf("repeated command executed %d times", n)
 			}
@@ -454,20 +476,24 @@ func TestHostileBalancedServer(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			s, rp, st, done := hostileServer(t, iec101.ModeBalanced, func(c *server.Config) {
-				p := c.Params
-				p.Link.SenderAddr = false
-				c.Params = p
+			// The station's timers and the pauses of the cases run on
+			// the fake clock of the bubble.
+			synctest.Test(t, func(t *testing.T) {
+				s, rp, st, done := hostileServer(t, iec101.ModeBalanced, func(c *server.Config) {
+					p := c.Params
+					p.Link.SenderAddr = false
+					c.Params = p
+				})
+				// The server's primary messages carry the peer's address 1;
+				// the peer answers them as a secondary, and sends its own
+				// primary messages to 3.
+				rp.AnyAddr = true
+				rs := serialline.NewRawSecondary(rp.Peer, 1)
+				tc.hook(rs)
+				rs.Start()
+				tc.run(t, s, rp, rs, st)
+				done()
 			})
-			// The server's primary messages carry the peer's address 1;
-			// the peer answers them as a secondary, and sends its own
-			// primary messages to 3.
-			rp.AnyAddr = true
-			rs := serialline.NewRawSecondary(rp.Peer, 1)
-			tc.hook(rs)
-			rs.Start()
-			tc.run(t, s, rp, rs, st)
-			done()
 		})
 	}
 }

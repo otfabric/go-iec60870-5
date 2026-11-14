@@ -9,7 +9,7 @@ import "github.com/otfabric/go-iec60870-5/iec103/server"
 Package server is the protection equipment of IEC 60870-5-103: the secondary station of unbalanced transmission (clause 6.2.3). It answers the link procedures of the controlling system, hands control-direction ASDUs to a [Handler](#type-handler), transmits monitor-direction ASDUs as class 1 data (events, answers) or class 2 data (measurands) when polled, and runs the system functions itself:
 
   - identification after reset CU and reset FCB, and once after start (clause 7.4.1, table 8);
-  - time synchronization (clause 7.4.2): the server keeps the clock offset, answers with ASDU 6 and flags its time tags invalid until the first synchronization and when none came for [Config.SyncTimeout](#func-config-synctimeout);
+  - time synchronization (clause 7.4.2): the server keeps the clock offset, answers with ASDU 6 and flags its time tags invalid until the first synchronization and when none came for [Config.SyncTimeout](#func-config-synctimeout). A synchronization whose time is flagged invalid, or lies outside the years 1970 to 2069 that CP56Time2a carries, is not applied: the clock stays as it was, and an addressed one is answered with ASDU 6 carrying the station's time with IV set;
   - the disturbance data transfer of clause 7.4.7 from a [DisturbanceSource](#type-disturbancesource), when one is configured; the selection of a record whose number of channels (NOC) or of values per channel (NOE) does not fit its field is answered with TOO 34.
 
 The application answers general interrogations, general commands and generic services through the helpers [Server.AnswerGI](#func-server-answergi), [Server.AckCommand](#func-server-ackcommand), [Server.GenericAnswer](#func-server-genericanswer) and [Server.GenericIdentAnswer](#func-server-genericidentanswer).
@@ -109,10 +109,14 @@ type Config struct {
 	// 7.4.2 has broadcast messages need no answer; an addressed
 	// synchronization is always answered.
 	AnswerBroadcastSync bool
-	// OnTimeSync is called with each received synchronization time.
+	// OnTimeSync is called with each synchronization time the server
+	// applies, from the goroutine that calls the Handler.
 	OnTimeSync func(t time.Time, broadcast bool)
 
-	// OnState is called with each change of the link state.
+	// OnState is called with each change of the link state: from the
+	// station's link goroutine on a reset, and from Close for
+	// StateClosed. It must return quickly and must not call Close, which
+	// waits for that goroutine; call Close in a new goroutine instead.
 	OnState func(s iec103.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger
@@ -147,7 +151,9 @@ type Handler interface {
 }
 ```
 
-Handler handles the control-direction ASDUs of the controlling system that the server does not handle itself: general interrogation (ASDU 7), general commands (ASDU 20), generic services (ASDUs 10 and 21), the disturbance orders (ASDUs 24 and 25) when no [DisturbanceSource](#type-disturbancesource) is configured, and any private ASDU. Calls are made one at a time from a goroutine of the server; the handler answers through the Server.
+Handler handles the control-direction ASDUs of the controlling system that the server does not handle itself: general interrogation (ASDU 7), general commands (ASDU 20), generic services (ASDUs 10 and 21), the disturbance orders (ASDUs 24 and 25) when no [DisturbanceSource](#type-disturbancesource) is configured, and any private ASDU. Calls are made one at a time from a goroutine of the server; the handler answers through the Server, whose methods it may call, all but Close. Close waits for the goroutine that calls the handler: a handler that stops the station calls Close in a new goroutine (go s.Close()), which returns once the handler has returned.
+
+The ASDU is the handler's own: a new one is decoded for each call and the server keeps no reference to it, so the handler may keep or modify it.
 
 ### type HandlerFunc
 
@@ -192,7 +198,7 @@ New starts a protection equipment station on rw. Close stops it and closes rw wh
 func (s *Server) AckCommand(req *iec103.ASDU, positive bool) error
 ```
 
-AckCommand acknowledges the general command req (clause 7.4.4): ASDU 1 with the FUN and INF of the command, cause 20 (positive) or 21 (negative), the DCO as DPI and the RII as SIN. A positive command is followed by the change of state with cause 12, which the application sends ([Server.Event](#func-server-event)).
+AckCommand acknowledges the general command req (clause 7.4.4): ASDU 1 with the FUN and INF of the command, cause 20 (positive) or 21 (negative), the DCO as DPI and the RII as SIN. A positive command is followed by the change of state with cause 12, which the application sends ([Server.Event](#func-server-event)). A req whose body is not a general command ([iec103.GeneralCommand](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#GeneralCommand)), such as an ASDU 20 with a private cause that decodes as [iec103.Raw](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#Raw), returns an error wrapping [iec103.ErrInvalid](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#ErrInvalid) and acknowledges nothing.
 
 #### func (Server) AnswerGI
 
@@ -200,7 +206,7 @@ AckCommand acknowledges the general command req (clause 7.4.4): ASDU 1 with the 
 func (s *Server) AnswerGI(req *iec103.ASDU, data ...*iec103.ASDU) error
 ```
 
-AnswerGI answers the general interrogation req (ASDU 7, clause 7.4.3): it queues data with cause 9, the scan number as SIN of time-tagged messages, then the termination (ASDU 8) with the scan number. With a [DisturbanceSource](#type-disturbancesource) the list of recorded disturbances follows (ASDU 23, cause 31, with the function type of the equipment, clauses 7.3.1.11 and 7.4.7). A new ASDU 7 that arrives before the cycle was polled drops what is left of it, termination included (clause 7.4.3).
+AnswerGI answers the general interrogation req (ASDU 7, clause 7.4.3): it queues data with cause 9, the scan number as SIN of time-tagged messages, then the termination (ASDU 8) with the scan number. With a [DisturbanceSource](#type-disturbancesource) the list of recorded disturbances follows (ASDU 23, cause 31, with the function type of the equipment, clauses 7.3.1.11 and 7.4.7). A new ASDU 7 that arrives before the cycle was polled drops what is left of it, termination included (clause 7.4.3). A req whose body is not a general interrogation ([iec103.GIInit](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#GIInit)), such as an ASDU 7 with a private cause that decodes as [iec103.Raw](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#Raw), returns an error wrapping [iec103.ErrInvalid](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#ErrInvalid) and queues nothing.
 
 #### func (Server) AnswerGenericGI
 
@@ -216,7 +222,7 @@ AnswerGenericGI answers the general interrogation of generic data req (ASDU 21, 
 func (s *Server) Close() error
 ```
 
-Close stops the station.
+Close stops the station. Close is safe to call more than once and from several goroutines: the first call closes the transport and returns its error; later calls return nil. It must not be called from the Handler, OnState or OnTimeSync (see [Handler](#type-handler)).
 
 #### func (Server) CommonAddr
 

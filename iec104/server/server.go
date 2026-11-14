@@ -141,7 +141,10 @@ func (s *Server) ListenAndServe(addr string) error {
 
 // Serve accepts connections on ln and serves them until the server is
 // closed. It takes ownership of ln and always returns a non-nil error:
-// [ErrServerClosed] after [Server.Close]. Serve may be called on several
+// [ErrServerClosed] after [Server.Close], or the error of a listener that
+// was closed elsewhere ([net.ErrClosed]). Any other accept error, such as
+// running out of file descriptors, is logged and retried after a pause
+// that doubles from 5 ms up to 1 s. Serve may be called on several
 // listeners.
 func (s *Server) Serve(ln net.Listener) error {
 	s.mu.Lock()
@@ -167,15 +170,21 @@ func (s *Server) Serve(ln net.Listener) error {
 			if s.isClosed() {
 				return ErrServerClosed
 			}
-			var ne net.Error
-			if errors.As(err, &ne) && ne.Timeout() {
-				// A transient accept failure: back off and retry.
-				delay = min(max(2*delay, 5*time.Millisecond), time.Second)
-				s.log.Warn("accept failed", "retry_in", delay.String(), "error", err)
-				time.Sleep(delay)
-				continue
+			if errors.Is(err, net.ErrClosed) {
+				return err
 			}
-			return err
+			// Out of file descriptors, a connection aborted before it was
+			// accepted, a timeout: the listener still works, so back off
+			// and retry.
+			delay = min(max(2*delay, 5*time.Millisecond), time.Second)
+			s.log.Warn("accept failed", "retry_in", delay.String(), "error", err)
+			pause := time.NewTimer(delay)
+			select {
+			case <-pause.C:
+			case <-s.done:
+				pause.Stop()
+			}
+			continue
 		}
 		delay = 0
 		go s.accept(conn)
@@ -232,9 +241,14 @@ func (s *Server) accept(conn net.Conn) {
 	}()
 }
 
+// errSessionLimit is why a connection beyond [WithMaxSessions] is closed.
+var errSessionLimit = errors.New("session limit reached")
+
 // handshake completes the TLS handshake of an accepted connection, bounded
-// by t0, so that a peer that never speaks cannot hold a session. It is a
-// no-op for other connections.
+// by t0, so that a peer that never speaks cannot hold a session. With
+// [WithMaxSessions], a handshake in progress counts as a session: a
+// connection beyond the limit is closed before its handshake starts. It is
+// a no-op for other connections.
 func (s *Server) handshake(conn net.Conn) error {
 	tc, ok := conn.(*tls.Conn)
 	if !ok {
@@ -244,6 +258,10 @@ func (s *Server) handshake(conn net.Conn) error {
 	if s.closed {
 		s.mu.Unlock()
 		return ErrServerClosed
+	}
+	if s.opts.maxSessions > 0 && len(s.sessions)+len(s.pending) >= s.opts.maxSessions {
+		s.mu.Unlock()
+		return fmt.Errorf("%w (%d, TLS handshakes included)", errSessionLimit, s.opts.maxSessions)
 	}
 	s.pending[conn] = struct{}{}
 	s.mu.Unlock()
@@ -329,8 +347,13 @@ func (s *Server) Broadcast(ctx context.Context, a *asdu.ASDU) (int, error) {
 }
 
 // Close stops listening and closes every session, as [Session.Close] does:
-// when it returns no handler is running or will run. Serve returns
-// [ErrServerClosed]. Close is idempotent.
+// when it returns no handler is running or will run. The event queues of
+// the redundancy groups ([Server.Enqueue]) stop sending at Close; the
+// goroutine of each ends when the send it may be in has ended, which Close
+// does not wait for. Serve returns [ErrServerClosed]. Close is safe to call
+// more than once and from several goroutines; called from a callback of a
+// session it returns at once and the close completes when the callback has
+// returned.
 func (s *Server) Close() error {
 	s.mu.Lock()
 	first := !s.closed

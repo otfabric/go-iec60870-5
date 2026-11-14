@@ -68,6 +68,20 @@ own list: [docs/iec104/LIMITATIONS.md](docs/iec104/LIMITATIONS.md).
   class 1 when class 2 is empty.
 - **Balanced test function** is sent every `TestInterval` regardless of
   other traffic.
+- **No transaction identifier.** IEC 60870-5-101 has none: the client
+  recognises an answer by type identification, common address,
+  information object address and cause of transmission. A request that
+  ended at its deadline is forgotten; a confirmation of it that arrives
+  later goes to the Handler or, when an identical request was issued in
+  the meantime, is taken as the answer to that one. A late positive
+  confirmation can so complete a repeated command that the station
+  refuses; the station's own answer then reaches only the Handler.
+  Identical requests at the same time are refused with
+  `telecontrol.ErrBusy`.
+- **Requests from the Handler.** `client.Config.Handler` runs behind a
+  queue of 256 ASDUs that nothing empties while it runs: a request made
+  from it fails at its deadline when the station sends more ASDUs than
+  that first. Issue requests from another goroutine.
 - **Open deviations from IEC 60870-5-101:2003:**
   - While busy, reset of remote link (0) is still acknowledged, where
     figures 6 and 9 show NACK with DFC = 1.
@@ -101,6 +115,12 @@ own list: [docs/iec104/LIMITATIONS.md](docs/iec104/LIMITATIONS.md).
 - The layout of M_EI_NA_2 (70) is unknown (carried raw); signatures are not
   checked; the server has no class 1 or spontaneous data and does not
   enforce a session; one station per client.
+- After a request ends before its answer is complete, the next request
+  first polls the station until it has no more data (no reset of remote
+  link); a station that never runs out of data makes that request end at
+  its deadline.
+- `ree.Session.OnSetTime` receives the time b of C_CS_TA_2 as received;
+  checking it is the application's.
 
 ## IEC 60870-5-103
 
@@ -123,7 +143,15 @@ own list: [docs/iec104/LIMITATIONS.md](docs/iec104/LIMITATIONS.md).
 - Test mode and monitor-direction blocking are left to the application.
 - The 23 h rule for the IV bit is tested with a shortened timeout only.
 - The time correction covers the frame time, not internal delays.
-- The client cannot abort a disturbance transfer.
+- The client cannot abort a disturbance transfer. One that ends with
+  `ErrInvalid` (a value or channel beyond what its ASDU 26 announced)
+  leaves the equipment in its transfer: the client sends no abort (TOO 3,
+  9, 17).
+- A time synchronization that cannot be applied is answered with ASDU 6
+  with IV set; clause 7.4.2 defines no negative answer (interpretation 13
+  of [docs/iec103/INTEROPERABILITY.md](docs/iec103/INTEROPERABILITY.md)).
+- A request issued from `client.Config.Handler` stalls once the Handler's
+  queue (256) fills behind it; issue requests from another goroutine.
 - A generic data element is never split over several ASDUs (the GDD CONT
   bit); long answers are split by element.
 - The 15 s limit on DFC (cl. 6.3) is not enforced.

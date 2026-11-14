@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/otfabric/go-iec60870-5/iec104/apci"
@@ -54,8 +55,8 @@ type Peer struct {
 	acked      uint16 // N(R) the peer last sent
 	theirAck   uint16 // N(R) the implementation last sent
 	pending    []apci.Frame
-	frames     chan readResult // filled by the reading goroutine
-	extraCon   int             // TESTFR con the recorded other side never sent
+	frames     *frameQueue // filled by the reading goroutine
+	extraCon   int         // TESTFR con the recorded other side never sent
 }
 
 // Mismatch is a difference between the recording and the implementation.
@@ -89,6 +90,43 @@ type Result struct {
 type readResult struct {
 	frame apci.Frame
 	err   error
+}
+
+// frameQueue holds the frames read and not taken yet. It has no bound, so
+// that the reading goroutine never waits for the test: it ends when the
+// connection is closed, however many frames nobody took.
+type frameQueue struct {
+	mu     sync.Mutex
+	frames []readResult
+	ready  chan struct{} // holds a value while frames is not empty
+}
+
+func (q *frameQueue) put(r readResult) {
+	q.mu.Lock()
+	q.frames = append(q.frames, r)
+	q.mu.Unlock()
+	select {
+	case q.ready <- struct{}{}:
+	default:
+	}
+}
+
+// take returns the next frame, or ok false when there is none.
+func (q *frameQueue) take() (r readResult, ok bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.frames) == 0 {
+		return readResult{}, false
+	}
+	r = q.frames[0]
+	q.frames = q.frames[1:]
+	if len(q.frames) > 0 {
+		select {
+		case q.ready <- struct{}{}:
+		default:
+		}
+	}
+	return r, true
 }
 
 // errSequence reports a sequence number of the implementation that does not
@@ -311,30 +349,36 @@ func (p *Peer) read(d time.Duration) (apci.Frame, error) {
 	// One goroutine reads whole frames: a wait that ends never leaves
 	// half a frame read.
 	if p.frames == nil {
-		p.frames = make(chan readResult, 64)
-		go func(conn net.Conn, out chan<- readResult) {
+		p.frames = &frameQueue{ready: make(chan struct{}, 1)}
+		go func(conn net.Conn, q *frameQueue) {
 			for {
 				f, err := apci.ReadFrame(conn)
-				out <- readResult{f, err}
+				q.put(readResult{f, err})
 				if err != nil {
-					close(out)
 					return
 				}
 			}
 		}(p.Conn, p.frames)
 	}
 	var f apci.Frame
-	select {
-	case r, ok := <-p.frames:
-		if !ok {
-			return apci.Frame{}, net.ErrClosed
+	timeout := time.NewTimer(d)
+	defer timeout.Stop()
+	for {
+		r, ok := p.frames.take()
+		if ok {
+			if r.err != nil {
+				// Every later read reports the connection closed.
+				p.frames.put(readResult{err: net.ErrClosed})
+				return apci.Frame{}, r.err
+			}
+			f = r.frame
+			break
 		}
-		if r.err != nil {
-			return apci.Frame{}, r.err
+		select {
+		case <-p.frames.ready:
+		case <-timeout.C:
+			return apci.Frame{}, ErrTimeout
 		}
-		f = r.frame
-	case <-time.After(d):
-		return apci.Frame{}, ErrTimeout
 	}
 	switch f.Format {
 	case apci.FormatI:

@@ -98,11 +98,16 @@ type Config struct {
 	FrameGap time.Duration
 
 	// OnFrame, when set, is called for every frame sent (tx true) and
-	// received. It runs on the station's goroutines and must not block.
+	// received. It runs on the station's goroutines and must not block
+	// or call Close, which waits for those goroutines. f.Data of a sent
+	// frame is the caller's data, of a received one the copy the
+	// station delivers: neither may be modified.
 	OnFrame func(tx bool, f ft12.Frame)
 
 	// OnDiscard, when set, is called for octets that do not form a
-	// valid frame (line noise, checksum errors).
+	// valid frame (line noise, checksum errors). It runs on the
+	// station's reader goroutine and must not call Close. b is the
+	// decoder's buffer, valid only during the call: copy what is kept.
 	OnDiscard func(b []byte, err error)
 }
 
@@ -153,9 +158,12 @@ type port struct {
 
 	done      chan struct{}
 	closeOnce sync.Once
-	errMu     sync.Mutex
-	readErr   error // the transport error that stopped the station
-	readDone  chan struct{}
+	// rwOnce closes the transport once, whether Close or a write error
+	// closes it first.
+	rwOnce   sync.Once
+	errMu    sync.Mutex
+	readErr  error // the transport error that stopped the station
+	readDone chan struct{}
 	// writeDone is closed when the writer goroutine has returned: close
 	// waits for it, so no frame is written or traced after Close.
 	writeDone chan struct{}
@@ -196,9 +204,7 @@ func (p *port) writer() {
 					p.setErr(fmt.Errorf("link: write: %w", err))
 				}
 				p.shutdown()
-				if c, ok := p.rw.(io.Closer); ok {
-					_ = c.Close() // unblock the reader
-				}
+				_ = p.closeTransport() // unblock the reader
 				return
 			}
 		}
@@ -262,14 +268,27 @@ func (p *port) setErr(err error) {
 
 func (p *port) shutdown() { p.closeOnce.Do(func() { close(p.done) }) }
 
-// close stops the station. The transport is closed when it is an
-// io.Closer, which unblocks the reader.
+// closeTransport closes the transport when it is an io.Closer, which
+// unblocks the reader. Only the first call closes it and returns its
+// error; later calls return nil.
+func (p *port) closeTransport() error {
+	var err error
+	p.rwOnce.Do(func() {
+		if c, ok := p.rw.(io.Closer); ok {
+			err = c.Close()
+		}
+	})
+	return err
+}
+
+// close stops the station and waits for its reader and writer goroutines.
+// It is safe to call more than once and from several goroutines: the
+// first call closes the transport and returns its error, later calls
+// return nil. The reader returns only when closing the transport unblocks
+// its Read, so the transport must be an io.Closer whose Close does.
 func (p *port) close() error {
 	p.shutdown()
-	var err error
-	if c, ok := p.rw.(io.Closer); ok {
-		err = c.Close()
-	}
+	err := p.closeTransport()
 	<-p.readDone
 	<-p.writeDone
 	return err

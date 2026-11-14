@@ -4,9 +4,12 @@ package server_test
 
 import (
 	"context"
+	"errors"
 	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	iec60870 "github.com/otfabric/go-iec60870-5"
@@ -132,63 +135,131 @@ func established(g *client.Group) bool {
 	return true
 }
 
+// pipeNet connects clients to Serve over net.Pipe: it is the listener of
+// the station and the dialer of the clients, for tests in a synctest bubble.
+type pipeNet struct {
+	conns     chan net.Conn
+	closed    chan struct{}
+	closeOnce sync.Once
+	port      atomic.Int32
+}
+
+func newPipeNet() *pipeNet {
+	return &pipeNet{conns: make(chan net.Conn), closed: make(chan struct{})}
+}
+
+func (n *pipeNet) Accept() (net.Conn, error) {
+	select {
+	case c := <-n.conns:
+		return c, nil
+	case <-n.closed:
+		return nil, net.ErrClosed
+	}
+}
+
+func (n *pipeNet) Close() error {
+	n.closeOnce.Do(func() { close(n.closed) })
+	return nil
+}
+
+func (n *pipeNet) Addr() net.Addr { return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 2404} }
+
+func (n *pipeNet) DialContext(ctx context.Context, _, _ string) (net.Conn, error) {
+	station, peer := net.Pipe()
+	c := addrConn{Conn: station, remote: &net.TCPAddr{IP: net.IPv4(127, 0, 0, 2), Port: 50000 + int(n.port.Add(1))}}
+	select {
+	case n.conns <- c:
+		return peer, nil
+	case <-ctx.Done():
+		_, _ = station.Close(), peer.Close()
+		return nil, ctx.Err()
+	case <-n.closed:
+		_, _ = station.Close(), peer.Close()
+		return nil, net.ErrClosed
+	}
+}
+
+// addrConn is the station's end of a net.Pipe, with TCP addresses.
+type addrConn struct {
+	net.Conn
+	remote net.Addr
+}
+
+func (c addrConn) RemoteAddr() net.Addr { return c.remote }
+func (addrConn) LocalAddr() net.Addr    { return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 2404} }
+
 // A standby of a declared group that loses its connection and comes back
 // rejoins in STOPDT: the active connection keeps data transfer, and its
 // events arrive once each, in order.
 func TestReconnectingStandbyDoesNotEvictActive(t *testing.T) {
-	srv, addr := serve(t, server.HandlerFunc(confirmAll), server.WithLogger(iec60870.NopLogger()),
-		server.WithRedundancyGroups(server.RedundancyGroup{Name: "scada"}))
-	rx := &events{}
-	g, err := client.NewGroup([]string{addr, addr},
-		client.WithParams(testutil.Params()), client.WithHandler(rx), client.WithLogger(iec60870.NopLogger()),
-		client.WithReconnect(client.Reconnect{MinDelay: 20 * time.Millisecond}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = g.Close() }()
-	if err := g.Connect(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	testutil.Eventually(t, "active and standby", func() bool {
-		return len(srv.Sessions()) == 2 && len(startedSessions(srv)) == 1 && established(g)
-	})
-	active := startedSessions(srv)[0]
-	activeClient := g.Active()
-	enqueue(t, srv, 1, 10)
-	testutil.Eventually(t, "events before the reconnect", func() bool { return isRange(rx.values(), 1, 10) })
-
-	// The station drops the standby; the group re-establishes it.
-	for _, s := range srv.Sessions() {
-		if s != active {
-			_ = s.Close()
+	synctest.Test(t, func(t *testing.T) {
+		srv, err := server.New(server.HandlerFunc(confirmAll), server.WithParams(testutil.Params()),
+			server.WithLogger(iec60870.NopLogger()), server.WithRedundancyGroups(server.RedundancyGroup{Name: "scada"}))
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	testutil.Eventually(t, "the standby back", func() bool {
+		pn := newPipeNet()
+		served := make(chan error, 1)
+		go func() { served <- srv.Serve(pn) }()
+		defer func() {
+			_ = srv.Close()
+			if err := <-served; !errors.Is(err, server.ErrServerClosed) {
+				t.Errorf("Serve returned %v, want ErrServerClosed", err)
+			}
+		}()
+		rx := &events{}
+		g, err := client.NewGroup([]string{"station:2404", "station:2404"},
+			client.WithParams(testutil.Params()), client.WithHandler(rx), client.WithLogger(iec60870.NopLogger()),
+			client.WithDialer(pn), client.WithReconnect(client.Reconnect{MinDelay: 20 * time.Millisecond}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = g.Close() }()
+		if err := g.Connect(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		testutil.Eventually(t, "active and standby", func() bool {
+			return len(srv.Sessions()) == 2 && len(startedSessions(srv)) == 1 && established(g)
+		})
+		active := startedSessions(srv)[0]
+		activeClient := g.Active()
+		enqueue(t, srv, 1, 10)
+		testutil.Eventually(t, "events before the reconnect", func() bool { return isRange(rx.values(), 1, 10) })
+
+		// The station drops the standby; the group re-establishes it.
 		for _, s := range srv.Sessions() {
-			if s != active && s.Err() == nil {
-				return len(srv.Sessions()) == 2 && established(g)
+			if s != active {
+				_ = s.Close()
 			}
 		}
-		return false
-	})
-	// Give a STARTDT on the new connection, if one were sent, time to land.
-	time.Sleep(200 * time.Millisecond)
+		testutil.Eventually(t, "the standby back", func() bool {
+			for _, s := range srv.Sessions() {
+				if s != active && s.Err() == nil {
+					return len(srv.Sessions()) == 2 && established(g)
+				}
+			}
+			return false
+		})
+		// Every goroutine of the station and the group waits: a STARTDT on
+		// the new connection, if the group had sent one, has been handled.
+		synctest.Wait()
 
-	if got := startedSessions(srv); len(got) != 1 || got[0] != active {
-		t.Fatalf("started sessions after the standby came back: %d, want only the active one", len(got))
-	}
-	if active.Err() != nil {
-		t.Errorf("the active session ended: %v", active.Err())
-	}
-	if g.Active() != activeClient {
-		t.Error("the group switched over when its standby came back")
-	}
-	enqueue(t, srv, 11, 20)
-	testutil.Eventually(t, "events after the reconnect", func() bool { return len(rx.values()) >= 20 })
-	if !isRange(rx.values(), 1, 20) {
-		t.Errorf("received %v, want 1..20 once each", rx.values())
-	}
-	testutil.Eventually(t, "acknowledgement", func() bool { return srv.Pending("scada") == 0 })
+		if got := startedSessions(srv); len(got) != 1 || got[0] != active {
+			t.Fatalf("started sessions after the standby came back: %d, want only the active one", len(got))
+		}
+		if active.Err() != nil {
+			t.Errorf("the active session ended: %v", active.Err())
+		}
+		if g.Active() != activeClient {
+			t.Error("the group switched over when its standby came back")
+		}
+		enqueue(t, srv, 11, 20)
+		testutil.Eventually(t, "events after the reconnect", func() bool { return len(rx.values()) >= 20 })
+		if !isRange(rx.values(), 1, 20) {
+			t.Errorf("received %v, want 1..20 once each", rx.values())
+		}
+		testutil.Eventually(t, "acknowledgement", func() bool { return srv.Pending("scada") == 0 })
+	})
 }
 
 // When the path of the active connection fails silently, the station still

@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"runtime"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -16,6 +15,7 @@ import (
 	"github.com/otfabric/go-iec60870-5/asdu"
 	"github.com/otfabric/go-iec60870-5/iec104/apci"
 	"github.com/otfabric/go-iec60870-5/iec104/server"
+	"github.com/otfabric/go-iec60870-5/internal/testutil/leakcheck"
 )
 
 // pipeListener is a net.Listener of in-memory connections: DialContext
@@ -104,21 +104,6 @@ func (fuzzSink) StoreFile(*server.Session, asdu.CommonAddr, asdu.IOA, uint16, se
 	return nil
 }
 
-// ownGoroutines returns the stacks of the goroutines that run code of this
-// module, other than the caller. The fuzzing engine starts goroutines of
-// its own while it runs, so counting all of them is not a leak check.
-func ownGoroutines() []string {
-	buf := make([]byte, 1<<20)
-	buf = buf[:runtime.Stack(buf, true)]
-	var own []string
-	for _, g := range strings.Split(string(buf), "\n\n") {
-		if strings.Contains(g, "github.com/otfabric/go-iec60870-5/") && !strings.Contains(g, "[running]") {
-			own = append(own, g)
-		}
-	}
-	return own
-}
-
 // fuzzParams keeps every iteration short: a stream that leaves the server
 // waiting for an acknowledgement is ended by t1.
 func fuzzParams() apci.Params {
@@ -178,7 +163,8 @@ func FuzzServerStream(f *testing.F) {
 			return
 		}
 		chunk, stream := 1+int(input[0])%64, input[1:]
-		baseline := ownGoroutines()
+		// Goroutines of this module only: the fuzzing engine starts its own.
+		leaks := leakcheck.Check(t)
 
 		srv, err := server.New(fuzzStation(), server.WithParams(fuzzParams()))
 		if err != nil {
@@ -237,13 +223,6 @@ func FuzzServerStream(f *testing.F) {
 		_ = conn.Close()
 		<-drained
 
-		deadline := time.Now().Add(2 * time.Second)
-		for len(ownGoroutines()) > len(baseline) && time.Now().Before(deadline) {
-			time.Sleep(time.Millisecond)
-		}
-		if now := ownGoroutines(); len(now) > len(baseline) {
-			t.Fatalf("%d goroutines of go-iec60870-5 before, %d after Close:\n%s", len(baseline), len(now),
-				strings.Join(now, "\n\n"))
-		}
+		leaks()
 	})
 }

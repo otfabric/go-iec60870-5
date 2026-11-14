@@ -59,6 +59,17 @@ type Client struct {
 	// waits instead, until the Handler has seen what was received.
 	quiet atomic.Bool
 	wg    sync.WaitGroup
+	// The start handlers (WithStartHandler) that run, which Close waits
+	// for: live counts them, closing those that are inside Close
+	// themselves, which Close does not wait for; starters maps the
+	// goroutine of each to whether it is closing.
+	// watchers counts the goroutines that end their contexts.
+	startMu   sync.Mutex
+	startIdle *sync.Cond // on startMu: signalled when live or closing changes
+	live      int
+	closing   int
+	starters  map[uint64]bool
+	watchers  sync.WaitGroup
 }
 
 type notice struct {
@@ -98,6 +109,8 @@ func New(addr string, opts ...Option) (*Client, error) {
 		closeDone: make(chan struct{}),
 	}
 	c.idle = sync.NewCond(&c.notifyMu)
+	c.startIdle = sync.NewCond(&c.startMu)
+	c.starters = map[uint64]bool{}
 	return c, nil
 }
 
@@ -270,21 +283,83 @@ func (c *Client) connect(ctx context.Context) error {
 	}
 	c.syncState(l)
 	if f := c.opts.onStart; f != nil && l.Started() {
-		ctx, cancel := context.WithCancel(context.Background())
-		go func() {
-			defer cancel()
-			f(ctx, c)
-		}()
-		go func() {
-			select {
-			case <-l.Done():
-			case <-c.closeCh:
-			case <-ctx.Done():
-			}
-			cancel()
-		}()
+		c.runStart(f, l)
 	}
 	return nil
+}
+
+// runStart runs the start handler for l on a goroutine of its own, which
+// Close waits for. Its context ends with l or the client.
+func (c *Client) runStart(f func(ctx context.Context, c *Client), l *link.Link) {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
+	// Counted under the lock that guards closed: Close, which sets closed
+	// first, waits for every start handler that got past the check.
+	c.startMu.Lock()
+	c.live++
+	c.startMu.Unlock()
+	c.watchers.Add(1)
+	c.mu.Unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		id := goroutineID()
+		c.startMu.Lock()
+		c.starters[id] = false
+		c.startMu.Unlock()
+		defer func() {
+			cancel()
+			c.startMu.Lock()
+			delete(c.starters, id)
+			c.live--
+			c.startIdle.Broadcast()
+			c.startMu.Unlock()
+		}()
+		f(ctx, c)
+	}()
+	go func() {
+		defer c.watchers.Done()
+		select {
+		case <-l.Done():
+		case <-c.closeCh:
+		case <-ctx.Done():
+		}
+		cancel()
+	}()
+}
+
+// closingFromStart marks the caller, when it is a start handler of this
+// client, as inside a Close, which Close then does not wait for. The
+// returned function removes the mark.
+func (c *Client) closingFromStart() func() {
+	id := goroutineID()
+	c.startMu.Lock()
+	defer c.startMu.Unlock()
+	if closing, ok := c.starters[id]; !ok || closing {
+		return func() {}
+	}
+	c.starters[id] = true
+	c.closing++
+	c.startIdle.Broadcast()
+	return func() {
+		c.startMu.Lock()
+		c.starters[id] = false
+		c.closing--
+		c.startMu.Unlock()
+	}
+}
+
+// waitStarts waits until every start handler has returned or is inside a
+// Close itself.
+func (c *Client) waitStarts() {
+	c.startMu.Lock()
+	for c.live > c.closing {
+		c.startIdle.Wait()
+	}
+	c.startMu.Unlock()
+	c.watchers.Wait()
 }
 
 // security returns the Security of the links, nil without one: a nil
@@ -369,6 +444,10 @@ func (c *Client) isClosed() bool {
 	return c.closed
 }
 
+// errNoConnection is why a connect fails whose Dialer returned neither a
+// connection nor an error.
+var errNoConnection = errors.New("the dialer returned no connection")
+
 func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 	d := c.opts.dialer
 	if d == nil {
@@ -377,6 +456,9 @@ func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 	conn, err := d.DialContext(ctx, "tcp", c.addr)
 	if err != nil {
 		return nil, err
+	}
+	if conn == nil {
+		return nil, errNoConnection
 	}
 	if c.opts.tls == nil {
 		return conn, nil
@@ -403,8 +485,11 @@ func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 //
 // Called from the Handler or the state handler, Close cannot wait for that
 // call: it returns at once, the Handler is not called again, and
-// "disconnected" is reported after the call has returned. Close is
-// idempotent; every caller outside a callback returns when the client is
+// "disconnected" is reported after the call has returned. Close also waits
+// for the start handlers ([WithStartHandler]) to return, whose contexts it
+// cancels; called from a start handler, it waits for everything else and
+// returns. Close is safe to call more than once and from several
+// goroutines; every caller outside a callback returns when the client is
 // closed.
 func (c *Client) Close() error {
 	c.mu.Lock()
@@ -437,7 +522,9 @@ func (c *Client) Close() error {
 	if inside {
 		return nil
 	}
+	defer c.closingFromStart()()
 	<-c.closeDone
+	c.waitStarts()
 	return nil
 }
 

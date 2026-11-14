@@ -101,6 +101,12 @@ func (t *transfer) next(types ...iec103.TypeID) (*iec103.ASDU, error) {
 // 34) is acknowledged negatively and returns [iec103.ErrAborted]. The ctx
 // should allow for the whole transfer; on its expiry the transfer is left
 // as it is (no abortion order is sent). One transfer at a time.
+//
+// The record holds at most what the ASDU 26 announced: NOC channels of NOE
+// values each (clauses 7.2.6.10, 7.2.6.11). A value beyond NOE in a
+// channel, or a channel beyond NOC, ends the transfer at once with the
+// record so far and an error wrapping [iec103.ErrInvalid]; as on the expiry
+// of ctx, no order is sent for it.
 func (c *Client) Disturbance(ctx context.Context, fun iec103.FunctionType, fan uint16) (*iec103.Disturbance, error) {
 	if err := lock(&c.distMu); err != nil {
 		return nil, err
@@ -218,6 +224,9 @@ func (t *transfer) channels(rec *iec103.Disturbance, ready iec103.DisturbanceRea
 			break
 		}
 		cr := a.Body.(iec103.ChannelReady)
+		if len(rec.Channels) >= int(ready.NOC) {
+			return fmt.Errorf("%w: channel ACC %d beyond the %d channels announced (NOC, clause 7.2.6.10)", iec103.ErrInvalid, cr.ACC, ready.NOC)
+		}
 		ch := iec103.Channel{ACC: cr.ACC, RPV: cr.RPV, RSV: cr.RSV, RFA: cr.RFA}
 		if err := t.order(false, iec103.TOORequestChannel, cr.ACC); err != nil {
 			return err
@@ -235,6 +244,11 @@ func (t *transfer) channels(rec *iec103.Disturbance, ready iec103.DisturbanceRea
 				break
 			}
 			v := a.Body.(iec103.DisturbanceValues)
+			if len(ch.Values)+len(v.Values) > int(ready.NOE) {
+				rec.Channels = append(rec.Channels, ch)
+				return fmt.Errorf("%w: channel ACC %d: %d values beyond the %d announced (NOE, clause 7.2.6.11)",
+					iec103.ErrInvalid, cr.ACC, len(ch.Values)+len(v.Values)-int(ready.NOE), ready.NOE)
+			}
 			if v.ACC != cr.ACC || int(v.NFE) != len(ch.Values) {
 				ok = false
 			}

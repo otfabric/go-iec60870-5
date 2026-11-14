@@ -41,9 +41,11 @@ type Decoder struct {
 	// Gap, when positive, is the longest pause between two reads inside a
 	// frame: octets of an unfinished frame read before a longer pause are
 	// discarded, with [ErrShort], before the octets after it are looked
-	// at. FT 1.2 sends a frame without idle line between its characters
-	// (IEC 60870-5-1 6.2.4.2, rules R2 and R4); this is the closest a
-	// reader without character timing comes to that check.
+	// at, and the rest of a rejected frame is no longer awaited: the
+	// octets after the pause start a new frame. FT 1.2 sends a frame
+	// without idle line between its characters (IEC 60870-5-1 6.2.4.2,
+	// rules R2 and R4); this is the closest a reader without character
+	// timing comes to that check.
 	Gap time.Duration
 
 	last time.Time // when the last octets were read
@@ -81,8 +83,13 @@ func NewDecoder(r io.Reader, p Params) *Decoder {
 func (d *Decoder) Buffered() int { return d.end - d.beg }
 
 // Reset discards buffered octets, for example after a link timeout when a
-// partial frame must not be completed by later octets.
-func (d *Decoder) Reset() { d.beg, d.end = 0, 0 }
+// partial frame must not be completed by later octets. The rest of a
+// rejected frame that has not arrived yet is no longer dropped, and a
+// single character is a frame again at once.
+func (d *Decoder) Reset() {
+	d.beg, d.end = 0, 0
+	d.drop, d.dropErr, d.noSingle = 0, nil, false
+}
 
 // Next returns the next valid frame. The frame's Data aliases the
 // decoder's buffer and is valid until the next call. Read errors of the
@@ -171,11 +178,14 @@ func (d *Decoder) fill() error {
 		n, err := d.r.Read(d.buf[d.end:])
 		if n > 0 && d.Gap > 0 {
 			now := time.Now()
-			if d.end > 0 && now.Sub(d.last) > d.Gap {
-				if d.OnDiscard != nil {
+			if (d.end > 0 || d.drop > 0) && now.Sub(d.last) > d.Gap {
+				if d.end > 0 && d.OnDiscard != nil {
 					d.OnDiscard(d.buf[:d.end], ErrShort)
 				}
 				d.end = copy(d.buf, d.buf[d.end:d.end+n]) - n
+				// The rest of a rejected frame would have come without
+				// a pause: what comes after one is not part of it.
+				d.drop, d.dropErr = 0, nil
 			}
 			d.last = now
 		}

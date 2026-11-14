@@ -14,9 +14,9 @@ IEC 60870-5-102 is request driven: the client polls only while a request is open
   - UntilConfirmation: the activation confirmation, the request mirrored with cause 7;
   - UntilTermination: the activation termination, the request mirrored with cause 10, after the confirmation and the data (cause 5).
 
-A mirror with the P/N bit or a cause 13..18 ends any request with an [\*iec102.RefusedError](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec102#RefusedError). These procedures are those of the recorded traffic (innoWatt log: C\_AC\_NA\_2 confirmed with cause 7; C\_CI\_NU\_2 confirmed, 744 ASDUs M\_IT\_TK\_2 with cause 5, terminated with cause 10) and of gisce/iec870ree; the Beckhoff TS650x manual describes no application procedure. They are interpretations; see docs/iec102/INTEROPERABILITY.md.
+A mirror with the P/N bit or a cause 13..18 ends any request with an [\*iec102.RefusedError](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec102#RefusedError). A mirror is an ASDU of the station with the type identification, common address and record address of the request ([iec102.ASDU.Mirrors](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec102#ASDU.Mirrors)) and its information object too: the requested addresses and time range. These procedures are those of the recorded traffic (innoWatt log: C\_AC\_NA\_2 confirmed with cause 7; C\_CI\_NU\_2 confirmed, 744 ASDUs M\_IT\_TK\_2 with cause 5, terminated with cause 10) and of gisce/iec870ree; the Beckhoff TS650x manual describes no application procedure. They are interpretations; see docs/iec102/INTEROPERABILITY.md.
 
-The link is initialized (request status of link, reset of remote link) by [Client.Init](#func-client-init) or the first request, and again after the station stopped answering (link.ErrTimeout, which link.ErrUnexpected also wraps when only answers to something else came until the last time-out). Requests run one at a time; a second waits.
+The link is initialized (request status of link, reset of remote link) by [Client.Init](#func-client-init) or the first request, and again after the station stopped answering (link.ErrTimeout, which link.ErrUnexpected also wraps when only answers to something else came until the last time-out). Requests run one at a time; a second waits. A request that ends before its answer is complete (its context ended, or the link failed) leaves the rest of that answer at the station: the next request first polls the station until it has no more data and drops what of it belongs to its common address, so that it is not taken for the next answer.
 
 ## Constants
 
@@ -38,6 +38,9 @@ type Client struct {
 
 	// one request at a time
 
+	// dirty is set when a request to common address dirtyCA ended before
+	// its answer was complete: the next request drains the station first.
+
 }
 ```
 
@@ -57,7 +60,7 @@ New starts a controlling station on rw. Close stops it and closes rw when it is 
 func (c *Client) Close() error
 ```
 
-Close stops the station. Outstanding requests fail with [iec102.ErrClosed](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec102#ErrClosed).
+Close stops the station. Outstanding requests fail with [iec102.ErrClosed](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec102#ErrClosed). Close is safe to call more than once and from several goroutines: the first call closes the transport and returns its error; later calls return nil. It must not be called from the Handler or OnState (see [Config](#type-config)).
 
 #### func (Client) CommonAddr
 
@@ -110,10 +113,12 @@ ReadTotals reads integrated totals with one of the read commands C\_CI\_NA\_2 ..
 #### func (Client) Request
 
 ```go
-func (c *Client) Request(ctx context.Context, a *iec102.ASDU, until Until) ([]*iec102.ASDU, error)
+func (c *Client) Request(ctx context.Context, a *iec102.ASDU, until Until) (_ []*iec102.ASDU, err error)
 ```
 
 Request sends a and collects the station's answers until the request is complete by rule until. It returns every ASDU of the station's common address received meanwhile, the mirrors included. A refusal returns the answers so far and an [\*iec102.RefusedError](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec102#RefusedError).
+
+When an earlier request ended before its answer was complete, Request first polls the station until it reports no more data, dropping what of that answer arrives (ASDUs of other common addresses still reach the Handler); the rest of an abandoned answer is never returned as the answer of this request.
 
 #### func (Client) State
 
@@ -151,9 +156,20 @@ type Config struct {
 	RequestTimeout time.Duration
 
 	// Handler receives the ASDUs that answer no request: those of another
-	// common address. It runs on a goroutine of its own, in order.
+	// common address. It runs on a goroutine of its own, in order, through
+	// a queue of 64 ASDUs; one that does not fit is dropped and logged. It
+	// may call the client's methods: a request from it waits for the
+	// request in progress like any other. It must not call Close, which
+	// waits for the Handler's goroutine: call it in a new goroutine
+	// (go c.Close()), which returns once the Handler has returned. The ASDU
+	// is the Handler's own: the client keeps no reference to it.
 	Handler func(a *iec102.ASDU)
-	// OnState is called with each change of the link state.
+	// OnState is called with each change of the link state, from the
+	// goroutine of the request that changed it (while that request holds
+	// the request slot), or from Close for StateClosed. It must return
+	// quickly. It must not issue a request, which waits for the request
+	// slot the calling request holds, nor call Close; start them in a new
+	// goroutine.
 	OnState func(s iec102.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger

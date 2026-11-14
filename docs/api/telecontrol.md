@@ -10,6 +10,8 @@ Package telecontrol holds the application procedures that IEC 60870-5-101 and IE
 
 Neither companion standard has a transaction identifier: answers are recognised by type identification, common address, information object address and cause of transmission. A [Requester](#type-requester) keeps the outstanding requests and routes each received ASDU to the request it answers.
 
+A request that ended (at its deadline, say) is forgotten. An answer to it that arrives later goes to the application or, when an identical request was issued in the meantime, is taken as the answer to that one: a late positive confirmation then completes the new request, and the station's own answer to it, negative or not, reaches only the application.
+
 The package is transport independent: the companion standard packages supply a send function and feed received ASDUs to [Requester.Dispatch](#func-requester-dispatch).
 
 ## Variables

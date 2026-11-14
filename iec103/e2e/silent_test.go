@@ -5,7 +5,9 @@ package e2e
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -72,12 +74,35 @@ func TestBusy(t *testing.T) {
 	}
 }
 
+// warnings hands the client's warnings that contain a text to a channel.
+type warnings struct {
+	text string
+	ch   chan string
+}
+
+func (w *warnings) Debugf(string, ...any) {}
+func (w *warnings) Infof(string, ...any)  {}
+func (w *warnings) Errorf(string, ...any) {}
+func (w *warnings) Warnf(format string, args ...any) {
+	if s := fmt.Sprintf(format, args...); strings.Contains(s, w.text) {
+		select {
+		case w.ch <- s:
+		default:
+		}
+	}
+}
+
 // TestInitRequestsFail lets the general interrogation after the
 // initialization time out; the link stays up.
 func TestInitRequestsFail(t *testing.T) {
-	r := start(t, options{custom: silent, noDist: true, timeout: 100 * time.Millisecond})
+	w := &warnings{text: "general interrogation after initialization failed", ch: make(chan string, 1)}
+	r := start(t, options{custom: silent, noDist: true, timeout: 100 * time.Millisecond, logger: w})
 	r.expect(t, "time synchronization answer", is(iec103.TypeTimeSync, iec103.CauseTimeSync))
-	time.Sleep(200 * time.Millisecond)
+	select {
+	case <-w.ch: // the general interrogation ended at its deadline
+	case <-time.After(10 * time.Second):
+		t.Fatal("the general interrogation after the initialization did not end")
+	}
 	if r.c.State() != iec103.StateUp {
 		t.Fatal(r.c.State())
 	}

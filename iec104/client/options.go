@@ -5,6 +5,7 @@ package client
 import (
 	"context"
 	"crypto/tls"
+	"math/rand/v2"
 	"net"
 	"time"
 
@@ -27,6 +28,11 @@ import (
 // [Client.Read] and the like): their answers are delivered by the very
 // goroutine the handler is running on, so they would only time out. Start a
 // goroutine for work that needs them.
+//
+// The *asdu.ASDU is shared: an ASDU that a request collects is the same
+// value the request returns to its caller, on another goroutine, and the
+// client reads it while it matches answers. Treat it as read-only; copy
+// what you need to change.
 type Handler interface {
 	HandleASDU(a *asdu.ASDU)
 }
@@ -43,7 +49,9 @@ type Dialer interface {
 	DialContext(ctx context.Context, network, address string) (net.Conn, error)
 }
 
-// Reconnect configures automatic reconnection.
+// Reconnect configures automatic reconnection. The delay starts at MinDelay
+// and doubles after every failed attempt up to MaxDelay; each wait is
+// chosen at random between half the delay and the delay (equal jitter).
 type Reconnect struct {
 	// MinDelay is the delay before the first attempt after a connection
 	// was lost. Default 1s.
@@ -77,6 +85,24 @@ type options struct {
 	failpoint      func(name string)
 	requestTimeout time.Duration
 	security       *sec.Endpoint
+	// randN, when not nil, replaces rand.Int64N as the source of the
+	// jitter of the backoff delays. Tests only.
+	randN func(n int64) int64
+}
+
+// jitter returns the pause for a backoff delay d: a time chosen at random
+// between d/2 and d ("equal jitter"), so that clients that lost a station
+// at the same moment do not try again in step.
+func (o *options) jitter(d time.Duration) time.Duration {
+	if d <= 1 {
+		return d
+	}
+	randN := o.randN
+	if randN == nil {
+		randN = rand.Int64N
+	}
+	half := d / 2
+	return half + time.Duration(randN(int64(d-half)+1))
 }
 
 func defaultOptions() options {
@@ -140,7 +166,8 @@ func WithMetrics(m iec104.Metrics) Option {
 // WithDialer replaces the transport dialer, for example to bind a local
 // address, go through a proxy or connect over an in-memory pipe in tests.
 // When combined with [WithTLS] the TLS handshake runs on top of the
-// connection the dialer returns.
+// connection the dialer returns. A dialer that returns neither a connection
+// nor an error fails the connect with [iec104.ErrConnectFailed].
 func WithDialer(d Dialer) Option {
 	return func(o *options) { o.dialer = d }
 }
@@ -191,7 +218,9 @@ func WithReconnect(r Reconnect) Option {
 	}
 }
 
-// Retry configures automatic retries of idempotent requests.
+// Retry configures automatic retries of idempotent requests. Each wait
+// before another attempt is chosen at random between half the delay and
+// the delay (equal jitter).
 type Retry struct {
 	// Attempts is the total number of attempts, the first one included.
 	// Default 3.
@@ -245,8 +274,10 @@ func WithRetry(r Retry) Option {
 // what a controlling station does on a fresh connection, typically a general
 // interrogation and a clock synchronization.
 //
-// f runs on its own goroutine and may call any method of the client. ctx is
-// cancelled when that connection ends or the client is closed.
+// f runs on its own goroutine and may call any method of the client,
+// [Client.Close] included. ctx is cancelled when that connection ends or the
+// client is closed. [Client.Close] waits for f to return, except when f
+// itself calls it.
 func WithStartHandler(f func(ctx context.Context, c *Client)) Option {
 	return func(o *options) { o.onStart = f }
 }

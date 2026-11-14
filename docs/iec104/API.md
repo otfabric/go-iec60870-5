@@ -110,8 +110,10 @@ func (c *Client) Addr() string
   sends STARTDT. It returns `ErrBusy` when already connected or connecting and
   `ErrConnectFailed`, wrapping the cause, when the connection cannot be made.
 - `Dial` is `New` + `Connect`.
-- `Close` is idempotent, stops reconnecting and fails pending requests with
-  `ErrClosed`. A closed client cannot be reused.
+- `Close` is safe to call more than once and from several goroutines, stops
+  reconnecting, fails pending requests with `ErrClosed` and waits for the
+  start handlers (`WithStartHandler`) to return, unless it is called from
+  one. A closed client cannot be reused.
 
 ### Options
 
@@ -123,8 +125,8 @@ func (c *Client) Addr() string
 | `WithHandler(Handler)` | none | Receiver of every ASDU from the station |
 | `WithStateHandler(func(iec104.State, error))` | none | Connection state changes, with the reason |
 | `WithAutoStart(bool)` | true | Send STARTDT on connect and reconnect |
-| `WithReconnect(Reconnect)` | off | Re-dial after a loss; `MinDelay` 1s, `MaxDelay` 30s, exponential |
-| `WithRetry(Retry)` | off | Repeat idempotent requests on transient failure; `Attempts` 3, `Backoff` 500ms doubling up to `MaxBackoff` 10s |
+| `WithReconnect(Reconnect)` | off | Re-dial after a loss; `MinDelay` 1s, `MaxDelay` 30s, exponential; each wait between half the delay and the delay (equal jitter) |
+| `WithRetry(Retry)` | off | Repeat idempotent requests on transient failure; `Attempts` 3, `Backoff` 500ms doubling up to `MaxBackoff` 10s; each wait between half the delay and the delay (equal jitter) |
 | `WithStartHandler(func(context.Context, *Client))` | none | Runs on its own goroutine after every connect and reconnect that started data transfer |
 | `WithSwitchHandler(func(*Client))` | none | `Group` only: the active connection changed |
 | `WithRequestTimeout(time.Duration)` | 10s | Bound for request methods when the context has no deadline, and for every attempt with `WithRetry`; ≤ 0 disables |
@@ -306,6 +308,9 @@ var ErrServerClosed error
 
 - `ListenAndServe("")` listens on `:2404`, or `:19998` with `WithTLS`.
 - `Serve` and `ListenAndServe` block and return `ErrServerClosed` after `Close`.
+  Accept errors other than a closed listener (out of file descriptors, a
+  connection aborted before accept, a timeout) are logged and retried after a
+  pause that doubles from 5 ms up to 1 s.
 - `Broadcast` sends to every session whose data transfer is started and
   returns how many it reached; per-session errors are joined.
 - A nil handler rejects everything with "unknown type identification".
@@ -321,11 +326,11 @@ var ErrServerClosed error
 | `WithCommonAddrs(...asdu.CommonAddr)` | all | Stations served; others get "unknown common address" (broadcast always passes) |
 | `WithRedundancyGroups(...RedundancyGroup)` | one group `default` for every client | Which clients form a redundancy group, of which one is started at a time; a client no group allows is turned away |
 | `WithEventQueue(int)` | 1024 | Events buffered per redundancy group; the oldest is dropped when full |
-| `WithMaxSessions(int)` | unlimited | Close connections beyond the limit on accept |
+| `WithMaxSessions(int)` | unlimited | Close connections beyond the limit on accept; TLS handshakes in progress count |
 | `WithAccept(func(net.Addr) bool)` | all | Filter connections before any exchange |
 | `WithStateHandler(func(*Session, iec104.State, error))` | none | Session accepted / started / stopped / ended |
 | `WithTLS(*tls.Config)` | none | TLS in `ListenAndServe` |
-| `WithSecurity(func(group string, aim uint16) (*sec.Endpoint, error))` | none | IEC 62351-5 application-layer security: one endpoint, role `sec.Controlled`, per controlling station (AIM) and redundancy group, made when that station is first heard; an error refuses the AIM. A connection is bound by its first security message. Unprotected ASDUs are discarded; requests the endpoint's `Roles` do not permit are refused with `asdu.CauseNotAuthorized` before the handler; without MONITOR DATA no monitor-direction data goes to the association (`Session.Send` fails with `sec.ErrNotPermitted`, `Broadcast` skips it, `Enqueue` drops the event); statistic reports of `sec.Config.Reports` go out with the endpoint's output |
+| `WithSecurity(func(group string, aim uint16) (*sec.Endpoint, error))` | none | IEC 62351-5 application-layer security: one endpoint, role `sec.Controlled`, per controlling station (AIM) and redundancy group, made when that station is first heard; an error refuses the AIM. A connection is bound to the association its first security message names once a message on it is authenticated (a Station Association or Session Key Change that completes, or Secure Data under the current keys); until then its key management runs apart and changes nothing of the association, and an association no message authenticated is not kept. Unprotected ASDUs are discarded; requests the endpoint's `Roles` do not permit are refused with `asdu.CauseNotAuthorized` before the handler; without MONITOR DATA no monitor-direction data goes to the association (`Session.Send` fails with `sec.ErrNotPermitted`, `Broadcast` skips it, `Enqueue` drops the event); statistic reports of `sec.Config.Reports` go out with the endpoint's output |
 | `WithLogger(iec60870.Logger)` | silent | Logging |
 | `WithMetrics(iec104.Metrics)` | none | Metrics callbacks |
 
@@ -467,7 +472,7 @@ func (s *Session) ID() uint64
 func (s *Session) RemoteAddr() net.Addr
 func (s *Session) LocalAddr() net.Addr
 func (s *Session) Conn() net.Conn           // e.g. to read the TLS peer certificate
-func (s *Session) Security() *sec.Endpoint  // the controlling station's association; nil without WithSecurity or before its first security message
+func (s *Session) Security() *sec.Endpoint  // the controlling station's association; nil without WithSecurity or before a message on the session is authenticated
 func (s *Session) Context() context.Context // cancelled when the session ends
 func (s *Session) Started() bool
 func (s *Session) Err() error

@@ -19,7 +19,10 @@
 //     with cause 10, after the confirmation and the data (cause 5).
 //
 // A mirror with the P/N bit or a cause 13..18 ends any request with an
-// [*iec102.RefusedError]. These procedures are those of the recorded
+// [*iec102.RefusedError]. A mirror is an ASDU of the station with the type
+// identification, common address and record address of the request
+// ([iec102.ASDU.Mirrors]) and its information object too: the requested
+// addresses and time range. These procedures are those of the recorded
 // traffic (innoWatt log: C_AC_NA_2 confirmed with cause 7; C_CI_NU_2
 // confirmed, 744 ASDUs M_IT_TK_2 with cause 5, terminated with cause 10)
 // and of gisce/iec870ree; the Beckhoff TS650x manual describes no
@@ -30,10 +33,15 @@
 // by [Client.Init] or the first request, and again after the station
 // stopped answering (link.ErrTimeout, which link.ErrUnexpected also wraps
 // when only answers to something else came until the last time-out).
-// Requests run one at a time; a second waits.
+// Requests run one at a time; a second waits. A request that ends before
+// its answer is complete (its context ended, or the link failed) leaves the
+// rest of that answer at the station: the next request first polls the
+// station until it has no more data and drops what of it belongs to its
+// common address, so that it is not taken for the next answer.
 package client
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -79,9 +87,20 @@ type Config struct {
 	RequestTimeout time.Duration
 
 	// Handler receives the ASDUs that answer no request: those of another
-	// common address. It runs on a goroutine of its own, in order.
+	// common address. It runs on a goroutine of its own, in order, through
+	// a queue of 64 ASDUs; one that does not fit is dropped and logged. It
+	// may call the client's methods: a request from it waits for the
+	// request in progress like any other. It must not call Close, which
+	// waits for the Handler's goroutine: call it in a new goroutine
+	// (go c.Close()), which returns once the Handler has returned. The ASDU
+	// is the Handler's own: the client keeps no reference to it.
 	Handler func(a *iec102.ASDU)
-	// OnState is called with each change of the link state.
+	// OnState is called with each change of the link state, from the
+	// goroutine of the request that changed it (while that request holds
+	// the request slot), or from Close for StateClosed. It must return
+	// quickly. It must not issue a request, which waits for the request
+	// slot the calling request holds, nor call Close; start them in a new
+	// goroutine.
 	OnState func(s iec102.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger
@@ -109,10 +128,17 @@ type Client struct {
 	mu    sync.Mutex
 	state iec102.State
 	acd   bool
+	// dirty is set when a request to common address dirtyCA ended before
+	// its answer was complete: the next request drains the station first.
+	dirty   bool
+	dirtyCA uint16
 
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // New starts a controlling station on rw. Close stops it and closes rw
@@ -163,19 +189,23 @@ func (c *Client) State() iec102.State {
 func (c *Client) CommonAddr() uint16 { return c.cfg.CommonAddr }
 
 // Close stops the station. Outstanding requests fail with
-// [iec102.ErrClosed].
+// [iec102.ErrClosed]. Close is safe to call more than once and from
+// several goroutines: the first call closes the transport and returns its
+// error; later calls return nil. It must not be called from the Handler or
+// OnState (see [Config]).
 func (c *Client) Close() error {
-	c.mu.Lock()
-	if c.state == iec102.StateClosed {
-		c.mu.Unlock()
-		return nil
+	first := false
+	c.closeOnce.Do(func() {
+		first = true
+		c.cancel()
+		c.closeErr = c.pri.Close()
+		c.wg.Wait()
+		c.setState(iec102.StateClosed, nil)
+	})
+	if first {
+		return c.closeErr
 	}
-	c.mu.Unlock()
-	c.cancel()
-	err := c.pri.Close()
-	c.wg.Wait()
-	c.setState(iec102.StateClosed, nil)
-	return err
+	return nil
 }
 
 func (c *Client) setState(s iec102.State, err error) {
@@ -272,8 +302,18 @@ func (c *Client) init(ctx context.Context) error {
 // complete by rule until. It returns every ASDU of the station's common
 // address received meanwhile, the mirrors included. A refusal returns the
 // answers so far and an [*iec102.RefusedError].
-func (c *Client) Request(ctx context.Context, a *iec102.ASDU, until Until) ([]*iec102.ASDU, error) {
+//
+// When an earlier request ended before its answer was complete, Request
+// first polls the station until it reports no more data, dropping what of
+// that answer arrives (ASDUs of other common addresses still reach the
+// Handler); the rest of an abandoned answer is never returned as the
+// answer of this request.
+func (c *Client) Request(ctx context.Context, a *iec102.ASDU, until Until) (_ []*iec102.ASDU, err error) {
 	raw, err := a.Encode(c.cfg.Params)
+	if err != nil {
+		return nil, err
+	}
+	obj, err := a.Body.AppendTo(nil, c.cfg.Params)
 	if err != nil {
 		return nil, err
 	}
@@ -287,6 +327,19 @@ func (c *Client) Request(ctx context.Context, a *iec102.ASDU, until Until) ([]*i
 			return nil, err
 		}
 	}
+	if ca, dirty := c.isDirty(); dirty {
+		if err := c.drain(ctx, ca); err != nil {
+			return nil, err
+		}
+	}
+	// From the first transmission on, an answer may be under way: a
+	// request that ends without it complete leaves the link dirty.
+	defer func() {
+		var refused *iec102.RefusedError
+		if err != nil && !errors.As(err, &refused) {
+			c.setDirty(true, a.CommonAddr)
+		}
+	}()
 	addr := c.cfg.LinkAddr
 	for {
 		st, err := c.pri.SendConfirm(ctx, addr, raw)
@@ -332,7 +385,7 @@ func (c *Client) Request(ctx context.Context, a *iec102.ASDU, until Until) ([]*i
 			continue
 		}
 		out = append(out, r)
-		if !r.Mirrors(a) {
+		if !c.mirrors(r, a, obj) {
 			if until == UntilReply {
 				return out, nil
 			}
@@ -347,6 +400,72 @@ func (c *Client) Request(ctx context.Context, a *iec102.ASDU, until Until) ([]*i
 			return out, nil
 		}
 	}
+}
+
+// mirrors reports whether r is the mirror of request a, whose encoded
+// information object is obj: [iec102.ASDU.Mirrors], and the same
+// information object, so that the addresses and the time range are the
+// requested ones. The recorded traffic (innoWatt log) has the confirmation
+// and the termination repeat the request's object; that a refusal does so
+// too is an interpretation (docs/iec102/INTEROPERABILITY.md).
+func (c *Client) mirrors(r, a *iec102.ASDU, obj []byte) bool {
+	if !r.Mirrors(a) {
+		return false
+	}
+	got, err := r.Body.AppendTo(nil, c.cfg.Params)
+	return err == nil && bytes.Equal(got, obj)
+}
+
+// drain polls the station until it has no more data, after a request to
+// common address ca that ended before its answer was complete. ASDUs of
+// other common addresses go to the Handler; those of ca are the rest of
+// that answer and are dropped.
+func (c *Client) drain(ctx context.Context, ca uint16) error {
+	addr := c.cfg.LinkAddr
+	dropped := 0
+	for {
+		class := link.Class2
+		if c.getACD() {
+			class = link.Class1
+		}
+		data, st, err := c.pri.RequestData(ctx, addr, class)
+		if err != nil {
+			return c.linkErr(err)
+		}
+		c.setACD(st.ACD)
+		if data == nil {
+			if st.ACD {
+				continue
+			}
+			c.setDirty(false, 0)
+			if dropped > 0 {
+				c.log.Debug("rest of an unfinished answer dropped", "asdus", dropped)
+			}
+			return nil
+		}
+		r, err := iec102.Decode(data, c.cfg.Params)
+		if err != nil {
+			c.log.Warn("undecodable ASDU dropped", "error", err)
+			continue
+		}
+		if r.CommonAddr != ca {
+			c.handoff(r)
+			continue
+		}
+		dropped++
+	}
+}
+
+func (c *Client) isDirty() (uint16, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.dirtyCA, c.dirty
+}
+
+func (c *Client) setDirty(v bool, ca uint16) {
+	c.mu.Lock()
+	c.dirty, c.dirtyCA = v, ca
+	c.mu.Unlock()
 }
 
 func (c *Client) handoff(a *iec102.ASDU) {

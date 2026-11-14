@@ -62,12 +62,23 @@ func Segment(msg []byte, p asdu.Params, max int, seq uint8) ([][]byte, uint8, er
 	return out, seq, nil
 }
 
+// maxMessageFields bounds the fields after the data unit identifier of a
+// reassembled security message. The longest message of the A-Profile is the
+// Association Response S_AP_NA_1 (IEC TS 60870-5-7:2025, Figure 8): AIM and
+// AIS (two octets each), the certificate data length (two octets), the
+// challenge data length (one octet, as [Decode] reads it; see SECURITY.md),
+// a certificate of at most 65535 octets and challenge data of at most 255.
+// Every other message is shorter: one length field of two octets at most,
+// plus fixed fields and a MAC.
+const maxMessageFields = 2 + 2 + 2 + 1 + 0xFFFF + 0xFF
+
 // reassembler joins the segments of received security messages, one series
 // at a time, as the segment reception state machine of IEC TS 60870-5-7
 // describes: a series starts with FIR and continues with consecutive
 // numbers and the same data unit identifier; a repeated segment is ignored;
-// anything else abandons the series. discarded is called for every segment
-// or series that is dropped.
+// anything else abandons the series. A series whose fields would grow
+// beyond maxMessageFields is abandoned too. discarded is called for every
+// segment or series that is dropped.
 type reassembler struct {
 	p         asdu.Params
 	busy      bool
@@ -129,6 +140,10 @@ func (r *reassembler) add(seg []byte) []byte {
 		r.reset()
 	case asc.Seq == r.seq && bytes.Equal(seg, r.last):
 		// The same segment again: dropped without losing the series.
+	case asc.Seq == (r.seq+1)&0x3f && len(data) > maxMessageFields-len(r.buf):
+		// Longer than any message the A-Profile defines.
+		r.discard()
+		r.reset()
 	case asc.Seq == (r.seq+1)&0x3f:
 		r.buf = append(r.buf, data...)
 		r.last = append(r.last[:0], seg...)

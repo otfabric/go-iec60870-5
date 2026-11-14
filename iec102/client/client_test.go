@@ -17,7 +17,8 @@ import (
 
 // station is a scripted secondary: it refuses the first refuse user data
 // messages, and answers each accepted request with the octets of answers,
-// as class 1 data when class1 is set.
+// as class 1 data when class1 is set. Each accepted request is signalled on
+// seen when it is set.
 type station struct {
 	mu      sync.Mutex
 	refuse  int
@@ -25,6 +26,7 @@ type station struct {
 	answers [][]byte
 	queue   [][]byte
 	got     [][]byte
+	seen    chan struct{}
 }
 
 func (s *station) UserData(data []byte, _ bool) bool {
@@ -36,6 +38,9 @@ func (s *station) UserData(data []byte, _ bool) bool {
 	}
 	s.got = append(s.got, data)
 	s.queue = append(s.queue, s.answers...)
+	if s.seen != nil {
+		s.seen <- struct{}{}
+	}
 	return true
 }
 
@@ -127,29 +132,35 @@ func TestWrongAnswers(t *testing.T) {
 }
 
 func TestTimeoutAndBusy(t *testing.T) {
-	st := &station{} // accepts, never answers: the client polls until the deadline
+	// Accepts, never answers: the client polls until the deadline.
+	st := &station{seen: make(chan struct{}, 8)}
 	c := start(t, st, func(cfg *Config) { cfg.RequestTimeout = 100 * time.Millisecond })
 	if _, err := c.ReadTime(context.Background()); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal(err)
 	}
+	<-st.seen
 	// A second request waits for the first; its own context ends first.
+	first, release := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-		defer cancel()
-		_, _ = c.ReadTime(ctx)
+		_, _ = c.ReadTime(first)
 	}()
-	time.Sleep(50 * time.Millisecond)
+	<-st.seen // the first request holds the request slot
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	if err := c.Init(ctx); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal(err)
 	}
+	release()
 	<-done
 	// Closing ends a request in progress.
-	go func() { time.Sleep(50 * time.Millisecond); _ = c.Close() }()
+	closed := make(chan error, 1)
+	go func() { <-st.seen; closed <- c.Close() }()
 	if _, err := c.ReadTime(tctx(t)); !errors.Is(err, iec102.ErrClosed) {
+		t.Fatal(err)
+	}
+	if err := <-closed; err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Init(tctx(t)); !errors.Is(err, iec102.ErrClosed) {
@@ -175,4 +186,32 @@ func TestHandlerQueueFull(t *testing.T) {
 		t.Fatal(err)
 	}
 	close(block)
+}
+
+// TestMirrorOfAnotherRange: an ASDU with the type, common address and
+// record of the request but another time range does not end it; only the
+// mirror of the request itself does.
+func TestMirrorOfAnotherRange(t *testing.T) {
+	at := func(h int) iec102.TimeA { return iec102.TimeAOf(time.Date(2024, 3, 2, h, 0, 0, 0, time.UTC), nil) }
+	q := iec102.Read{T: iec102.C_CI_NU_2, First: 1, Last: 1, From: at(5), To: at(5)}
+	other := iec102.Read{T: iec102.C_CI_NU_2, First: 1, Last: 1, From: at(1), To: at(2)}
+	req := iec102.New(iec102.CauseActivation, 1, 11, q)
+	st := &station{answers: [][]byte{
+		enc(t, iec102.New(iec102.CauseActivationCon, 1, 11, q)),
+		enc(t, iec102.New(iec102.CauseActivationTerm, 1, 11, other)),
+		enc(t, iec102.New(iec102.CauseRequest, 1, 11, iec102.IntegratedTotals{T: iec102.M_IT_TK_2, Time: at(5),
+			Totals: []iec102.IntegratedTotal{{Addr: 1, Value: 5}}})),
+		enc(t, iec102.New(iec102.CauseActivationTerm, 1, 11, q)),
+	}}
+	c := start(t, st, nil)
+	out, err := c.Request(tctx(t), req, UntilTermination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 4 {
+		t.Fatalf("%d ASDUs, want 4: the termination of another range does not end the request", len(out))
+	}
+	if last := out[len(out)-1]; last.Cause != iec102.CauseActivationTerm || last.Body.(iec102.Read) != q {
+		t.Fatalf("ended by %v %+v", last, last.Body)
+	}
 }

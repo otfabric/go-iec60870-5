@@ -136,7 +136,10 @@ rec, err := c.Disturbance(ctx, iec103.FunDistance, fan)
   acknowledged negatively when the initial states are not at position 0,
   the end when fewer channels came than NOC announced. An abortion of the
   whole transfer (TOO 34) is acknowledged with TOO 65 and returns
-  `ErrAborted`.
+  `ErrAborted`. The record holds at most the NOC channels of NOE values
+  the ASDU 26 announced (clauses 7.2.6.10, 7.2.6.11): a value or a
+  channel beyond them ends the transfer at once with `ErrInvalid`, and no
+  further order is sent (`TestDisturbanceWithinAnnounced`).
 - After every initialization the client synchronizes the time and runs a
   general interrogation (clause 7.4.1, figure 3) unless `NoInitTimeSync` /
   `NoInitGI` are set. The identification (ASDU 5) is kept and available
@@ -179,7 +182,14 @@ s.Send(measurands, server.Class2)
   characters of 11 bits) at `BitRate` (default 9600 bit/s, clause 6.2.4);
   a negative `SyncDelay` turns the correction off. A broadcast
   synchronization is answered only with `AnswerBroadcastSync` (figure 5:
-  broadcast messages need no answer).
+  broadcast messages need no answer). A synchronization whose time is flagged
+  invalid, or lies outside the years 1970 to 2069 that CP56Time2a carries,
+  is not applied: the clock stays as it was, and an addressed one is
+  answered with ASDU 6 carrying the station's time with IV set
+  ([interpretation 13](INTEROPERABILITY.md#interpretations)).
+- `AnswerGI` needs the general interrogation (ASDU 7) and `AckCommand` the
+  general command (ASDU 20) the handler received; for any other ASDU they
+  return `iec103.ErrInvalid` and send nothing.
 - The handler answers with `AnswerGI` (cause 9, SCN as SIN, ASDU 8),
   `AckCommand` (ASDU 1, cause 20/21, RII as SIN), `GenericAnswer`,
   `AnswerGenericGI` and `GenericIdentAnswer`. A new ASDU 7 (or ASDU 21 with

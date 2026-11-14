@@ -296,13 +296,21 @@ func TestTestFR(t *testing.T) {
 	errc := make(chan error, 2)
 	go func() { errc <- l.TestFR(context.Background()) }()
 	p.expectU(apci.TestFRAct)
-	go func() { errc <- l.TestFR(context.Background()) }() // joins the pending test
-	time.Sleep(50 * time.Millisecond)
+	// A second test while the first waits, sent as TestFR sends it: the
+	// send returns when the loop has taken the request, which joins the
+	// pending test before the confirmation below is read.
+	joined := ctlReq{fn: apci.TestFRAct, done: make(chan error, 1)}
+	select {
+	case l.ctlCh <- joined:
+	case <-l.Done():
+		t.Fatalf("the link ended: %v", l.Err())
+	}
 	p.send(apci.NewU(apci.TestFRCon))
-	for range 2 {
-		if err := <-errc; err != nil {
-			t.Fatalf("TestFR: %v", err)
-		}
+	if err := <-errc; err != nil {
+		t.Fatalf("TestFR: %v", err)
+	}
+	if err := <-joined.done; err != nil {
+		t.Fatalf("TestFR that joined the pending test: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)

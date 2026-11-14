@@ -13,12 +13,13 @@ import (
 	"io"
 	"math/rand"
 	"os"
-	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/otfabric/go-iec60870-5/internal/testutil/leakcheck"
 )
 
 // bufCap bounds the octets a direction holds that the reader has not taken:
@@ -343,24 +344,12 @@ func envInt(name string, def int) int {
 	return def
 }
 
-// Goroutines records the number of goroutines and returns a check that
-// fails t when, after waiting up to 5 s for them to end, more than two
-// are left (the slack the IEC 104 suites allow for the runtime's own).
+// Goroutines records the goroutines running now and returns a check that
+// fails t when goroutines of this module started since are still running
+// after up to 5 s ([leakcheck.Check]: stacks compared, not counted).
 func Goroutines(t testing.TB) func() {
 	t.Helper()
-	baseline := runtime.NumGoroutine()
-	return func() {
-		t.Helper()
-		deadline := time.Now().Add(5 * time.Second)
-		for runtime.NumGoroutine() > baseline+2 && time.Now().Before(deadline) {
-			time.Sleep(10 * time.Millisecond)
-		}
-		if n := runtime.NumGoroutine(); n > baseline+2 {
-			buf := make([]byte, 1<<20)
-			buf = buf[:runtime.Stack(buf, true)]
-			t.Errorf("goroutine leak: %d running, %d before\n%s", n, baseline, buf)
-		}
-	}
+	return leakcheck.Check(t)
 }
 
 // Within runs call and fails t when it does not return within bound. It

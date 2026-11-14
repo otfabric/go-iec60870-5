@@ -24,6 +24,19 @@ const (
 // only station that initiates messages, and polls the secondaries
 // addressed by link address. Methods are safe for concurrent use; the
 // exchanges are serialized because the line carries one at a time.
+//
+// The frames refer to the caller's user data without copying it: data
+// passed to SendConfirm or SendNoReply must not be modified after the
+// call. SendNoReply returns once the frame is queued, and a frame queued
+// before the context of SendConfirm ended is still sent. The user data
+// RequestData returns is the caller's.
+//
+// When the context of SendConfirm ends during the exchange the frame
+// count bit of the message is spent although no confirmation came: if the
+// message did not reach the peer, the peer takes the next message with the
+// same user data for a repetition of the last one it accepted and does not
+// deliver it. Run an exchange that must not lose its message under a
+// context that outlives it, as the iec101 client does.
 type Primary struct {
 	p *port
 	x *exchanger
@@ -49,7 +62,12 @@ func NewPrimary(rw io.ReadWriter, cfg Config) (*Primary, error) {
 	return pr, nil
 }
 
-// Close stops the station.
+// Close stops the station and waits for its goroutines. It closes rw when
+// rw is an io.Closer; the reader goroutine returns only when that Close
+// unblocks Read, so a transport whose Close does not leaves Close waiting.
+// Close is safe to call more than once and from several goroutines: the
+// first call closes the transport and returns its error; later calls
+// return nil.
 func (pr *Primary) Close() error { return pr.p.close() }
 
 // Done is closed when the station stops: after Close or a transport

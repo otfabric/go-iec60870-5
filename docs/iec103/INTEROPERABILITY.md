@@ -154,12 +154,13 @@ sends it (vitusdong does not).
 | 7.4.2 | time synchronization, addressed (send/confirm) and broadcast (send/no reply) | `ClockSync`, `BroadcastClockSync` | built in: offset, ASDU 6 answer to an addressed one (to a broadcast only with `AnswerBroadcastSync`) | e2e (`TestTimeSync`, `TestBroadcastSyncAnswer`), independent (addressed: server with vitusdong, Open103, go-iecp5; client with vitusdong) |
 | 7.4.2 | the command carries the time its first bit is sent; the equipment corrects by length times bit time | the ASDU 6 is encoded when it is transmitted | `SyncDelay`, default 21 x 11 bits at `BitRate` (9600) | e2e (`TestClockSyncStampedAtSend`, `TestSyncDelay`) |
 | 7.4.2 | IV until the first synchronization and after 23 h without | - | `Now`, `SyncTimeout` | e2e (`TestInitializationResetFCB` before the first; `TestSyncTimeout` with a shortened `SyncTimeout`; the 23 h default itself is not run) |
+| 7.4.2 | a synchronization time flagged IV, or outside the years 1970 to 2069 of CP56Time2a (IEC 60870-5-4) | - | not applied: the clock stays; an addressed one is answered with ASDU 6 carrying the station's time with IV set (interpretation 13); the offset is held within ±36525 days | unit (`TestTimeSyncValidity`, `TestTimeSyncRefusedKeepsTheClock`, `TestTimeSyncOffsetClamped`) |
 | 7.4.3 | GI with SCN, answers cause 9 with SIN = SCN, end ASDU 8 with SCN | `Interrogate` (drops answers of another SCN) | `AnswerGI` | e2e (`TestGeneralInterrogation`, `TestStaleGIAnswers`), independent (server: all 4 clients, with the scan number and the fixture's DPIs; client: termination with the scan number from vitusdong, its answers are a known bug) |
 | 7.4.3 | a GI during a cycle aborts it without termination and starts again | - | a new ASDU 7 drops the queued rest of the cycle | e2e (`TestNewGIAbortsCycle`) |
 | 7.4.4 | general command with RII; acknowledgement ASDU 1 cause 20/21 with SIN = RII; change of state with cause 12; one command at a time | `Command` (`ErrBusy`) | `AckCommand`, `Event`; refuses a second command before the first is acknowledged | e2e (`TestCommands`), independent (server: acknowledgement 20/21 with SIN = RII for vitusdong, Open103, go-iecp5; cause 12 after the acknowledgement for vitusdong, Open103, go-iecp5; client: none, vitusdong's acknowledgement is a known bug) |
 | 7.4.5 | test mode (cause 7) | cause delivered to the handler | not a feature: the application sends INF 21 and cause 7 | e2e (`TestTestModeAndBlocking`, application-driven) |
 | 7.4.6 | monitor direction blocked | - | not a feature: the application sends INF 20 and answers a GI with its termination only | e2e (`TestTestModeAndBlocking`, application-driven) |
-| 7.4.7 | disturbance data: list, select, data, tags, channels, acknowledgements, end, updated list | `DisturbanceList`, `Disturbance` (NFE/NOE check, initial tags at position 0, NOC check, negative ack) | built in from a `DisturbanceSource` | e2e (`TestDisturbanceTransfer`, `TestDisturbanceIncomplete`, `TestDisturbanceOrders`, `TestDisturbanceClientAcks`, lossy line), independent (server: the whole procedure with Open103, description, tags and ratings as the fixture; the values not, Open103 known bug; client: none) |
+| 7.4.7 | disturbance data: list, select, data, tags, channels, acknowledgements, end, updated list | `DisturbanceList`, `Disturbance` (NFE/NOE check, initial tags at position 0, NOC check, negative ack; the record holds at most the NOC channels of NOE values the ASDU 26 announced (7.2.6.10, 7.2.6.11): a value or channel beyond them ends the transfer at once with `ErrInvalid`, no further order sent) | built in from a `DisturbanceSource` | e2e (`TestDisturbanceTransfer`, `TestDisturbanceIncomplete`, `TestDisturbanceOrders`, `TestDisturbanceClientAcks`, `TestDisturbanceWithinAnnounced`, lossy line), independent (server: the whole procedure with Open103, description, tags and ratings as the fixture; the values not, Open103 known bug; client: none) |
 | 7.4.7 | ASDU 23 after the start of a GI (cause 31) and after a completed or aborted transfer | - | list with the function type of the equipment after the GI termination, after the final acknowledgement and after TOO 33/34 | e2e (`TestListAfterGIHasEquipmentFun`, `TestDisturbanceAbortByEquipment`), independent (after the GI: Open103 starts its transfer from it) |
 | 7.4.7 | abortion by the control system (TOO 3, 9, 17) | not sent | answered with TOO 33, 36, 39 | e2e (`TestDisturbanceOrders`) |
 | 7.4.7 | abortion by the equipment (TOO 34, 37, 40); every ASDU 31 acknowledged | ASDU 25 TOO 65, 67, 69; after 37 and 40 the transfer goes on, 34 ends it (`ErrAborted`) | TOO 34 for implausible orders ends the transfer and the list follows; the selection of a record whose NOC (> 255) or NOE (> 65535) does not fit its field is answered with TOO 34; TOO 37 for an unknown channel | e2e (`TestDisturbanceClientAcks`, `TestDisturbanceAbortByEquipment`, `TestDisturbanceTooLarge`) |
@@ -214,6 +215,14 @@ the code.
     ("the position of the first tag is zero"). Open103 stores the values of
     an ASDU 30 at NFE onwards from 0 (seen in the interop run); vitusdong
     numbers them from 1 (its source; no run reaches that point).
+13. **Time synchronization that cannot be applied** (7.4.2): the clause
+    defines no negative answer to ASDU 6. A synchronization whose time is
+    flagged invalid (IV), or lies outside the years 1970 to 2069 that
+    CP56Time2a carries, is not applied; the server answers an addressed
+    one with ASDU 6 carrying its own time with IV set, a broadcast one only
+    with `Config.AnswerBroadcastSync`, as for an applied one. The link
+    layer still confirms the frame: a negative link acknowledgement would
+    say the station is busy, not that the time is wrong.
 
 ## Not implemented
 

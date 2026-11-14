@@ -90,13 +90,30 @@ type Config struct {
 
 	// Handler receives every monitor-direction ASDU, the answers to
 	// requests included (they are also returned by the request). It runs
-	// on a goroutine of its own, in order; it may issue requests.
+	// on a goroutine of its own, in order, through a queue of 256 ASDUs;
+	// while the queue is full the link loop waits, and with it every
+	// request. So the Handler must not wait for the client: a request
+	// issued from it (Interrogate, Command, ClockSync, the generic
+	// services, DisturbanceList, Disturbance, also Send) stalls once the
+	// queue fills behind it, and ends only at its deadline. Issue requests
+	// from another goroutine. The Handler may call the methods that do
+	// not wait (State, CommonAddr, Identification, IdentificationFor), and
+	// must not call Close, which waits for the Handler's goroutine: call
+	// it in a new goroutine (go c.Close()), which returns once the Handler
+	// has returned.
+	//
+	// The ASDU is shared: the same value is returned by the request that
+	// collects it and by Identification and IdentificationFor. Treat it as
+	// read-only, and copy what the Handler keeps beyond the call if it may
+	// be modified elsewhere.
 	Handler func(a *iec103.ASDU)
 	// OnState is called with each change of the link state, from the
-	// goroutine that changed it. WaitUp returns only after OnState for the
-	// change to StateUp has returned, so what the callback sets up is in
-	// place when WaitUp returns. State reports a change before OnState
-	// for it is called.
+	// goroutine that changed it: the link loop, or Close for StateClosed.
+	// WaitUp returns only after OnState for the change to StateUp has
+	// returned, so what the callback sets up is in place when WaitUp
+	// returns. State reports a change before OnState for it is called.
+	// While OnState runs the link loop waits: it must not wait for a
+	// request, and must not call Close; start either in a new goroutine.
 	OnState func(s iec103.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger
@@ -129,6 +146,9 @@ type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	closeOnce sync.Once
+	closeErr  error
 }
 
 type sendReq struct {
@@ -252,19 +272,23 @@ func (c *Client) IdentificationFor(cause iec103.Cause) *iec103.ASDU {
 }
 
 // Close stops the station. Outstanding requests fail with
-// [iec103.ErrClosed].
+// [iec103.ErrClosed]. Close is safe to call more than once and from
+// several goroutines: the first call closes the transport and returns its
+// error; later calls return nil. It must not be called from the Handler or
+// OnState (see [Config]).
 func (c *Client) Close() error {
-	c.mu.Lock()
-	if c.state == iec103.StateClosed {
-		c.mu.Unlock()
-		return nil
+	first := false
+	c.closeOnce.Do(func() {
+		first = true
+		c.cancel()
+		c.closeErr = c.pri.Close()
+		c.wg.Wait()
+		c.setState(iec103.StateClosed, nil)
+	})
+	if first {
+		return c.closeErr
 	}
-	c.mu.Unlock()
-	c.cancel()
-	err := c.pri.Close()
-	c.wg.Wait()
-	c.setState(iec103.StateClosed, nil)
-	return err
+	return nil
 }
 
 func (c *Client) setState(s iec103.State, err error) {

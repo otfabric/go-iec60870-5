@@ -55,6 +55,49 @@ The `Extended` workflow runs nightly: every fuzz target for 5 minutes and each c
 - **`iec101/interop`, `iec103/interop`, `iec102/interop`** (build tag `interop`): the serial standards against the images of the same harness, pinned in each package's `harness.go`; results in [INTEROPERABILITY.md](INTEROPERABILITY.md), [docs/iec103/INTEROPERABILITY.md](docs/iec103/INTEROPERABILITY.md) and [docs/iec102/INTEROPERABILITY.md](docs/iec102/INTEROPERABILITY.md).
 - **`iec104/interop/cbsigma`**: `sec` against cB-Sigma/iec60870 in memory.
 
+## Contract test matrix
+
+The lifecycle contract of every long-lived type, row by row (L1 to L16 of
+the otfabric/engineering lifecycle standard), and the tests that check it.
+Long-lived types:
+
+- IEC 104: `iec104/internal/link.Link`, `client.Client`, `client.Group`,
+  `server.Server`, `server.Session`.
+- Serial: `link.Primary`, `link.Secondary`, `link.Balanced`, the clients
+  and servers of `iec101`, `iec102` and `iec103`, and
+  `telecontrol.Requester` (no goroutine and no Close: only L6 and L7
+  apply).
+- Not in the matrix: `sec.Endpoint` has no goroutine and no Close (its
+  owner is the IEC 104 link, which drives it), and `ree.Session` is not
+  long-lived.
+
+Every package whose tests start goroutines checks for leaks with
+`internal/testutil/leakcheck`, which compares goroutine stacks, not counts:
+`leakcheck.Main` after the package's tests (`link`, `telecontrol`,
+`iec101/client`, `iec101/server`, `iec102/client`, `iec102/server`,
+`iec103/client`, `iec103/server`, `iec104/client`, `iec104/server`,
+`iec104/internal/link`), `leakcheck.Check` in the e2e suites (through
+`serialline.Goroutines` in the serial ones).
+
+| Row | IEC 104 | Serial stations | n/a, open |
+|---|---|---|---|
+| L1 Close twice | `TestPendingRequests`, `TestGroup` (client), `TestServerLifecycle` (server), `TestConnectInTwoSteps` (e2e); `link.Link` closes once | `link.TestL01CloseTwice` (Primary, Secondary, Balanced), `link.TestL01CloseAfterAWriteError`; `iec101/e2e.TestL01CloseTwice` (both modes); `TestCloseTwice` in `iec102/client`, `iec102/server`, `iec103/client`, `iec103/server` | - |
+| L2 Concurrent Close | `TestOrderingConcurrentClientClose`, `TestReentrantConcurrentGroupClose` (client), `TestOrderingConcurrentServerClose` (server) | `link.TestL02ConcurrentClose`; `iec101/e2e.TestL02ConcurrentClose`; `TestConcurrentClose` in the iec102 and iec103 clients and servers | - |
+| L3 Close during a blocked read | `TestPendingControlFailsOnClose` (link), `TestRequestFailsWhenConnectionDrops`, `TestCloseIsSynchronous` (client), `TestServeEndsWhenTheListenerIsClosed` (server) | `link.TestCloseAndCancel`, `TestWaitUpCloseWhileWaiting` (iec101 and iec103 clients), the "Close returns" checks of the hostile suites | a transport that is not an `io.Closer` (documented: Close needs one whose Close unblocks Read) |
+| L4 Close during a write | `TestOrderingSendRacingCloseReturnsLinkError`, `TestWriteFailures` (link) | `link.TestCloseWaitsForTheWriter` | - |
+| L5 Close during the handshake | `TestCloseDuringStartDTReportsErrClosed` (client), `TestTLSHandshakeIsBounded`, `TestTLSHandshakesCountAgainstTheSessionLimit` (server) | `TestWaitUpCloseWhileWaiting`, the hostile "silent station" cases | the iec102 client has no test of its own |
+| L6 Cancel a pending request | `TestCancellation` (client), `TestCancelledContexts` (link) | `iec101/e2e.TestRequestDeadlineWhileTheLinkRepeats`, `TestBalancedRequestDeadlineWhileTheLinkRepeats`, `TestBalancedSendAfterItsDeadline`; `iec103/e2e.TestRequestDeadlineWhileTheLinkRepeats`; `telecontrol` `FuzzDispatch` | - |
+| L7 Response after the request ended | `TestRequestTakesOnlyItsOwnAnswers`, `TestRequestsAllAtOnce` (client) | `iec102/e2e.TestUnfinishedAnswerNotTaken`, `iec103/e2e.TestStaleGIAnswers` | a late confirmation completes the next identical request (no transaction identifier: LIMITATIONS.md, docs/iec104/LIMITATIONS.md); no counter of late answers |
+| L8 Response after reconnect | `TestRetryAcrossReconnect` (client), `TestPendingRequestsWhenTransferStops` (e2e) | `iec101/e2e.TestLinkRecovery` | n/a for the serial servers and `link` (no reconnect) |
+| L9 Callback calls a public method | `TestRequestFromHandlerFailsAtOnce` (`ErrInHandler`), `TestReentrantStateHandlerDrivesTheClient` (client); server handlers call Session methods throughout | the serial server handlers answer through their station in every e2e suite | requests from the iec101 and iec103 client Handlers stall behind their queue (documented; LIMITATIONS.md) |
+| L10 Callback calls Close | `TestOrderingHandlerCalledAfterCloseFromHandler` (client and server), `TestOrderingCloseFromServerCallbacks`, `TestReentrantCloseFromHandlerStopsReconnecting`, `TestReview2GroupCloseFromStateHandler`, `TestCloseFromTheStartHandler`, `TestCloseWaitsForTheStartHandler` (client), `TestCloseWaitsForCallbacks` (link) | the documented contract, Close in a new goroutine: `link.TestL10CallbackClosesAsynchronously`, `iec101/e2e.TestL10CallbackClosesAsynchronously` (Handler and OnState of client and server, both modes), `TestCloseFromHandler` in the iec102 and iec103 clients and servers | a synchronous Close from a serial callback waits for its own goroutine (documented on every handler) |
+| L11 Slow callback | `TestBurstWithSlowHandler` (server), `TestGroupFailsOverBehindABusyHandler` (client) | `iec101/e2e.TestServerBusySetsDFC` | no slow-handler test for the serial clients |
+| L12 Queue at capacity | `TestEventQueueOverflow` (with its dropped counter), `TestReceiveBackpressure`, `TestThrottledLinkStillProcessesAcks` (link) | `iec101/e2e.TestServerUnbalancedEdges` (`ErrQueueFull`), `iec102/client.TestHandlerQueueFull`, `iec102/server.TestJunkAndBusy`, `iec103/server.TestClass1QueueFull`, `link` `FuzzSecondary` (response queue bound) | no drop counters in the serial stations; server answers cut at the queue bound |
+| L13 Concurrent sessions | `TestOrderingSessionCallbacksOnOneGoroutine`, `TestDefaultGroupKeepsIndependentSessions`, `TestFileTransfersPerSession`, `TestUnauthenticatedMessageLeavesTheAssociation`, `TestAuthenticatedSessionTakesTheAssociationOver`, `TestPendingAssociationIsShared` (server) | n/a: one line and one peer per station | - |
+| L14 Failure during construction | the connect-failure tests of the client, `TestDialerWithoutConnection`; `TestServeRetriesAcceptErrors` (server); validation in `New` before any goroutine | `link.TestConfigErrors`, `iec101/e2e.TestConfigErrors`, the config tests of iec102 and iec103 | - |
+| L15 `Shutdown(ctx)` | n/a: no type has a graceful shutdown; `TestCloseDeliversWhatWasAcknowledged` (client) | n/a | - |
+| L16 Close racing reconnect | `TestCloseWhileLossIsBeingReportedWithReconnect`, `TestReentrantCloseFromHandlerStopsReconnecting`, `TestReview2GroupCloseRacingSwitchover`, `TestReview2GroupStress` (client) | `iec101/e2e.TestHostileBalancedServer` (Close while re-initializing), `TestWaitUpCloseWhileWaiting` | n/a for types without reconnect |
+
 ## Options
 
 | Variable or flag | Effect |
@@ -91,6 +134,7 @@ The gate is 90% of statements in total, the same value as `coverage-min` in `.gi
 | `iec104/internal/capture`, `iec101/internal/capture`, `iec103/internal/capture`, `iec102/internal/capture` | Readers and replay of the recorded captures, test infrastructure; their own tests run |
 | `internal/testutil/corpus` | Manifest and oracle helpers of the capture suites, no production code |
 | `internal/testutil/serialline` | Faulty in-memory line, raw FT 1.2 peers and the goroutine check of the serial hostile and chaos suites, no production code |
+| `internal/testutil/leakcheck` | The goroutine leak check of the package tests and the e2e suites, no production code |
 
 The `interop` packages are outside the default build by their build tag, and `iec104/interop/cbsigma` is another module.
 

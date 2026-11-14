@@ -37,7 +37,16 @@ and ASDU is checked before use and the decoders and receive paths are
 fuzzed; the send queues are bounded (`QueueSize`, `server.ErrQueueFull`);
 the hostile-peer suites (`iec101/e2e`, `iec102/e2e`, `iec103/e2e`,
 `hostile_test.go`) check that a station stays bounded and serves a peer
-that behaves afterwards ([TESTING.md](TESTING.md)).
+that behaves afterwards ([TESTING.md](TESTING.md)). After a pause longer
+than `link.Config.FrameGap` the FT 1.2 decoder neither completes an
+unfinished frame nor waits for the rest of a rejected one, so the frames
+that follow the pause are read. The IEC 103 client keeps a disturbance
+record within the NOC channels of NOE values its ASDU 26 announced. The
+IEC 103 server does not apply a time synchronization flagged invalid or
+outside the CP56Time2a years 1970 to 2069, and holds its clock offset
+within ±36525 days. The IEC 102 client takes as an answer only what
+repeats the request's information object, and drains the rest of an
+unfinished answer before the next request.
 
 ### IEC 60870-5-104 Has No Built-In Security
 
@@ -65,7 +74,8 @@ IEC 62351-5 authenticates application messages themselves, on top of or instead 
 - **Statistics and events**: the counters of IEC 62351-5 (`Endpoint.Statistics`, 0 to 2^31-1) and its security events with their mnemonics (`Config.OnEvent`). A controlled station reports the statistics listed in `sec.Config.Reports` spontaneously in M_IT_TB_1 at their configured IOAs once they grew by their threshold (TS 5.4.2.3, 9.7; the default thresholds of Table 10). The reports are Secure Data and go to every role: they are security information, not process data (an interpretation: TS 8.2 does not say)
 - **Key usage**: the session keys are changed after 24 hours or 65535 messages by default (the lower ends of the ranges of TS Table 9); the controlled station allows twice that
 - **Keys at rest**: `sec.FileStore` keeps the association in a file with mode 0600, so that a restart does not need a new Station Association. The file holds the keys as they are: put it where only the station's account can read it, on encrypted storage, or implement `sec.KeyStore` against a key vault or HSM
-- **One association per controlling station**: every security message names its controlling station by the AIM, the controlling station's half of the association ID. `server.WithSecurity` makes the station's association for an AIM when that station is first heard, or refuses it; a connection is bound to its association by the first security message on it. The connections of one controlling station (a client redundancy group, which shares one `Endpoint`) share its association, carried by the connection that is started; other controlling stations, in the same redundancy group or not, have their own and take nothing over
+- **One association per controlling station**: every security message names its controlling station by the AIM, the controlling station's half of the association ID. `server.WithSecurity` makes the station's association for an AIM when that station is first heard, or refuses it. A connection is bound to that association only once a message on it is authenticated for it: a Station Association or a Session Key Change that completes, or Secure Data that verifies under the current session keys. Until then the station answers the connection's key management on a copy of the association and changes nothing of it: the connection that carries the association keeps it, `Session.Security` of the other is nil, and what its messages fail is counted in the association's statistics and events. An association that no message has authenticated is kept only while a connection waits for it; `newEndpoint` is called again when that station is heard next. The connections of one controlling station (a client redundancy group, which shares one `Endpoint`) share its association, carried by the connection that is started; other controlling stations, in the same redundancy group or not, have their own and take nothing over
+- **Reassembly is bounded**: the segments of one security message are joined up to the longest message the A-Profile defines, the Association Response with a certificate of 65535 octets (IEC TS 60870-5-7:2025, Figure 8; 65797 octets after the data unit identifier). A series that would grow beyond it is abandoned and counted in `StatDiscardedMessages`, as any other abandoned series
 - **An AIM is a claim**: any station the `Trust` accepts can claim any AIM, and with it the association and roles of that AIM. Give each AIM a `Trust` that accepts only its own station (`Trust.Subjects` with an authority, or the pinned certificate), and the `Roles` of that station
 
 What it does not have: the curves secp256k1 and X448 (both mandatory in the IEC TS 60870-5-7 PICS) and brainpool, BLAKE2s, the broadcast session key of IEC 60870-5-101, access tokens of IEC 62351-8 (the roles are configured, not carried), and certificate revocation lists (keep `Trust` current instead).
@@ -118,13 +128,15 @@ Gaps against the TS, open:
 ### Hardening a Server
 
 - `server.WithAccept` restricts which addresses may connect; it is checked before any protocol exchange. Treat it as defence in depth: a source address is not an identity
-- `server.WithMaxSessions` bounds the number of simultaneous connections
+- `server.WithMaxSessions` bounds the number of simultaneous connections, TLS handshakes in progress included: a connection beyond the limit is closed before its handshake starts
+- `Serve` keeps serving through accept errors such as running out of file descriptors: each is logged (`accept failed`) and retried after a pause that doubles from 5 ms up to 1 s and ends when the server is closed
 - `server.WithCommonAddrs` rejects ASDUs for stations the server does not represent
 - Validate every command in the handler (address, value range, select-before-operate state, interlocks) before acting on the process. The library checks the encoding, not the meaning
 
 ### Input Handling
 
 - Every received APDU and ASDU is length- and structure-checked before use; malformed input closes the connection (APDU) or is dropped (ASDU) and cannot cause a panic. The decoders are fuzzed
-- Memory per connection is bounded: frames are at most 255 octets, and a slow handler stops acknowledgements and ultimately reading instead of queueing without limit
+- Memory per connection is bounded, except for the files a `FileServer` with a `Sink` accepts, whose number per session is not capped: frames are at most 255 octets, a security message is reassembled up to the longest the A-Profile defines (above), and a slow handler stops acknowledgements and ultimately reading instead of queueing without limit
+- A file section that a controlling station announces (F_SR_NA_1) reserves no memory before its data arrives: an upload grows only with the segments received
 - A TLS handshake must complete within `t0`; a peer that connects and stays silent does not hold a session
 - A panic in a server handler closes that session only

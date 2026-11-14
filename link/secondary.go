@@ -13,7 +13,16 @@ import (
 // SecondaryHandler is the user of a secondary station: it receives the
 // primary's user data and supplies the data the primary polls. Calls come
 // from the station's reader goroutine, one at a time, and must return
-// quickly: the primary is waiting for the response.
+// quickly: the primary is waiting for the response. They run with the
+// station's state locked, so the handler must not call Close, which waits
+// for that goroutine: call it in a new goroutine (go s.Close()), which
+// returns once the handler has returned.
+//
+// The station keeps what Class1 and Class2 return, to send it again when
+// the primary repeats its request (FCB not toggled): the handler must not
+// modify it afterwards. The data passed to UserData is a copy the
+// handler may keep; the station also keeps it to recognise a repetition,
+// so it must not be modified.
 type SecondaryHandler interface {
 	// UserData delivers user data from the primary (function 3, or
 	// function 4 when broadcast or no reply is expected). Returning false
@@ -108,7 +117,16 @@ func NewSecondary(rw io.ReadWriter, cfg Config, addr uint16, h SecondaryHandler)
 	return s, nil
 }
 
-// Close stops the station.
+// Close stops the station and waits for its goroutines. It closes rw when
+// rw is an io.Closer; the reader goroutine returns only when that Close
+// unblocks Read, so a transport whose Close does not leaves Close waiting.
+// Close is safe to call more than once and from several goroutines: the
+// first call closes the transport and returns its error; later calls
+// return nil.
+//
+// A handler must not call Close: Close waits for the reader goroutine that
+// runs the handler. Call it in a new goroutine (go s.Close()); it returns
+// once the handler has returned.
 func (s *Secondary) Close() error { return s.p.close() }
 
 // Done is closed when the station stops.

@@ -56,7 +56,7 @@ Defined in package `iec104` and shared by `iec104/client` and `iec104/server`:
 |----------|---------|
 | `ErrClosed` | The client, server or session was closed by the application |
 | `ErrNotConnected` | The client has no established connection (never connected, or reconnecting) |
-| `ErrConnectFailed` | `Connect` or `Dial` failed: TCP dial, TLS handshake or STARTDT. The cause is wrapped too, so `errors.Is(err, context.DeadlineExceeded)` and `errors.As(err, &netErr)` keep working |
+| `ErrConnectFailed` | `Connect` or `Dial` failed: TCP dial (also a `Dialer` that returns neither a connection nor an error), TLS handshake or STARTDT. The cause is wrapped too, so `errors.Is(err, context.DeadlineExceeded)` and `errors.As(err, &netErr)` keep working |
 | `ErrNotStarted` | An ASDU was to be sent while data transfer is stopped |
 | `ErrConnectionLost` | The peer closed the connection or the transport failed |
 | `ErrTimeout` | `t1` expired; the connection was closed |
@@ -302,7 +302,7 @@ end, so the station may still receive it.
 |---|---|
 | `iec103.ErrShort` | the ASDU ends before its last field, or a GID is shorter than its GDD announces |
 | `iec103.ErrTrailing` | octets after the information object of a compatible type identification |
-| `iec103.ErrInvalid` | a field out of range: more elements than the ASDU may carry (ASDU 3: 4, ASDU 9: 9, ASDU 23: 8, ASDU 29 and 30: 25, NGD/NDE: 63), GID length different from its GDD, a GDD with DATASIZE 0 or NUMBER outside 1..127 (7.2.6.32), an ASDU 11 with NDE 0 (7.2.6.35), a VSQ other than 81H for a single information object or with SQ = 1 for ASDUs 3, 9 and 23 (7.2.2), an accessor of `iec103.Value` used on the wrong data type; also a client request with an information number that is not a generic read or write, or a general command with a DCO that `iec103.CommandAllowed` refuses |
+| `iec103.ErrInvalid` | a field out of range: more elements than the ASDU may carry (ASDU 3: 4, ASDU 9: 9, ASDU 23: 8, ASDU 29 and 30: 25, NGD/NDE: 63), GID length different from its GDD, a GDD with DATASIZE 0 or NUMBER outside 1..127 (7.2.6.32), an ASDU 11 with NDE 0 (7.2.6.35), a VSQ other than 81H for a single information object or with SQ = 1 for ASDUs 3, 9 and 23 (7.2.2), an accessor of `iec103.Value` used on the wrong data type; also a client request with an information number that is not a generic read or write, or a general command with a DCO that `iec103.CommandAllowed` refuses; also a disturbance transfer with a value or a channel beyond the NOC channels of NOE values its ASDU 26 announced (`Disturbance` returns the record so far), and `AnswerGI` / `AckCommand` of `iec103/server` with an ASDU that is not a general interrogation (ASDU 7) / general command (ASDU 20) |
 | `iec103.ErrTooLong` | an ASDU longer than 253 octets (one FT 1.2 frame with a one-octet link address), or a data set or description element too large for one ASDU |
 
 A type identification outside tables 3 and 4, or a private cause of
@@ -358,3 +358,9 @@ Requests wrap `context.DeadlineExceeded` when the answer is not complete
 within the context's deadline or `Config.RequestTimeout`. A NACK of the
 request (the station's input is full) is not returned: the client tries
 again after `PollInterval` until the deadline.
+
+An ASDU that matches the request's type, addresses and record but not its
+information object is not taken as its answer. A request after one that
+ended before its answer was complete first polls the station until it has
+no more data; an error of that polling is the request's (wrapping
+`iec102.ErrLinkDown`, `iec102.ErrClosed` or the context's error).

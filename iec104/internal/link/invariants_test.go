@@ -260,13 +260,24 @@ func randomStartStopSend(t *testing.T, params apci.Params, seed int64) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	stop := make(chan struct{})
+	settled := make(chan struct{}) // closed once data transfer is started for good
 	var wg, drivers sync.WaitGroup
 
-	// sender sends numbered frames and remembers which were accepted.
-	sender := func(e *end, seed int64) *[]uint32 {
-		var sent []uint32
+	// sender sends numbered frames and remembers which were accepted. ran
+	// is closed when it has sent settledSends frames after settled, or has
+	// returned.
+	const settledSends = 32
+	sender := func(e *end, seed int64) (sent *[]uint32, ran <-chan struct{}) {
+		sent = new([]uint32)
+		after := make(chan struct{})
 		wg.Go(func() {
 			rng := rand.New(rand.NewSource(seed))
+			sends := 0
+			defer func() {
+				if sends < settledSends {
+					close(after)
+				}
+			}()
 			for n := uint32(0); ; n++ {
 				select {
 				case <-stop:
@@ -275,7 +286,14 @@ func randomStartStopSend(t *testing.T, params apci.Params, seed int64) {
 				}
 				switch err := e.link.Send(ctx, payload(n)); {
 				case err == nil:
-					sent = append(sent, n)
+					*sent = append(*sent, n)
+					select {
+					case <-settled:
+						if sends++; sends == settledSends {
+							close(after)
+						}
+					default:
+					}
 				case errors.Is(err, iec104.ErrNotStarted):
 				default:
 					t.Errorf("Send: %v", err)
@@ -286,10 +304,10 @@ func randomStartStopSend(t *testing.T, params apci.Params, seed int64) {
 				}
 			}
 		})
-		return &sent
+		return sent, after
 	}
-	fromCtl := sender(ctl, seed)
-	fromCtd := sender(ctd, seed+100)
+	fromCtl, ctlRan := sender(ctl, seed)
+	fromCtd, ctdRan := sender(ctd, seed+100)
 
 	// Two drivers race each other over STARTDT and STOPDT.
 	var starts, stops atomic.Int64
@@ -317,12 +335,14 @@ func randomStartStopSend(t *testing.T, params apci.Params, seed int64) {
 		})
 	}
 	drivers.Wait()
-	// Settle in the started state, let the senders run a little longer, and
+	// Settle in the started state, let each sender send some more, and
 	// stop them: everything in flight can then be delivered.
 	if err := ctl.link.StartDT(ctx); err != nil {
 		t.Fatalf("seed %d: final StartDT: %v", seed, err)
 	}
-	time.Sleep(20 * time.Millisecond)
+	close(settled)
+	<-ctlRan
+	<-ctdRan
 	close(stop)
 	wg.Wait()
 	if starts.Load() < 10 || stops.Load() < 10 {
@@ -443,7 +463,7 @@ func TestCloseWaitsForCallbacks(t *testing.T) {
 		default:
 			t.Fatalf("iteration %d: Close returned before OnClose ran", i)
 		}
-		time.Sleep(2 * time.Millisecond)
+		<-ctl.link.Dispatched() // the dispatcher has ended: no callback follows
 		after, statesAfter := ctl.snapshot()
 		if len(after) != len(before) || len(statesAfter) != len(states) {
 			t.Fatalf("iteration %d: %d ASDUs and %d state reports were delivered after Close returned",

@@ -382,7 +382,7 @@ func (g *Group) dial(i int) {
 			// As a client does for a connection it lost: wait, longer
 			// after every failure.
 			g.delay[i] = min(max(2*g.delay[i], g.interval), g.maxDelay)
-			g.notYet[i] = time.Now().Add(g.delay[i])
+			g.notYet[i] = time.Now().Add(c.opts.jitter(g.delay[i]))
 		} else {
 			g.delay[i] = 0
 			g.notYet[i] = time.Time{}

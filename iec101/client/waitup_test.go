@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/otfabric/go-iec60870-5/iec101"
@@ -51,27 +52,32 @@ func TestWaitUpTransportClosedBeforeLinkUp(t *testing.T) {
 }
 
 // Close while WaitUp waits: WaitUp returns ErrClosed, not the transport error Close
-// itself causes.
+// itself causes. In a testing/synctest bubble, synctest.Wait returns once WaitUp is
+// blocked.
 func TestWaitUpCloseWhileWaiting(t *testing.T) {
-	a, b := net.Pipe()
-	defer func() { _ = b.Close() }()
-	go func() { _, _ = discard(b) }()
-	c, err := New(a, Config{Params: iec101.DefaultParams(), LinkAddr: 3, RetryInterval: 10 * time.Millisecond})
-	if err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan error, 1)
-	go func() { done <- c.WaitUp(context.Background()) }()
-	time.Sleep(50 * time.Millisecond)
-	_ = c.Close()
-	select {
-	case err := <-done:
-		if !errors.Is(err, iec101.ErrClosed) {
-			t.Errorf("WaitUp: %v, want ErrClosed", err)
+	synctest.Test(t, func(t *testing.T) {
+		a, b := net.Pipe()
+		defer func() { _ = b.Close() }()
+		go func() { _, _ = discard(b) }()
+		c, err := New(a, Config{Params: iec101.DefaultParams(), LinkAddr: 3, RetryInterval: 10 * time.Millisecond})
+		if err != nil {
+			t.Fatal(err)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("WaitUp did not return after Close")
-	}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		done := make(chan error, 1)
+		go func() { done <- c.WaitUp(ctx) }()
+		synctest.Wait()
+		_ = c.Close()
+		select {
+		case err := <-done:
+			if !errors.Is(err, iec101.ErrClosed) {
+				t.Errorf("WaitUp: %v, want ErrClosed", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("WaitUp did not return after Close")
+		}
+	})
 }
 
 // discard reads and drops what the client sends: a silent station.

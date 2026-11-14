@@ -11,7 +11,11 @@
 //     (clause 7.4.1, table 8);
 //   - time synchronization (clause 7.4.2): the server keeps the clock offset,
 //     answers with ASDU 6 and flags its time tags invalid until the first
-//     synchronization and when none came for [Config.SyncTimeout];
+//     synchronization and when none came for [Config.SyncTimeout]. A
+//     synchronization whose time is flagged invalid, or lies outside the
+//     years 1970 to 2069 that CP56Time2a carries, is not applied: the clock
+//     stays as it was, and an addressed one is answered with ASDU 6
+//     carrying the station's time with IV set;
 //   - the disturbance data transfer of clause 7.4.7 from a
 //     [DisturbanceSource], when one is configured; the selection of a
 //     record whose number of channels (NOC) or of values per channel
@@ -44,7 +48,13 @@ import (
 // general commands (ASDU 20), generic services (ASDUs 10 and 21), the
 // disturbance orders (ASDUs 24 and 25) when no [DisturbanceSource] is
 // configured, and any private ASDU. Calls are made one at a time from a
-// goroutine of the server; the handler answers through the Server.
+// goroutine of the server; the handler answers through the Server, whose
+// methods it may call, all but Close. Close waits for the goroutine that
+// calls the handler: a handler that stops the station calls Close in a new
+// goroutine (go s.Close()), which returns once the handler has returned.
+//
+// The ASDU is the handler's own: a new one is decoded for each call and the
+// server keeps no reference to it, so the handler may keep or modify it.
 type Handler interface {
 	HandleASDU(s *Server, a *iec103.ASDU)
 }
@@ -121,10 +131,14 @@ type Config struct {
 	// 7.4.2 has broadcast messages need no answer; an addressed
 	// synchronization is always answered.
 	AnswerBroadcastSync bool
-	// OnTimeSync is called with each received synchronization time.
+	// OnTimeSync is called with each synchronization time the server
+	// applies, from the goroutine that calls the Handler.
 	OnTimeSync func(t time.Time, broadcast bool)
 
-	// OnState is called with each change of the link state.
+	// OnState is called with each change of the link state: from the
+	// station's link goroutine on a reset, and from Close for
+	// StateClosed. It must return quickly and must not call Close, which
+	// waits for that goroutine; call Close in a new goroutine instead.
 	OnState func(s iec103.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger
@@ -163,6 +177,9 @@ type Server struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // queued is a monitor-direction ASDU waiting to be polled; cycle marks the
@@ -241,13 +258,23 @@ func New(rw io.ReadWriter, cfg Config) (*Server, error) {
 	return s, nil
 }
 
-// Close stops the station.
+// Close stops the station. Close is safe to call more than once and from
+// several goroutines: the first call closes the transport and returns its
+// error; later calls return nil. It must not be called from the Handler,
+// OnState or OnTimeSync (see [Handler]).
 func (s *Server) Close() error {
-	s.cancel()
-	err := s.sec.Close()
-	s.wg.Wait()
-	s.setState(iec103.StateClosed, nil)
-	return err
+	first := false
+	s.closeOnce.Do(func() {
+		first = true
+		s.cancel()
+		s.closeErr = s.sec.Close()
+		s.wg.Wait()
+		s.setState(iec103.StateClosed, nil)
+	})
+	if first {
+		return s.closeErr
+	}
+	return nil
 }
 
 // State returns the link state: up once the controlling system reset the
@@ -355,9 +382,22 @@ func (s *Server) Event(cause iec103.Cause, fun iec103.FunctionType, inf iec103.I
 // [DisturbanceSource] the list of recorded disturbances follows (ASDU 23,
 // cause 31, with the function type of the equipment, clauses 7.3.1.11 and
 // 7.4.7). A new ASDU 7 that arrives before the cycle was polled drops what
-// is left of it, termination included (clause 7.4.3).
+// is left of it, termination included (clause 7.4.3). A req whose body is
+// not a general interrogation ([iec103.GIInit]), such as an ASDU 7 with a
+// private cause that decodes as [iec103.Raw], returns an error wrapping
+// [iec103.ErrInvalid] and queues nothing.
 func (s *Server) AnswerGI(req *iec103.ASDU, data ...*iec103.ASDU) error {
-	scn := req.Body.(iec103.GIInit).SCN
+	var gi iec103.GIInit
+	if req != nil {
+		var ok bool
+		if gi, ok = req.Body.(iec103.GIInit); !ok {
+			req = nil
+		}
+	}
+	if req == nil {
+		return fmt.Errorf("%w: AnswerGI needs a general interrogation (ASDU 7)", iec103.ErrInvalid)
+	}
+	scn := gi.SCN
 	for _, a := range data {
 		c := *a
 		c.Cause = iec103.CauseGI
@@ -386,16 +426,39 @@ func (s *Server) AnswerGI(req *iec103.ASDU, data ...*iec103.ASDU) error {
 // with the FUN and INF of the command, cause 20 (positive) or 21
 // (negative), the DCO as DPI and the RII as SIN. A positive command is
 // followed by the change of state with cause 12, which the application
-// sends ([Server.Event]).
+// sends ([Server.Event]). A req whose body is not a general command
+// ([iec103.GeneralCommand]), such as an ASDU 20 with a private cause that
+// decodes as [iec103.Raw], returns an error wrapping [iec103.ErrInvalid]
+// and acknowledges nothing.
 func (s *Server) AckCommand(req *iec103.ASDU, positive bool) error {
+	cmd, err := generalCommand(req)
+	if err != nil {
+		return err
+	}
 	s.mu.Lock()
 	s.cmdPending = false
 	s.mu.Unlock()
-	return s.ack(req, positive)
+	return s.ackCommand(req, cmd, positive)
+}
+
+func generalCommand(req *iec103.ASDU) (iec103.GeneralCommand, error) {
+	if req != nil {
+		if cmd, ok := req.Body.(iec103.GeneralCommand); ok {
+			return cmd, nil
+		}
+	}
+	return iec103.GeneralCommand{}, fmt.Errorf("%w: AckCommand needs a general command (ASDU 20)", iec103.ErrInvalid)
 }
 
 func (s *Server) ack(req *iec103.ASDU, positive bool) error {
-	cmd := req.Body.(iec103.GeneralCommand)
+	cmd, err := generalCommand(req)
+	if err != nil {
+		return err
+	}
+	return s.ackCommand(req, cmd, positive)
+}
+
+func (s *Server) ackCommand(req *iec103.ASDU, cmd iec103.GeneralCommand, positive bool) error {
 	cause := iec103.CauseCommandAck
 	if !positive {
 		cause = iec103.CauseCommandNack
@@ -506,7 +569,7 @@ func (s *Server) dispatch(m inbound) {
 	}
 	switch b := a.Body.(type) {
 	case iec103.TimeSync:
-		s.timeSync(b.Time.Time, m)
+		s.timeSync(b.Time, m)
 		return
 	case iec103.GeneralCommand:
 		if !iec103.CommandAllowed(a.Fun, a.Inf, b.DCO) {
@@ -550,14 +613,51 @@ func (s *Server) dispatch(m inbound) {
 	}
 }
 
+// The years a CP56Time2a carries: two digits, 70..99 for 1970..1999 and
+// 0..69 for 2000..2069 (IEC 60870-5-4, as package cp reads it; clause 7.2.6
+// of IEC 60870-5-103 uses CP56Time2a for the time synchronization).
+const (
+	cp56FirstYear = 1970
+	cp56LastYear  = 2069
+)
+
+// maxOffset bounds the clock offset a synchronization sets: the 100 years
+// (36525 days) of the CP56Time2a range, so that the corrected clock stays
+// within reach of it whatever the local clock says.
+const maxOffset = 36525 * 24 * time.Hour
+
+// syncable reports whether a received synchronization time can be applied:
+// not flagged invalid (which a CP56Time2a with a field out of range also
+// decodes to, with the zero time), and within the CP56Time2a range.
+func syncable(t cp.Timestamp) bool {
+	y := t.Year()
+	return !t.Invalid && !t.IsZero() && y >= cp56FirstYear && y <= cp56LastYear
+}
+
 // timeSync applies a time synchronization (clause 7.4.2) and answers an
 // addressed one with ASDU 6 in the monitor direction carrying the
 // corrected time; a broadcast one only with [Config.AnswerBroadcastSync]
-// (figure 5: broadcast messages need no answer).
-func (s *Server) timeSync(t time.Time, m inbound) {
-	t = t.Add(s.cfg.SyncDelay)
+// (figure 5: broadcast messages need no answer). A time that [syncable]
+// refuses is not applied; the answer then carries the station's time with
+// IV set. Clause 7.4.2 defines no negative answer to a time
+// synchronization: the IV flag is how the ASDU 6 says the time is not
+// valid (an interpretation, docs/iec103/INTEROPERABILITY.md).
+func (s *Server) timeSync(ts cp.Timestamp, m inbound) {
+	if !syncable(ts) {
+		s.log.Warn("time synchronization not applied: time invalid or out of range",
+			"time", ts.Time, "invalid", ts.Invalid, "broadcast", m.broadcast)
+		if m.broadcast && !s.cfg.AnswerBroadcastSync {
+			return
+		}
+		now := s.Now()
+		now.Invalid = true
+		_ = s.Send(iec103.New(iec103.CauseTimeSync, s.ca, iec103.FunGlobal, iec103.InfTimeSync, iec103.TimeSync{Time: now}), Class1)
+		return
+	}
+	t := ts.Add(s.cfg.SyncDelay)
+	offset := min(max(t.Sub(m.at), -maxOffset), maxOffset)
 	s.mu.Lock()
-	s.offset = t.Sub(m.at)
+	s.offset = offset
 	s.synced = m.at
 	s.mu.Unlock()
 	if s.cfg.OnTimeSync != nil {

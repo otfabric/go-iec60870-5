@@ -1,5 +1,174 @@
 # Release notes
 
+## v0.5.3
+
+**Date:** 2026-11-14
+**Previous release:** v0.5.2
+
+Bounds and lifecycle fixes in every companion standard, from the policy 1.6
+review: limits on what a peer can make a station hold or wait for, Close
+that is safe to call more than once in the serial stations, balanced IEC 101
+sends on the client's own goroutine, and the callback, ownership and Close
+contracts documented on every station. No exported identifier is added,
+removed or changed.
+
+### Fixed
+
+- `sec`: the segments of one security message are reassembled up to the
+  longest message the A-Profile defines, the Association Response with a
+  certificate of 65535 octets (IEC TS 60870-5-7:2025, Figure 8; 65797
+  octets after the data unit identifier). A series that would grow beyond
+  it is abandoned and counted in `StatDiscardedMessages`.
+- `iec104/server` with `WithSecurity`: a connection is bound to the
+  association of its controlling station only once a message on it is
+  authenticated for it (a Station Association or Session Key Change that
+  completes, or Secure Data under the current session keys). Until then
+  its key management runs on a copy of the association and changes
+  nothing of it: the connection that carries the association keeps it,
+  and `Session.Security` of the other is nil. An association that no
+  message has authenticated is kept only while a connection waits for it;
+  `newEndpoint` is called again for that AIM when its station is heard
+  next.
+- `iec104/server`: `Serve` keeps serving through accept errors other than
+  a closed listener (out of file descriptors, a connection aborted before
+  accept, a timeout); each is logged and retried after a pause that
+  doubles from 5 ms up to 1 s and ends when the server is closed. With
+  `WithMaxSessions`, a TLS handshake in progress counts as a session, and
+  a connection beyond the limit is closed before its handshake starts.
+  Without a limit nothing changes.
+- `iec104/server`: `FileServer` reserves no memory for a file section a
+  controlling station announces; an upload grows only with the segments
+  that arrive.
+- `iec104/client`: a `Dialer` that returns neither a connection nor an
+  error fails the connect with `iec104.ErrConnectFailed`. `Close` waits
+  for the start handlers (`WithStartHandler`) to return, after cancelling
+  their contexts; called from a start handler, it waits for everything
+  else and returns.
+- `ft12`: after a pause longer than `Decoder.Gap` the rest of a rejected
+  frame is no longer awaited, as an unfinished frame already was not:
+  the octets after the pause start a new frame (IEC 60870-5-1 6.2.4.2, as
+  `Gap` documents). `Decoder.Reset` also forgets the rest of a rejected
+  frame still to come and the single-character hold-off.
+- `iec101/client`, balanced transmission: the supervisor goroutine sends
+  the user data of requests, under the client's own context, as the
+  poller does in unbalanced transmission. A request returns at its
+  deadline even while the link repeats another frame, and an exchange
+  whose request ended is still finished on the link, so the station
+  receives the message once and the FCB stays in step. OnState for a
+  failed send is called from the supervisor. The first test function for
+  link follows one `TestInterval` after the link came up.
+- `iec103/client`: `Disturbance` keeps at most the NOC channels of NOE
+  values its ASDU 26 announced (clauses 7.2.6.10, 7.2.6.11). A value or a
+  channel beyond them ends the transfer at once with an error wrapping
+  `iec103.ErrInvalid`, returns the record so far and sends no further
+  order.
+- `iec103/server`: `AnswerGI` and `AckCommand` return an error wrapping
+  `iec103.ErrInvalid`, and send nothing, for a request whose body is not
+  a general interrogation or general command (an ASDU 7 or 20 with a
+  private cause decodes as `iec103.Raw`). The quickstart example checks
+  the body the same way.
+- `iec103/server`: a time synchronization whose time is flagged invalid,
+  or lies outside the years 1970 to 2069 of CP56Time2a, is not applied:
+  the clock and `OnTimeSync` stay as they were, and an addressed one is
+  answered with ASDU 6 carrying the station's time with IV set (clause
+  7.4.2 defines no negative answer; interpretation 13 of
+  docs/iec103/INTEROPERABILITY.md). The clock offset is held within
+  ±36525 days. `iec101/server` and `iec102/server` apply no clock
+  synchronization themselves (the handler, or `ree.Session.OnSetTime`,
+  does).
+- `iec102/client`: an answer belongs to a request only when it also
+  repeats the request's information object, its addresses and time range
+  (`iec102.ASDU.Mirrors` is unchanged). A request after one that ended
+  before its answer was complete first polls the station until it has no
+  more data and drops the rest of that answer; ASDUs of other common
+  addresses still go to the Handler.
+- Serial stations (`link.Primary`, `link.Secondary`, `link.Balanced`, the
+  clients and servers of `iec101`, `iec102` and `iec103`): Close is safe
+  to call more than once and from several goroutines. The first call
+  closes the transport, once, also when the writer closed it after a
+  write error, and returns its error; later calls return nil.
+
+### Changed
+
+- `iec104/client`: each reconnect, request retry and `Group` redial wait
+  is chosen at random between half the delay and the delay (equal
+  jitter); the logged `retry_in` is that wait.
+
+### Documentation
+
+- Every handler and OnState of the serial stations says which goroutine
+  calls it, what it may call, and that it must not call Close (Close
+  waits for that goroutine; call it in a new goroutine, which returns
+  once the handler has returned). The iec101 and iec103 client Handlers
+  no longer say they may issue requests: a request from them stalls
+  behind their queue (LIMITATIONS.md).
+- Ownership: the slices that cross the `link` API (`SendNoReply`,
+  `SendConfirm`, `Balanced.Send`, what `Class1`, `Class2` and `UserData`
+  hand over, the `OnDiscard` buffer), the ASDUs the iec102 and iec103
+  handlers receive, and the `*asdu.ASDU` that the iec104 client shares
+  between its Handler and the request that collects it (read-only).
+- Close needs a transport whose Close unblocks Read (`link`, `iec101`).
+  `iec104/server.Server.Close` does not wait for the goroutines of the
+  event queues.
+- No transaction identifier: a late confirmation of a request that ended
+  completes the next identical request (LIMITATIONS.md,
+  docs/iec104/LIMITATIONS.md, the `telecontrol` package doc).
+- TESTING.md lists the long-lived types against the contract test matrix
+  (L1 to L16). SECURITY.md, ERRORS.md, ARCHITECTURE.md, OBSERVABILITY.md,
+  docs/iec104/API.md, docs/iec102 and docs/iec103 follow the changes
+  above.
+
+### Tests
+
+- `sec`: `TestReassemblyLengthLimit` (the bound, one octet below, at and
+  above it), `TestReassemblyAllocationBudget` (20,000 segments without
+  FIN within 8 times the bound); `FuzzDecode` checks the bound on every
+  input.
+- `iec104/server`: `TestUnauthenticatedMessageLeavesTheAssociation`,
+  `TestAuthenticatedSessionTakesTheAssociationOver`,
+  `TestPendingAssociationIsShared`,
+  `TestUnauthenticatedAssociationsAreNotKept`,
+  `TestServeRetriesAcceptErrors`, `TestServeEndsWhenTheListenerIsClosed`,
+  `TestTLSHandshakesCountAgainstTheSessionLimit`; `iec104/e2e`:
+  `TestHostileSectionAnnouncementBudget`.
+- `iec104/client`: `TestReconnectPausesAreJittered`,
+  `TestRetryPausesAreJittered`, `TestGroupRedialPausesAreJittered`,
+  `TestDialerWithoutConnection`, `TestCloseWaitsForTheStartHandler`,
+  `TestCloseFromTheStartHandler`.
+- `ft12`: the rejected-header case of `TestDecoderGap`,
+  `TestDecoderResetForgetsARejectedFrame`,
+  `TestDecoderGapKeepsAFrameWithoutPause`; `iec101/e2e`: the
+  rejected-header case of the half-open line in `TestHostileServer`.
+- `iec101/e2e`: `TestBalancedRequestDeadlineWhileTheLinkRepeats`,
+  `TestBalancedSendAfterItsDeadline`.
+- `iec103`: `TestDisturbanceWithinAnnounced` (e2e),
+  `TestAnswersNeedTheirRequestBody`, `TestTimeSyncValidity`,
+  `TestTimeSyncRefusedKeepsTheClock`, `TestTimeSyncOffsetClamped`
+  (server).
+- `iec102`: `TestUnfinishedAnswerNotTaken` (e2e),
+  `TestMirrorOfAnotherRange` (client).
+- Contract rows L1, L2 and L10 for the serial stations:
+  `link.TestL01CloseTwice`, `link.TestL01CloseAfterAWriteError`,
+  `link.TestL02ConcurrentClose`, `link.TestL10CallbackClosesAsynchronously`,
+  the same three in `iec101/e2e`, and `TestCloseTwice`,
+  `TestConcurrentClose`, `TestCloseFromHandler` in the iec102 and iec103
+  clients and servers.
+- `internal/testutil/leakcheck` compares goroutine stacks instead of counting
+  goroutines; `leakcheck.Main` runs after the tests of `link`, `telecontrol`,
+  the iec101, iec102, iec103 and iec104 clients and servers and
+  `iec104/internal/link`, and the e2e suites use `leakcheck.Check`. The
+  `iec104/internal/capture` replay peer queues frames without a bound,
+  so its reader ends with the connection.
+- Waits that slept are now events, hooks or `testing/synctest` in
+  `link/close_test.go`, `iec101/client/waitup_test.go`,
+  `iec101/e2e/hostile_test.go`, `iec101/e2e/deadline_test.go`,
+  `ft12/gap_test.go`, `iec102/client/client_test.go`,
+  `iec103/e2e/silent_test.go`, `iec104/server/ordering_test.go`,
+  `iec104/server/reconnect_test.go`, `iec104/internal/link/link_test.go`
+  and `iec104/internal/link/invariants_test.go`.
+
+---
+
 ## v0.5.2
 
 **Date:** 2026-11-12
