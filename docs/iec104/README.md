@@ -39,7 +39,7 @@ The library provides:
 - **Tested against other implementations**: the Interop workflow runs the
   library, as client and as server, against MZ Automation lib60870-C,
   OpenMUC j60870, wendy512/iec104, cB-Sigma/iec60870 and pascaldekloe/part5
-  on every push and pull request that changes more than Markdown
+  on every pull request that changes more than Markdown
 
 **Docs:** [API.md](API.md) (public API) · [ARCHITECTURE.md](ARCHITECTURE.md) (packages, goroutines, protocol machine) · [INTEROPERABILITY.md](INTEROPERABILITY.md) (what is implemented, clause by clause) · [FEATURE-STATUS.md](FEATURE-STATUS.md) (features and their evidence) · [LIMITATIONS.md](LIMITATIONS.md) · [ERRORS.md](../../ERRORS.md) (error semantics) · [OBSERVABILITY.md](../../OBSERVABILITY.md) (logging and metrics) · [TESTING.md](../../TESTING.md) (test tiers) · [SECURITY.md](../../SECURITY.md) · [RELEASE.md](../../RELEASE.md) (changelog)
 
@@ -500,7 +500,7 @@ iec104-interop under new names; lib60870-C v2.4.1, j60870 1.8.0,
 wendy512/iec104 v1.0.4 on go-iecp5 v1.2.6, cB-Sigma/iec60870 v0.3.0,
 pascaldekloe/part5 v0.3.0). The five images are pinned by digest in
 `iec104/interop/harness.go`, the Makefile and the Interop workflow, which
-runs on every push and pull request that changes more than Markdown. To test against another build, set
+runs on every pull request that changes more than Markdown. To test against another build, set
 `IEC104_INTEROP_LIB60870_IMAGE`, `IEC104_INTEROP_OPENMUC_IMAGE`,
 `IEC104_INTEROP_WENDY512_IMAGE`, `IEC104_INTEROP_CBSIGMA_IMAGE` or
 `IEC104_INTEROP_PART5_IMAGE`; to run one stack only,

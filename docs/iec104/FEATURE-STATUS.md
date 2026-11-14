@@ -114,7 +114,7 @@ Recordings of other implementations, replayed against the client and the server 
 
 ## 4. Interop results
 
-Peer versions, digests and per-direction results are in [INTEROPERABILITY.md](INTEROPERABILITY.md#verification-status). The Interop workflow runs on every push and pull request that changes more than Markdown.
+Peer versions, digests and per-direction results are in [INTEROPERABILITY.md](INTEROPERABILITY.md#verification-status). The Interop workflow runs on every pull request that changes more than Markdown.
 
 ## 5. Not verified
 

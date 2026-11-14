@@ -478,7 +478,7 @@ Where a reference station can do the same, the cB-Sigma client's complete
 result must not tell our station from it.
 
 Besides its own tests the library is run against five independent
-implementations, as client and as server, on every push and pull request that changes more
+implementations, as client and as server, on every pull request that changes more
 than Markdown (Interop workflow). The reference
 builds are the IEC 104 images of
 [otfabric/iec60870-5-interop v0.5.0](https://github.com/otfabric/iec60870-5-interop/releases/tag/v0.5.0)
