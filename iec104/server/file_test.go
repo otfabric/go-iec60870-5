@@ -368,6 +368,7 @@ type sink struct {
 	mu     sync.Mutex
 	files  map[asdu.IOA][]byte
 	shape  map[asdu.IOA][]int // section lengths
+	spare  int                // capacity past the length of the sections stored
 	refuse asdu.IOA           // an address the station does not take
 	broken asdu.IOA           // an address it cannot store
 }
@@ -387,6 +388,7 @@ func (k *sink) StoreFile(_ *server.Session, _ asdu.CommonAddr, ioa asdu.IOA, _ u
 	for _, s := range f.Sections {
 		all = append(all, s...)
 		shape = append(shape, len(s))
+		k.spare += cap(s) - len(s)
 	}
 	k.files[ioa], k.shape[ioa] = all, shape
 	return nil
@@ -469,6 +471,13 @@ func TestFileUpload(t *testing.T) {
 	if err := c.PutFile(ctx, 1, 9, 1, make([][]byte, 255)...); !errors.Is(err, asdu.ErrInvalidValue) {
 		t.Errorf("255 sections: %v", err)
 	}
+
+	// The sections take the memory of their length and no more.
+	k.mu.Lock()
+	if k.spare != 0 {
+		t.Errorf("stored sections hold %d octets of spare capacity", k.spare)
+	}
+	k.mu.Unlock()
 
 	mu.Lock()
 	defer mu.Unlock()

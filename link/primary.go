@@ -67,7 +67,9 @@ func NewPrimary(rw io.ReadWriter, cfg Config) (*Primary, error) {
 // unblocks Read, so a transport whose Close does not leaves Close waiting.
 // For a transport that is not an io.Closer Close does not wait for the
 // reader: it ends when its pending Read returns, and delivers nothing
-// more. Close is safe to call more than once and from several goroutines:
+// more. Nor does it then wait for a writer blocked in Write (a peer that
+// stops reading): the writer ends when that Write returns, and writes
+// nothing more. Close is safe to call more than once and from several goroutines:
 // the first call closes the transport and returns its error; later calls
 // return nil.
 //
@@ -201,7 +203,7 @@ func (pr *Primary) SendNoReply(addr uint16, data []byte) error {
 	f := ft12.Frame{Kind: ft12.KindVariable, Control: byte(PrimaryControl(FuncUserDataNoRepl, false, false, false)), Addr: addr, Data: data}
 	pr.x.mu.Lock()
 	defer pr.x.mu.Unlock()
-	return pr.p.write(f)
+	return pr.p.write(context.Background(), f)
 }
 
 // RequestData polls a secondary for user data of class c (function 10 or

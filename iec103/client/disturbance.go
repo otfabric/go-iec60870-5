@@ -49,7 +49,9 @@ func (t *transfer) order(ack bool, too iec103.TOO, acc uint8) error {
 }
 
 // next returns the next ASDU of the transfer of one of the given types; an
-// ASDU 31 is always returned. An ASDU 31 that ends the whole disturbance
+// ASDU 31 of the selected fault is always returned. An ASDU 31 of another
+// fault (FAN) is logged and skipped: it neither ends nor aborts this
+// transfer (clause 7.4.7 transfers one fault at a time). An ASDU 31 that ends the whole disturbance
 // data aborted by the protection equipment (TOO 34) is acknowledged
 // negatively (ASDU 25, TOO 65: clause 7.4.7, figure 10 sheet 4, every end
 // of the disturbance data is acknowledged) and returns
@@ -61,6 +63,10 @@ func (t *transfer) next(types ...iec103.TypeID) (*iec103.ASDU, error) {
 			return nil, err
 		}
 		if e, ok := a.Body.(iec103.EndOfTransmission); ok {
+			if e.FAN != t.fan {
+				t.c.log.Debug("end of transmission of another fault in disturbance data transfer", "asdu", a.String())
+				continue
+			}
 			if e.TOO == iec103.TOOEndDataAbortProt {
 				if err := t.order(true, iec103.TOODataFailed, iec103.ACCGlobal); err != nil {
 					return nil, err
@@ -104,9 +110,14 @@ func (t *transfer) next(types ...iec103.TypeID) (*iec103.ASDU, error) {
 //
 // The record holds at most what the ASDU 26 announced: NOC channels of NOE
 // values each (clauses 7.2.6.10, 7.2.6.11). A value beyond NOE in a
-// channel, or a channel beyond NOC, ends the transfer at once with the
-// record so far and an error wrapping [iec103.ErrInvalid]; as on the expiry
-// of ctx, no order is sent for it.
+// channel, a channel beyond NOC, or a channel offered (ASDU 27) for another
+// fault (FAN) ends the transfer at once with the record so far and an error
+// wrapping [iec103.ErrInvalid]; as on the expiry of ctx, no order is sent
+// for it. Disturbance values (ASDU 30) of another fault are not added to
+// the record, and the channel is acknowledged negatively. Disturbance
+// values that add nothing to the record (no values, or another fault)
+// count against Config.MaxResult per channel: beyond it the transfer ends
+// with an error wrapping [iec103.ErrResultLimit].
 func (c *Client) Disturbance(ctx context.Context, fun iec103.FunctionType, fan uint16) (*iec103.Disturbance, error) {
 	if err := lock(&c.distMu); err != nil {
 		return nil, err
@@ -227,6 +238,9 @@ func (t *transfer) channels(rec *iec103.Disturbance, ready iec103.DisturbanceRea
 			break
 		}
 		cr := a.Body.(iec103.ChannelReady)
+		if cr.FAN != t.fan {
+			return fmt.Errorf("%w: channel ACC %d of FAN %d", iec103.ErrInvalid, cr.ACC, cr.FAN)
+		}
 		if len(rec.Channels) >= int(ready.NOC) {
 			return fmt.Errorf("%w: channel ACC %d beyond the %d channels announced (NOC, clause 7.2.6.10)", iec103.ErrInvalid, cr.ACC, ready.NOC)
 		}
@@ -234,7 +248,7 @@ func (t *transfer) channels(rec *iec103.Disturbance, ready iec103.DisturbanceRea
 		if err := t.order(false, iec103.TOORequestChannel, cr.ACC); err != nil {
 			return err
 		}
-		ok := true
+		ok, idle := true, 0
 		for {
 			a, err := t.next(iec103.TypeDisturbanceValues)
 			if err != nil {
@@ -247,6 +261,19 @@ func (t *transfer) channels(rec *iec103.Disturbance, ready iec103.DisturbanceRea
 				break
 			}
 			v := a.Body.(iec103.DisturbanceValues)
+			if v.FAN != t.fan || len(v.Values) == 0 {
+				// Nothing for this record: values of another fault are
+				// not this fault's channel (clause 7.4.7).
+				if v.FAN != t.fan {
+					ok = false
+				}
+				if err := t.c.limit(idle, "channel request"); err != nil {
+					rec.Channels = append(rec.Channels, ch)
+					return err
+				}
+				idle++
+				continue
+			}
 			if len(ch.Values)+len(v.Values) > int(ready.NOE) {
 				rec.Channels = append(rec.Channels, ch)
 				return fmt.Errorf("%w: channel ACC %d: %d values beyond the %d announced (NOE, clause 7.2.6.11)",

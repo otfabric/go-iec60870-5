@@ -33,7 +33,17 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: stable
-      - run: make fuzz FUZZTIME=${{ inputs.fuzztime || '5m' }}
+      # The dispatch input reaches the shell through the environment and
+      # must be a Go -fuzztime value: a duration (5m, 1h30m) or a count (100x).
+      - name: Fuzz
+        env:
+          FUZZTIME: ${{ inputs.fuzztime || '5m' }}
+        run: |
+          if ! [[ "$FUZZTIME" =~ ^([0-9]+[hms])+$|^[0-9]+x$ ]]; then
+            echo "::error::fuzztime must be a duration such as 5m or a count such as 100x"
+            exit 1
+          fi
+          make fuzz FUZZTIME="$FUZZTIME"
       - name: Upload the failing inputs
         if: failure()
         uses: actions/upload-artifact@v4
@@ -58,4 +68,15 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: make chaos CHAOS_PKGS=./${{ matrix.suite }}/e2e/ CHAOS_SEEDS=${{ inputs.chaos_seeds || '20' }}
+      # The dispatch input reaches the shell through the environment and
+      # must be a number of seeds.
+      - name: Chaos
+        env:
+          CHAOS_SEEDS: ${{ inputs.chaos_seeds || '20' }}
+          SUITE: ${{ matrix.suite }}
+        run: |
+          if ! [[ "$CHAOS_SEEDS" =~ ^[0-9]+$ ]]; then
+            echo "::error::chaos_seeds must be a number"
+            exit 1
+          fi
+          make chaos CHAOS_PKGS="./$SUITE/e2e/" CHAOS_SEEDS="$CHAOS_SEEDS"

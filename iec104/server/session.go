@@ -13,7 +13,9 @@ import (
 
 	"github.com/otfabric/go-iec60870-5/asdu"
 	iec104 "github.com/otfabric/go-iec60870-5/iec104"
+	"github.com/otfabric/go-iec60870-5/iec104/apci"
 	"github.com/otfabric/go-iec60870-5/iec104/internal/link"
+	"github.com/otfabric/go-iec60870-5/internal/callback"
 	"github.com/otfabric/go-iec60870-5/internal/logx"
 	"github.com/otfabric/go-iec60870-5/sec"
 )
@@ -32,10 +34,13 @@ type Session struct {
 	// has returned and set link.
 	lk atomic.Pointer[link.Link]
 	// sec is the security of the session, nil without security.
-	sec    *route
-	ready  chan struct{}
-	ctx    context.Context
-	cancel context.CancelFunc
+	sec *route
+	// metrics are the metrics of the server as the session calls them,
+	// nil without metrics.
+	metrics iec104.Metrics
+	ready   chan struct{}
+	ctx     context.Context
+	cancel  context.CancelFunc
 }
 
 // newSession starts the protocol machine on conn. The callbacks wait for
@@ -53,11 +58,14 @@ func newSession(srv *Server, conn net.Conn, grp *group) *Session {
 	}
 	o := &srv.opts
 	s.log = srv.log.With("session", s.id, "remote", conn.RemoteAddr().String(), "group", grp.name)
+	if o.metrics != nil {
+		s.metrics = sessionMetrics{s: s, m: o.metrics}
+	}
 	cfg := link.Config{
 		Role:    link.Controlled,
 		Params:  o.params,
 		Log:     s.log,
-		Metrics: o.metrics,
+		Metrics: s.metrics,
 		// The group follows the link itself, in step with the frames.
 		OnTransfer: func(l *link.Link, started bool, epoch uint64) {
 			s.lk.Store(l)
@@ -72,7 +80,7 @@ func newSession(srv *Server, conn net.Conn, grp *group) *Session {
 		// on the dispatcher's goroutine.
 		OnOpen: func() {
 			<-s.ready
-			if m := s.srv.opts.metrics; m != nil {
+			if m := s.metrics; m != nil {
 				m.OnConnect(s.conn.RemoteAddr())
 			}
 			s.log.Info("session connected")
@@ -93,11 +101,62 @@ func newSession(srv *Server, conn net.Conn, grp *group) *Session {
 		},
 	}
 	if grp.assoc != nil {
-		s.sec = &route{set: grp.assoc, log: s.log}
+		s.sec = &route{set: grp.assoc, log: s.log, abort: s.abort}
 		cfg.Security, cfg.NotReady = s.sec, sec.ErrNotReady
 	}
 	s.link = link.New(conn, cfg)
+	s.lk.CompareAndSwap(nil, s.link)
 	return s
+}
+
+// call runs the application callback name. One that does not return
+// normally is logged with its stack and ends the session, and the server
+// goes on serving the others. It reports whether f returned normally.
+func (s *Session) call(name string, f func()) bool {
+	if err := callback.Call(s.log, name, f); err != nil {
+		s.abort()
+		return false
+	}
+	return true
+}
+
+// abort ends the session from any of its goroutines without waiting:
+// nothing more that is queued for the session is delivered to the
+// callbacks, only the end of the session.
+func (s *Session) abort() {
+	if l := s.lk.Load(); l != nil {
+		l.Shutdown()
+		return
+	}
+	// The link is not made yet: losing its connection ends it.
+	_ = s.conn.Close()
+}
+
+// sessionMetrics calls the metrics of the server for a session, through
+// Session.call.
+type sessionMetrics struct {
+	s *Session
+	m iec104.Metrics
+}
+
+func (sm sessionMetrics) OnConnect(remote net.Addr) {
+	sm.s.call("Metrics.OnConnect", func() { sm.m.OnConnect(remote) })
+}
+
+func (sm sessionMetrics) OnDisconnect(remote net.Addr, err error) {
+	sm.s.call("Metrics.OnDisconnect", func() { sm.m.OnDisconnect(remote, err) })
+}
+
+func (sm sessionMetrics) OnFrameSent(remote net.Addr, f apci.Frame, size int) {
+	sm.s.call("Metrics.OnFrameSent", func() { sm.m.OnFrameSent(remote, f, size) })
+}
+
+func (sm sessionMetrics) OnFrameReceived(remote net.Addr, f apci.Frame, size int) {
+	sm.s.call("Metrics.OnFrameReceived", func() { sm.m.OnFrameReceived(remote, f, size) })
+}
+
+func (sm sessionMetrics) OnDecodeError(remote net.Addr, err error) {
+	sm.s.call("Metrics.OnDecodeError", func() { sm.m.OnDecodeError(remote, err) })
 }
 
 // start releases the callbacks of the session, the first of which
@@ -115,7 +174,7 @@ func (s *Session) transferring() bool {
 
 func (s *Session) notify(state iec104.State, err error) {
 	if f := s.srv.opts.onState; f != nil {
-		f(s, state, err)
+		s.call("state handler", func() { f(s, state, err) })
 	}
 }
 
@@ -126,7 +185,7 @@ func (s *Session) onClose(err error) {
 	s.cancel()
 	s.srv.remove(s)
 	s.group.ended(s)
-	if m := s.srv.opts.metrics; m != nil {
+	if m := s.metrics; m != nil {
 		m.OnDisconnect(s.conn.RemoteAddr(), err)
 	}
 	if err != nil {
@@ -141,7 +200,7 @@ func (s *Session) onASDU(raw []byte) {
 	o := &s.srv.opts
 	a, err := asdu.Decode(raw, o.asduParams)
 	if err != nil {
-		if m := o.metrics; m != nil {
+		if m := s.metrics; m != nil {
 			m.OnDecodeError(s.conn.RemoteAddr(), err)
 		}
 		s.log.Warn("dropping undecodable ASDU", "error", err)
@@ -161,12 +220,16 @@ func (s *Session) onASDU(raw []byte) {
 	}
 	if hm, ok := o.metrics.(iec104.HandlerMetrics); ok {
 		begin := time.Now()
-		defer func() { hm.OnHandled(s.conn.RemoteAddr(), a.Type, a.Cause, time.Since(begin)) }()
+		defer func() {
+			s.call("HandlerMetrics.OnHandled", func() { hm.OnHandled(s.conn.RemoteAddr(), a.Type, a.Cause, time.Since(begin)) })
+		}()
 	}
 	defer func() {
 		if r := recover(); r != nil {
 			s.log.Error("handler panic", "asdu", a.String(), "panic", fmt.Sprint(r), "stack", string(debug.Stack()))
-			go func() { _ = s.Close() }()
+			// Ends the session at once: ASDUs already received are not
+			// delivered to the Handler any more.
+			s.abort()
 		}
 	}()
 	s.srv.handler.HandleASDU(s, a)

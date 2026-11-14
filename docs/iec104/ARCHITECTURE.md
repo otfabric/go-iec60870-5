@@ -124,7 +124,14 @@ allows: the receiver accepts Secure Data only with increasing sequence
 numbers, and the segments of one message must not be interleaved. A send
 request that finds no session keys (`ErrNotReady`) is held, and the send
 channel is not read, until the endpoint announces a change; a held request
-whose caller gives up is cancelled without being sent. The endpoint's
+whose caller gives up is cancelled without being sent. The transmit
+queue is bounded in octets of ASDU, since only the peer's
+acknowledgements drain it: above 128 KiB (two of the longest security
+messages, so a normal exchange never reaches it) the loop stops
+acknowledging received I frames, as at the receive limit, and a
+conformant peer stops after `k` more; above 1 MiB the peer went on past
+its window and the loop ends the connection with `iec104.ErrProtocol`.
+The endpoint's
 deadline joins the loop's one timer.
 
 The connections that one controlling station keeps to a station (a client

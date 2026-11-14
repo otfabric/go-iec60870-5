@@ -418,6 +418,13 @@ func (t Trust) verify(der []byte, curve Curve, now time.Time, ignoreValidity boo
 	if !ignoreValidity && now.Before(c.NotBefore) {
 		return fail(false, "%q is outside its validity period", c.Subject)
 	}
+	// A key usage extension, where present, must allow the key for the key
+	// agreement of the Station Association: keyAgreement, or digitalSignature
+	// as on certificates whose key also signs. Without the extension any
+	// use is allowed (RFC 5280 4.2.1.3).
+	if c.KeyUsage != 0 && c.KeyUsage&(x509.KeyUsageKeyAgreement|x509.KeyUsageDigitalSignature) == 0 {
+		return fail(false, "%q: key usage allows no key agreement", c.Subject)
+	}
 	// The authorities first: a station certificate whose subject equals its
 	// issuer's (both empty, say) is not self-signed for that.
 	var sigErr error
@@ -430,6 +437,12 @@ func (t Trust) verify(der []byte, curve Curve, now time.Time, ignoreValidity boo
 		// x509.Certificate.CheckSignatureFrom would refuse.
 		if err := ca.CheckSignature(c.SignatureAlgorithm, c.RawTBSCertificate, c.Signature); err != nil {
 			sigErr = err
+			continue
+		}
+		// An authority outside its validity period issues nothing that is
+		// valid; a renewed one under the same name may follow.
+		if !ignoreValidity && (now.Before(ca.NotBefore) || now.After(ca.NotAfter)) {
+			sigErr = fmt.Errorf("authority %q is outside its validity period", ca.Subject)
 			continue
 		}
 		if len(t.Subjects) > 0 {

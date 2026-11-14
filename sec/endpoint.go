@@ -110,12 +110,15 @@ type Endpoint struct {
 	err       error
 
 	// the association
-	st       State
-	assoc    bool // valid update keys
-	keys     updateKeys
-	mal      MACAlgorithm
-	remote   *x509.Certificate
-	remoteDH *ecdh.PublicKey
+	st     State
+	assoc  bool // valid update keys
+	keys   updateKeys
+	mal    MACAlgorithm
+	remote *x509.Certificate
+	// The remote station's certificate and key of the Station Association
+	// that runs: remote only once the procedure authenticated them.
+	peerCert *x509.Certificate
+	peerDH   *ecdh.PublicKey
 
 	// controlling station
 	km          kmState
@@ -138,6 +141,7 @@ type Endpoint struct {
 	// controlled station
 	waitUH    bool
 	saTimer   time.Time
+	arRecv    []byte // the Association Request answered with apSent
 	apSent    []byte
 	apRandom  []byte
 	uhValid   []byte
@@ -211,7 +215,6 @@ func (e *Endpoint) load(st State) {
 	if len(st.RemoteCertificate) > 0 {
 		if c, err := x509.ParseCertificate(st.RemoteCertificate); err == nil {
 			e.remote = c
-			_, e.remoteDH, _ = publicKey(c)
 		}
 	}
 	e.sess = sessionKeys{control: st.ControlKey, monitor: st.MonitorKey}
@@ -310,7 +313,15 @@ func (e *Endpoint) Ready() bool {
 	return e.ready()
 }
 
-func (e *Endpoint) ready() bool { return e.up && e.session && !e.suspended && !e.stale }
+// ready reports whether the session keys may be used now. A controlled
+// station also stops using them once they reached their lifetime or
+// [Settings.KeyUses].
+func (e *Endpoint) ready() bool {
+	if !e.up || !e.session || e.suspended || e.stale {
+		return false
+	}
+	return e.cfg.Role != Controlled || (!e.keysExpired(e.clock) && e.keyUses < e.cfg.Settings.KeyUses)
+}
 
 // Err returns why the last key management procedure failed, or nil.
 func (e *Endpoint) Err() error {
@@ -354,16 +365,11 @@ func (e *Endpoint) Refused(t asdu.TypeID) {
 // reportsDue reports statistic reports waiting that a session can protect
 // now.
 func (e *Endpoint) reportsDue() bool {
-	return slices.Contains(e.due[:], true) && e.canProtect(e.clock)
+	return slices.Contains(e.due[:], true) && e.canProtect()
 }
 
-// canProtect reports whether Secure Data can be sent now.
-func (e *Endpoint) canProtect(now time.Time) bool {
-	if !e.ready() || e.txSeq == 0xffffffff {
-		return false
-	}
-	return e.cfg.Role != Controlled || (!e.keysExpired(now) && e.keyUses < e.cfg.Settings.KeyUses)
-}
+// canProtect reports whether Secure Data can be sent now, at e.clock.
+func (e *Endpoint) canProtect() bool { return e.ready() && e.txSeq != 0xffffffff }
 
 // flushReports appends the statistic reports that are due to out
 // (IEC TS 60870-5-7:2025 5.4.2.3: M_IT_TB_1, cause spontaneous, at the
@@ -392,7 +398,7 @@ func (e *Endpoint) flushReports(now time.Time, out [][]byte) [][]byte {
 			e.due[s] = false // cannot be reported with these parameters
 			continue
 		}
-		frames, err := e.protectLocked(now, raw)
+		frames, err := e.protectLocked(raw)
 		if err != nil {
 			return out // not ready: later
 		}
@@ -574,6 +580,9 @@ func (e *Endpoint) Deadline() time.Time {
 		if e.session {
 			consider(e.keySince.Add(e.cfg.Settings.KeyLifetime))
 		}
+		if e.usesReached() {
+			consider(e.clock) // Tick invalidates the keys and asks for new ones
+		}
 		if e.reportsDue() {
 			consider(e.clock)
 		}
@@ -602,6 +611,33 @@ func (e *Endpoint) keysWornOut() bool {
 
 func (e *Endpoint) keysExpired(now time.Time) bool {
 	return e.session && !now.Before(e.keySince.Add(e.cfg.Settings.KeyLifetime))
+}
+
+// usesReached reports a controlled station's session whose keys reached
+// [Settings.KeyUses].
+func (e *Endpoint) usesReached() bool {
+	return e.cfg.Role == Controlled && e.session && e.skc != skcNoAssociation && e.keyUses >= e.cfg.Settings.KeyUses
+}
+
+// invalidateWornOut ends a controlled station's session whose keys reached
+// their lifetime or [Settings.KeyUses] (IEC TS 60870-5-7:2025 Table 9): it
+// stops accepting them and counts the invalidation. It reports whether it
+// did.
+func (e *Endpoint) invalidateWornOut(now time.Time) bool {
+	if e.cfg.Role != Controlled || !e.session || e.skc == skcNoAssociation {
+		return false
+	}
+	switch {
+	case e.keysExpired(now):
+		e.inc(StatKeyInvalidationsTime, nil)
+	case e.keyUses >= e.cfg.Settings.KeyUses:
+		e.inc(StatKeyInvalidationsCount, nil)
+	default:
+		return false
+	}
+	e.session = false
+	e.notify()
+	return true
 }
 
 // --- sending ---
@@ -782,7 +818,9 @@ func (e *Endpoint) receiveControlling(now time.Time, out *[][]byte, whole []byte
 		}
 		uh := UpdateKeyChangeRequest{AIM: e.cfg.AssociationID, AIS: v.AIS, KeyWrap: KeyWrapAES256, MAC: mal.Code, Random: random}
 		uh.Tag = mal.sum(keys.auth, v.Random, e.macInput(uh))
-		e.pending, e.pendingAIS, e.remote, e.remoteDH = keys, v.AIS, cert, pub
+		// The certificate becomes the association's once the Update Key
+		// Change Response authenticates the controlled station.
+		e.pending, e.pendingAIS, e.peerCert = keys, v.AIS, cert
 		e.lastRequest = e.emit(out, uh)
 		e.km, e.replyAt, e.replies = kmUpdateKeyChange, now.Add(e.cfg.Settings.ReplyTimeout), 0
 		return nil, nil
@@ -798,6 +836,7 @@ func (e *Endpoint) receiveControlling(now time.Time, out *[][]byte, whole []byte
 		if v.AIM != e.cfg.AssociationID || v.AIS != e.pendingAIS {
 			return e.unexpected("update key change response with association IDs %d/%d", v.AIM, v.AIS)
 		}
+		e.remote, e.peerCert = e.peerCert, nil
 		e.st = State{AIM: v.AIM, AIS: v.AIS, MAC: mal.Code, KeyWrap: KeyWrapAES256,
 			EncryptionKey: e.pending.enc, AuthenticationKey: e.pending.auth, RemoteCertificate: e.remote.Raw}
 		e.keys, e.mal, e.assoc, e.session = e.pending, mal, true, false
@@ -910,18 +949,7 @@ func (e *Endpoint) tickControlled(now time.Time) [][]byte {
 			e.khValid, e.kpSent = nil, nil
 		}
 	}
-	if e.session && e.skc != skcNoAssociation {
-		switch {
-		case e.keysExpired(now):
-			e.session = false
-			e.inc(StatKeyInvalidationsTime, nil)
-			e.notify()
-		case e.keyUses >= e.cfg.Settings.KeyUses:
-			e.session = false
-			e.inc(StatKeyInvalidationsCount, nil)
-			e.notify()
-		}
-	}
+	e.invalidateWornOut(now)
 	if e.siPending && !e.siTimer.IsZero() && !now.Before(e.siTimer) {
 		e.siPending, e.siTimer = false, time.Time{}
 		e.inc(StatRequestTimeouts, nil)
@@ -957,16 +985,26 @@ func (e *Endpoint) receiveControlled(now time.Time, out *[][]byte, whole []byte,
 		if e.priv == nil {
 			return e.discard(StatUnexpectedMessages, fmt.Errorf("%w: no station identity for the Station Association", ErrConfig))
 		}
+		if e.waitUH && e.apSent != nil {
+			if bytes.Equal(whole, e.arRecv) {
+				// The request again: the same response, with the same random data.
+				e.send(out, e.apSent)
+				return nil, nil
+			}
+			if e.parent != nil && now.Before(e.saTimer) {
+				// A connection not bound to the association runs one
+				// Station Association at a time: another request is
+				// bounded to one per request timeout.
+				return e.unexpected("association request while waiting for the update key change request")
+			}
+		}
 		cert, pub, notAuth, err := e.cfg.Trust.verify(v.Certificate, e.curve, now, e.cfg.IgnoreValidity)
 		if err != nil {
 			return e.discard(certStat(notAuth, err), err)
 		}
-		e.remote, e.remoteDH = cert, pub
-		if e.waitUH && e.apSent != nil {
-			// The request again: the same response, with the same random data.
-			e.send(out, e.apSent)
-			return nil, nil
-		}
+		// The certificate becomes the association's once the Update Key
+		// Change Request authenticates the controlling station.
+		e.peerCert, e.peerDH, e.arRecv = cert, pub, whole
 		e.apRandom = e.random(32)
 		ap := AssociationResponse{AIM: v.AIM, AIS: e.cfg.AssociationID, Certificate: e.cfg.Identity.Certificate.Raw, Random: e.apRandom}
 		e.apSent = e.emit(out, ap)
@@ -988,7 +1026,7 @@ func (e *Endpoint) receiveControlled(now time.Time, out *[][]byte, whole []byte,
 		if err := checkRandom(v.Random, "update key change request"); err != nil {
 			return e.discard(StatUnexpectedMessages, err)
 		}
-		keys, err := deriveUpdateKeys(mal, e.priv, e.remoteDH, v.Random, e.apRandom)
+		keys, err := deriveUpdateKeys(mal, e.priv, e.peerDH, v.Random, e.apRandom)
 		if err != nil {
 			return e.discard(StatKeyAuthenticationErrors, err)
 		}
@@ -1003,9 +1041,17 @@ func (e *Endpoint) receiveControlled(now time.Time, out *[][]byte, whole []byte,
 		}
 		up := UpdateKeyChangeResponse{AIM: v.AIM, AIS: e.cfg.AssociationID}
 		up.Tag = mal.sum(keys.auth, whole, e.macInput(up))
+		e.remote, e.peerCert, e.peerDH, e.arRecv = e.peerCert, nil, nil, nil
+		// New update keys end the session: the session keys of the earlier
+		// association are not used again. The controlling station changes
+		// them next (IEC TS 60870-5-7:2025 Table 15: the Session Key Change
+		// follows the Station Association at once).
+		if e.session {
+			e.notify()
+		}
+		e.session, e.stale, e.sess = false, false, sessionKeys{}
 		e.st = State{AIM: v.AIM, AIS: e.cfg.AssociationID, MAC: mal.Code, KeyWrap: v.KeyWrap,
-			EncryptionKey: keys.enc, AuthenticationKey: keys.auth, RemoteCertificate: e.remote.Raw,
-			ControlKey: e.sess.control, MonitorKey: e.sess.monitor, DataProtection: e.dp.Code}
+			EncryptionKey: keys.enc, AuthenticationKey: keys.auth, RemoteCertificate: e.remote.Raw}
 		e.keys, e.mal, e.assoc = keys, mal, true
 		e.save()
 		e.upSent = e.emit(out, up)
@@ -1179,6 +1225,9 @@ func (e *Endpoint) receiveData(h Header, whole []byte, v SecureData) ([]byte, er
 	if !e.session {
 		return e.unexpected("secure data without session keys")
 	}
+	if e.invalidateWornOut(e.clock) {
+		return e.unexpected("secure data under session keys that reached their limits")
+	}
 	key := e.sess.control
 	if e.cfg.Role == Controlling {
 		key = e.sess.monitor
@@ -1220,7 +1269,7 @@ func (e *Endpoint) Protect(now time.Time, data []byte) ([][]byte, error) {
 		!granted(e.cfg.Roles, PermMonitorData) {
 		return nil, fmt.Errorf("%w: %s needs MONITOR DATA", ErrNotPermitted, asdu.TypeID(data[0]))
 	}
-	out, err := e.protectLocked(now, data)
+	out, err := e.protectLocked(data)
 	if err != nil {
 		return nil, err
 	}
@@ -1228,8 +1277,8 @@ func (e *Endpoint) Protect(now time.Time, data []byte) ([][]byte, error) {
 }
 
 // protectLocked wraps data in Secure Data; the caller holds e.mu.
-func (e *Endpoint) protectLocked(now time.Time, data []byte) ([][]byte, error) {
-	if !e.canProtect(now) {
+func (e *Endpoint) protectLocked(data []byte) ([][]byte, error) {
+	if !e.canProtect() {
 		return nil, ErrNotReady
 	}
 	h, _, err := parseHeader(data, e.cfg.Params)

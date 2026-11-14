@@ -27,15 +27,64 @@ type exchange struct {
 	// earlier period leaves a request that is still on its way alone.
 	epoch atomic.Uint64
 
+	// bound limits the ASDUs queued for the request.
+	bound queueBound
+
 	mu    sync.Mutex
 	items []*asdu.ASDU
 	err   error
 	sig   chan struct{}
 }
 
+// queueBound limits the ASDUs an exchange queues: an ASDU beyond n is not
+// queued, and the request ends with err once it has taken what is queued.
+// A zero n is no bound.
+type queueBound struct {
+	n   int
+	err error
+}
+
+const (
+	// queueMargin is what a collecting request queues beyond MaxResult:
+	// the confirmation, the termination and the mirrors of an earlier
+	// request that may arrive while the request is still being sent.
+	queueMargin = 8
+	// answerQueue bounds the queue of a request that ends at its first
+	// answer (a confirmation, a read): it only skips the termination or
+	// the positive mirror of an earlier request ahead of it.
+	answerQueue = 16
+)
+
+// collecting returns the bound of a request that collects up to the
+// client's MaxResult ASDUs; there is none when MaxResult is not positive.
+func (c *Client) collecting(req *asdu.ASDU) queueBound {
+	n := c.opts.maxResult
+	if n <= 0 {
+		return queueBound{}
+	}
+	return queueBound{n: n + queueMargin, err: c.resultLimit(req)}
+}
+
+// resultLimit is the error of a request whose answer exceeds MaxResult.
+func (c *Client) resultLimit(req *asdu.ASDU) error {
+	return fmt.Errorf("%w: more than %d ASDUs answer %s", telecontrol.ErrResultLimit, c.opts.maxResult, req.Type)
+}
+
+// answering returns the bound of a request that ends at its first answer.
+func answering(req *asdu.ASDU) queueBound {
+	return queueBound{n: answerQueue, err: fmt.Errorf("%w: more than %d mirrors queued for %s",
+		telecontrol.ErrResultLimit, answerQueue, req.Type)}
+}
+
 func (x *exchange) deliver(a *asdu.ASDU) {
 	x.mu.Lock()
-	x.items = append(x.items, a)
+	if x.bound.n > 0 && len(x.items) >= x.bound.n {
+		if x.err == nil {
+			x.err = x.bound.err
+		}
+	} else {
+		x.items = append(x.items, a)
+	}
 	x.mu.Unlock()
 	x.signal()
 }
@@ -112,8 +161,8 @@ func (c *Client) processData(req, a *asdu.ASDU) bool {
 
 // begin registers an exchange for req, sends req and returns the exchange.
 // also, when not nil, selects further ASDUs to collect besides the mirrors
-// of req. The caller must call end.
-func (c *Client) begin(ctx context.Context, req *asdu.ASDU, also func(a *asdu.ASDU) bool) (*exchange, error) {
+// of req; bound limits how many are queued. The caller must call end.
+func (c *Client) begin(ctx context.Context, req *asdu.ASDU, also func(a *asdu.ASDU) bool, bound queueBound) (*exchange, error) {
 	req.Originator = c.opts.originator
 	raw, err := req.Encode(c.opts.asduParams)
 	if err != nil {
@@ -124,7 +173,7 @@ func (c *Client) begin(ctx context.Context, req *asdu.ASDU, also func(a *asdu.AS
 	if c.inCallback() {
 		return nil, fmt.Errorf("%w: %s", iec104.ErrInHandler, req.Type)
 	}
-	x := &exchange{req: req, sig: make(chan struct{}, 1)}
+	x := &exchange{req: req, bound: bound, sig: make(chan struct{}, 1)}
 	x.epoch.Store(math.MaxUint64)
 	x.match = func(a *asdu.ASDU) bool {
 		return c.mirrored(req, a) || (also != nil && also(a))
@@ -260,7 +309,7 @@ func (c *Client) confirmed(ctx context.Context, req *asdu.ASDU, idempotent bool)
 }
 
 func (c *Client) confirmedOnce(ctx context.Context, req *asdu.ASDU) error {
-	x, err := c.begin(ctx, req, nil)
+	x, err := c.begin(ctx, req, nil, answering(req))
 	if err != nil {
 		return err
 	}
@@ -328,7 +377,7 @@ func (c *Client) collect(ctx context.Context, req *asdu.ASDU, cause asdu.Cause, 
 func (c *Client) collectOnce(ctx context.Context, req *asdu.ASDU, cause asdu.Cause) ([]*asdu.ASDU, error) {
 	x, err := c.begin(ctx, req, func(a *asdu.ASDU) bool {
 		return a.Cause == cause && c.processData(req, a)
-	})
+	}, c.collecting(req))
 	if err != nil {
 		return nil, err
 	}
@@ -342,6 +391,9 @@ func (c *Client) collectOnce(ctx context.Context, req *asdu.ASDU, cause asdu.Cau
 			return data, err
 		}
 		if a.Type != req.Type {
+			if limit := c.opts.maxResult; limit > 0 && len(data) >= limit {
+				return data, c.resultLimit(req)
+			}
 			data = append(data, a)
 			continue
 		}
@@ -372,6 +424,8 @@ func (c *Client) collectOnce(ctx context.Context, req *asdu.ASDU, cause asdu.Cau
 // shared, so neither side may modify them. A large station can take longer
 // than the default request timeout: pass a context with a suitable
 // deadline. On error the ASDUs collected so far are returned alongside it.
+// A station that sends more ASDUs than [WithMaxResult] allows ends the
+// request there with an error wrapping [telecontrol.ErrResultLimit].
 func (c *Client) Interrogate(ctx context.Context, ca asdu.CommonAddr, qoi asdu.QOI) ([]*asdu.ASDU, error) {
 	req := asdu.New(asdu.CauseActivation, ca, asdu.Interrogation{Qualifier: qoi})
 	return c.collect(ctx, req, qoi.Cause(), true)
@@ -426,7 +480,7 @@ func (c *Client) readOnce(ctx context.Context, req *asdu.ASDU, ioa asdu.IOA) (*a
 			}
 		}
 		return false
-	})
+	}, answering(req))
 	if err != nil {
 		return nil, err
 	}

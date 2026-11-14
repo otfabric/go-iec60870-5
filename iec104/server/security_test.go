@@ -5,6 +5,7 @@ package server
 import (
 	"bytes"
 	"crypto/x509/pkix"
+	"errors"
 	"testing"
 	"time"
 
@@ -278,5 +279,27 @@ func TestPendingAssociationIsShared(t *testing.T) {
 	s.r.Detach(s.owner)
 	if kept, pending := f.set.count(); kept != 1 || pending != 0 {
 		t.Errorf("after both sessions ended: %d kept, %d pending, want 1 and 0", kept, pending)
+	}
+}
+
+// A security endpoint factory that does not return normally ends the
+// session that asked for the association, and leaves nothing behind.
+func TestEndpointFactoryPanicEndsTheSession(t *testing.T) {
+	f := newSecFixture(t)
+	f.set.newEndpoint = func(string, uint16) (*sec.Endpoint, error) { panic("boom") }
+	ended := 0
+	s := f.session()
+	s.r.abort = func() { ended++ }
+	ctl := f.controlling()
+	s.r.Attach(s.owner, f.now)
+	_, out, err := s.r.Receive(f.now, ctl.Up(f.now)[0])
+	if !errors.Is(err, errFactory) || len(out) != 0 {
+		t.Fatalf("Receive: %d ASDUs, %v; want none and errFactory", len(out), err)
+	}
+	if ended == 0 {
+		t.Fatal("the session was not ended")
+	}
+	if kept, pending := f.set.count(); kept != 0 || pending != 0 {
+		t.Fatalf("%d associations kept and %d pending after the factory failed", kept, pending)
 	}
 }

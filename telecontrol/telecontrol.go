@@ -150,6 +150,11 @@ type exchange struct {
 	// Requester's lock held, in arrival order.
 	done  func(a *asdu.ASDU) bool
 	ended bool
+	// limit, when positive, bounds the ASDUs queued for the request: an
+	// ASDU beyond it is not queued, and the request ends with overflow
+	// once it has taken what is queued.
+	limit    int
+	overflow error
 
 	mu    sync.Mutex
 	items []*asdu.ASDU
@@ -157,9 +162,20 @@ type exchange struct {
 	sig   chan struct{}
 }
 
+// queueMargin is what a collecting request queues beyond MaxResult: the
+// confirmation, the termination and the mirrors of an earlier request
+// that may arrive while the request is still being sent.
+const queueMargin = 8
+
 func (x *exchange) deliver(a *asdu.ASDU) {
 	x.mu.Lock()
-	x.items = append(x.items, a)
+	if x.limit > 0 && len(x.items) >= x.limit {
+		if x.err == nil {
+			x.err = x.overflow
+		}
+	} else {
+		x.items = append(x.items, a)
+	}
 	x.mu.Unlock()
 	x.signal()
 }
@@ -257,10 +273,17 @@ func (r *Requester) FailAll(err error) {
 }
 
 func (r *Requester) begin(ctx context.Context, req *asdu.ASDU, also, done func(*asdu.ASDU) bool) (*exchange, error) {
+	return r.beginLimited(ctx, req, also, done, 0, nil)
+}
+
+// beginLimited is begin for an exchange that queues at most limit ASDUs
+// (no bound when limit is not positive) and then ends with overflow.
+func (r *Requester) beginLimited(ctx context.Context, req *asdu.ASDU, also, done func(*asdu.ASDU) bool,
+	limit int, overflow error) (*exchange, error) {
 	if req.First() == nil {
 		return nil, fmt.Errorf("%w: request without information object", asdu.ErrInvalidValue)
 	}
-	x := &exchange{req: req, match: also, done: done, sig: make(chan struct{}, 1)}
+	x := &exchange{req: req, match: also, done: done, limit: limit, overflow: overflow, sig: make(chan struct{}, 1)}
 	r.mu.Lock()
 	for _, o := range r.exchanges {
 		if sameRequest(o.req, req) {
@@ -332,7 +355,14 @@ func (r *Requester) Collect(ctx context.Context, req *asdu.ASDU, cause asdu.Caus
 	ctx, cancel := r.bound(ctx)
 	defer cancel()
 	ended := false // the exchange's view, under the Requester's lock
-	x, err := r.begin(ctx, req, func(a *asdu.ASDU) bool {
+	limit, overflow := 0, error(nil)
+	if r.MaxResult > 0 {
+		// While Send is blocked nothing is taken from the queue: it holds
+		// no more than the answer that ends the request at the bound.
+		limit = r.MaxResult + queueMargin
+		overflow = fmt.Errorf("%w: more than %d ASDUs answer %s", ErrResultLimit, r.MaxResult, req.Type)
+	}
+	x, err := r.beginLimited(ctx, req, func(a *asdu.ASDU) bool {
 		return a.Cause == cause && processData(r.Params, req, a)
 	}, func(a *asdu.ASDU) bool {
 		switch {
@@ -345,7 +375,7 @@ func (r *Requester) Collect(ctx context.Context, req *asdu.ASDU, cause asdu.Caus
 			return false
 		}
 		return ended
-	})
+	}, limit, overflow)
 	if err != nil {
 		return nil, err
 	}

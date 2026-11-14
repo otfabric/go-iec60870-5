@@ -34,13 +34,14 @@ shared layers and IEC 101 were then checked against that text
 | LK-6 | ACD announces class 1 data; the primary then polls class 1 | 103 cl. 6.2.3 | `TestUnbalanced`, `iec101/e2e.TestServices` |
 | LK-7 | A secondary that cannot take user data answers NACK (1) with DFC set | 103 cl. 6.3 | `TestNackAndDFC`, `iec101/e2e.TestServerUnbalancedEdges` |
 | LK-8 | Answers 14 (not functioning) and 15 (not implemented) are reported; a secondary answers 15 to undefined functions | 103 cl. 6.3 | `TestPrimaryNegativeAnswers`, `TestSecondaryOddMessages` |
-| LK-9 | Broadcast address (all ones) accepts send/no reply only, without answer | 103 cl. 6.2.3 | `TestUnbalanced` |
+| LK-9 | Broadcast address (all ones) accepts send/no reply only, in a variable-length frame and only when the handler serves function 4, without answer | 103 cl. 6.2.3 | `TestUnbalanced`, `TestSecondaryBroadcastKindAndFilter` |
 | LK-10 | E5h may replace ACK and the no-data NACK when ACD and DFC are clear; a primary always accepts it | 103 cl. 6.1; interpretation | `TestUnbalanced` (single char variant) |
 | LK-11 | Reset of FCB (function 7), IEC 60870-5-103 only (not a 101 function, 101 table 3) | 103 cl. 6.3 | `TestUnbalanced` |
 | LK-12 | Balanced: each station initializes its own direction; DIR set by station A; test function for link | interpretation | `TestBalanced`, `iec101/e2e.TestClientBalancedSupervision` |
 | LK-13 | A secondary ignores frames for other addresses and other secondaries' responses | interpretation | `TestWrongAddressTimesOut`, `TestSecondaryOddMessages` |
 | LK-14 | A response that cannot answer the message is discarded; when only such responses arrive until the last time-out, the primary reports a time-out (`ErrUnexpected` wrapping `ErrTimeout`) | engineering | `TestLateResponseDiscarded`, `TestStrayAnswersAreATimeOut` |
 | LK-15 | The one-bit FCB cannot recognise a repetition delivered after the next message (documented limit) | 60870-5-2 (interpretation) | `TestRepetitionAfterTheNextMessage` |
+| LK-16 | An exchange ends with its context also while its frame waits for room in a full send queue; on a transport that is not an `io.Closer`, Close does not wait for a writer blocked in `Write` | engineering | `TestExchangeEndsWithContextOnFullQueue`, `TestCloseWithoutCloserBlockedWrite`, `TestCloseWithoutCloserIdleWriter` |
 
 ## IEC 60870-5-101 application (`iec101`, `telecontrol`)
 

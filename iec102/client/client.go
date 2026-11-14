@@ -623,7 +623,10 @@ func (c *Client) ReadTime(ctx context.Context) (iec102.TimeB, error) {
 // ReadTotals reads integrated totals with one of the read commands
 // C_CI_NA_2 .. C_CI_NU_2 (q.T; the fields q carries depend on it, see
 // iec102.Read) from record address record, with cause 6, and returns the
-// integration periods the station sent, in order.
+// integration periods the station sent for that record address, in order.
+// Integrated totals of another record address are not part of the answer
+// and are left out. The type family of the answer is not checked: meters
+// of the REE profile answer some reads with another family.
 func (c *Client) ReadTotals(ctx context.Context, record uint8, q iec102.Read) ([]iec102.IntegratedTotals, error) {
 	if q.T.Selection() == iec102.SelectNone {
 		return nil, fmt.Errorf("%w: %s is not a read of integrated totals", iec102.ErrInvalid, q.T)
@@ -631,7 +634,7 @@ func (c *Client) ReadTotals(ctx context.Context, record uint8, q iec102.Read) ([
 	out, err := c.Request(ctx, c.request(iec102.CauseActivation, record, q), UntilTermination)
 	var res []iec102.IntegratedTotals
 	for _, a := range out {
-		if b, ok := a.Body.(iec102.IntegratedTotals); ok {
+		if b, ok := a.Body.(iec102.IntegratedTotals); ok && a.Record == record {
 			res = append(res, b)
 		}
 	}
@@ -641,7 +644,8 @@ func (c *Client) ReadTotals(ctx context.Context, record uint8, q iec102.Read) ([
 // ReadSinglePoints reads the single-point information of record address
 // record (a list address 50..55, Beckhoff TS650x manual, section 9.1.8):
 // all of it with C_SP_NA_2, or the time range from..to with C_SP_NB_2 when
-// both are given; cause 6.
+// both are given; cause 6. Single points of another record address are
+// left out.
 func (c *Client) ReadSinglePoints(ctx context.Context, record uint8, from, to *iec102.TimeA) ([]iec102.SinglePoint, error) {
 	q := iec102.Read{T: iec102.C_SP_NA_2}
 	if from != nil && to != nil {
@@ -650,7 +654,7 @@ func (c *Client) ReadSinglePoints(ctx context.Context, record uint8, from, to *i
 	out, err := c.Request(ctx, c.request(iec102.CauseActivation, record, q), UntilTermination)
 	var res []iec102.SinglePoint
 	for _, a := range out {
-		if b, ok := a.Body.(iec102.SinglePoints); ok {
+		if b, ok := a.Body.(iec102.SinglePoints); ok && a.Record == record {
 			res = append(res, b.Points...)
 		}
 	}

@@ -80,14 +80,19 @@ APIs that follow their own application models.
 Every serial station takes an `io.ReadWriter` and owns it: `Close` closes
 it when it is an `io.Closer`, and waits for the reader only then (without
 one, the reader ends when its pending Read returns and delivers nothing
-more). A station runs two goroutines on it:
+more). Without an `io.Closer` Close does not wait for a writer blocked in
+`Write` either (a peer that stops reading): the writer ends when that
+`Write` returns, and writes and traces nothing more. A station runs two goroutines on it:
 
 - a reader that decodes FT 1.2 frames (`ft12.Decoder`, resynchronizing
   after noise) and hands each frame to the station logic;
 - a writer that sends queued frames, so a station never blocks its receive
   path on a full transport. Balanced stations answer from the reader while
   their peer does the same; with synchronous transports (`net.Pipe`) a
-  direct write would deadlock.
+  direct write would deadlock. An exchange waits for room in the send
+  queue only as long as its context lasts, so a peer that stops reading
+  cannot hold it past its deadline; the reader's own responses wait,
+  which holds back the peer's next messages.
 
 IEC 60870-5-101:2003 (6.1) does not require a receiver to measure gaps
 between characters, but after a receive error it looks for a 33-bit line

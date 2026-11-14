@@ -112,7 +112,7 @@ func (b *Balanced) receive(f ft12.Frame) {
 		return
 	}
 	if r := b.rx.repeated(c, f); r != nil {
-		_ = b.p.write(*r)
+		_ = b.p.write(context.Background(), *r)
 		return
 	}
 	var r *ft12.Frame
@@ -150,7 +150,7 @@ func (b *Balanced) receive(f ft12.Frame) {
 		r = b.reply(FuncNotImplemented, false)
 	}
 	b.rx.remember(c, f, r)
-	_ = b.p.write(*r)
+	_ = b.p.write(context.Background(), *r)
 }
 
 func (b *Balanced) busy() bool {

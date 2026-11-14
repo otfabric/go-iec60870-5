@@ -363,6 +363,33 @@ func TestPacketsErrors(t *testing.T) {
 	}
 }
 
+// Lengths of 2^31 and more, which do not fit a 32-bit int, are compared
+// as unsigned values before they are used: the capture is refused, or for
+// a simple packet the length is cut to the block.
+func TestPacketsLengthsBeyondInt32(t *testing.T) {
+	huge := uint32(0xfffffff0)
+	record := pcapFile(LinkRaw, []byte{1, 2, 3})
+	binary.LittleEndian.PutUint32(record[32:], huge)
+	ng := pcapng(9, [][]byte{{1}})
+	block := append([]byte(nil), ng...)
+	binary.LittleEndian.PutUint32(block[4:], huge)
+	epb := append([]byte(nil), ng...)
+	binary.LittleEndian.PutUint32(epb[bytes.Index(epb, []byte{6, 0, 0, 0})+20:], huge)
+	ifc := append([]byte(nil), ng...)
+	binary.LittleEndian.PutUint32(ifc[bytes.Index(ifc, []byte{6, 0, 0, 0})+8:], huge)
+	for name, b := range map[string][]byte{"pcap record": record, "pcapng block": block, "pcapng epb": epb, "pcapng interface": ifc} {
+		if _, err := Packets(b); !errors.Is(err, ErrFormat) {
+			t.Errorf("%s: err = %v, want ErrFormat", name, err)
+		}
+	}
+	spb := append([]byte(nil), ng...)
+	binary.LittleEndian.PutUint32(spb[len(spb)-28:], huge) // before the skipped block of 16 octets
+	p, err := Packets(spb)
+	if err != nil || len(p) != 2 || len(p[1].Data) != 4 {
+		t.Fatalf("simple packet: %+v %v", p, err)
+	}
+}
+
 func rtacFrame(ev byte, data ...byte) []byte {
 	h := []byte{0, 0, 0, 1, 0, 0, 0, 2, ev, 0x3c, 0, 0}
 	return append(h, data...)

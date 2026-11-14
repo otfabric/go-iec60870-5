@@ -90,7 +90,10 @@ type options struct {
 	// belong together. Tests only.
 	failpoint      func(name string)
 	requestTimeout time.Duration
-	security       *sec.Endpoint
+	// maxResult bounds the ASDUs (directory entries for ListFiles) one
+	// collecting request returns; zero is no bound.
+	maxResult int
+	security  *sec.Endpoint
 	// randN, when not nil, replaces rand.Int64N as the source of the
 	// jitter of the backoff delays. Tests only.
 	randN func(n int64) int64
@@ -117,6 +120,32 @@ func defaultOptions() options {
 		asduParams:     asdu.IEC104,
 		autoStart:      true,
 		requestTimeout: 10 * time.Second,
+		maxResult:      DefaultMaxResult,
+	}
+}
+
+// DefaultMaxResult is the default bound of [WithMaxResult], as for the
+// IEC 60870-5-101 client.
+const DefaultMaxResult = 65536
+
+// WithMaxResult bounds what one collecting request returns: the ASDUs of
+// [Client.Interrogate] and [Client.CounterInterrogate], the directory
+// entries of [Client.ListFiles]. The answer that would exceed n ends the
+// request with what was collected so far and an error wrapping
+// [telecontrol.ErrResultLimit], instead of growing it until its deadline;
+// such a request is not retried. Zero means [DefaultMaxResult], negative
+// means no bound. Choose n above the number of ASDUs the largest station
+// sends in answer to a general interrogation.
+func WithMaxResult(n int) Option {
+	return func(o *options) {
+		switch {
+		case n == 0:
+			o.maxResult = DefaultMaxResult
+		case n < 0:
+			o.maxResult = 0
+		default:
+			o.maxResult = n
+		}
 	}
 }
 

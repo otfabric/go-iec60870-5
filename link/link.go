@@ -184,6 +184,11 @@ type port struct {
 	// writeDone is closed when the writer goroutine has returned: close
 	// waits for it, so no frame is written or traced after Close.
 	writeDone chan struct{}
+	// wmu is held by the writer from its check of done until it calls
+	// Write; writing tells close, for a transport that is not an
+	// io.Closer, that the writer is inside a Write it cannot interrupt.
+	wmu     sync.Mutex
+	writing bool
 }
 
 func newPort(rw io.ReadWriter, cfg Config, component string) *port {
@@ -206,19 +211,28 @@ func (p *port) writer() {
 		case f := <-p.tx:
 			// select picks at random among ready cases: a frame queued
 			// before the station stopped is not sent after it.
+			p.wmu.Lock()
 			select {
 			case <-p.done:
+				p.wmu.Unlock()
 				return
 			default:
 			}
 			buf, _ = f.Append(buf[:0], p.cfg.FT12) // validated by write
 			if p.cfg.OnFrame != nil {
 				if err := callback.Call(p.log, "OnFrame", func() { p.cfg.OnFrame(true, f) }); err != nil {
+					p.wmu.Unlock()
 					p.fail(err)
 					return
 				}
 			}
-			if _, err := p.rw.Write(buf); err != nil {
+			p.writing = true
+			p.wmu.Unlock()
+			_, err := p.rw.Write(buf)
+			p.wmu.Lock()
+			p.writing = false
+			p.wmu.Unlock()
+			if err != nil {
 				select {
 				case <-p.done:
 				default:
@@ -292,8 +306,12 @@ func (p *port) fail(err error) {
 	_ = p.closeTransport() // unblock the reader
 }
 
-// write queues f for the writer goroutine.
-func (p *port) write(f ft12.Frame) error {
+// write queues f for the writer goroutine. It waits for room in the send
+// queue until the station stops or ctx ends: a peer that stops reading
+// fills the queue, and an exchange must still end with its context. The
+// reader's responses pass context.Background(): while the queue is full
+// the reader waits, which holds back the peer's next messages.
+func (p *port) write(ctx context.Context, f ft12.Frame) error {
 	if _, err := f.Encode(p.cfg.FT12); err != nil {
 		return err
 	}
@@ -306,6 +324,8 @@ func (p *port) write(f ft12.Frame) error {
 	select {
 	case <-p.done:
 		return ErrClosed
+	case <-ctx.Done():
+		return ctx.Err()
 	case p.tx <- f:
 		return nil
 	}
@@ -339,17 +359,32 @@ func (p *port) closeTransport() error {
 // first call closes the transport and returns its error, later calls
 // return nil. The reader returns only when closing the transport unblocks
 // its Read: without an io.Closer, close does not wait for it, and it ends
-// when its pending Read returns, delivering nothing more. Called on the
-// reader or the writer goroutine (from a callback), close does not wait
-// for that goroutine, which ends when the callback has returned.
+// when its pending Read returns, delivering nothing more. Likewise without
+// an io.Closer close does not wait for a writer blocked in Write (a peer
+// that stops reading): it ends when that Write returns, writing and
+// tracing nothing more. Called on the reader or the writer goroutine
+// (from a callback), close does not wait for that goroutine, which ends
+// when the callback has returned.
 func (p *port) close() error {
 	p.shutdown()
 	err := p.closeTransport()
 	id := callback.Goroutine()
-	if _, ok := p.rw.(io.Closer); ok && id != p.readerID.Load() {
+	_, closer := p.rw.(io.Closer)
+	if closer && id != p.readerID.Load() {
 		<-p.readDone
 	}
 	if id != p.writerID.Load() {
+		if !closer {
+			// Holding wmu, the writer is either inside Write or past
+			// its last check of done: in both cases it starts no
+			// further write.
+			p.wmu.Lock()
+			inWrite := p.writing
+			p.wmu.Unlock()
+			if inWrite {
+				return err
+			}
+		}
 		<-p.writeDone
 	}
 	return err
@@ -424,7 +459,7 @@ func (x *exchanger) exchange(ctx context.Context, addr uint16, fn byte, fcb bool
 	var stray *ft12.Frame // the last response that cannot answer fn
 	for attempt := 0; ; attempt++ {
 		x.drain() // late answers to earlier attempts or messages
-		if err := x.p.write(f); err != nil {
+		if err := x.p.write(ctx, f); err != nil {
 			return ft12.Frame{}, err
 		}
 		timer.Reset(x.p.cfg.Timeout)

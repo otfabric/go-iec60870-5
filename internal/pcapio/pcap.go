@@ -128,11 +128,14 @@ func pcapPackets(b []byte, bo binary.ByteOrder, unit time.Duration) ([]Packet, e
 			return nil, ErrFormat
 		}
 		sec, frac := int64(bo.Uint32(b[off:])), int64(bo.Uint32(b[off+4:]))
-		n := int(bo.Uint32(b[off+8 : off+12]))
+		// The length is compared before it becomes an int, which may be
+		// 32 bits wide.
+		n32 := bo.Uint32(b[off+8 : off+12])
 		off += 16
-		if n > len(b)-off {
+		if uint64(n32) > uint64(len(b)-off) {
 			return nil, ErrFormat
 		}
+		n := int(n32)
 		ts := time.Unix(sec, frac*int64(unit)).UTC()
 		out = append(out, Packet{Link: link, Time: ts, Data: b[off : off+n]})
 		off += n
@@ -169,10 +172,11 @@ func pcapngPackets(b []byte) ([]Packet, error) {
 			}
 			ifcs = ifcs[:0]
 		}
-		block = int(bo.Uint32(b[off+4:]))
-		if block < 12 || block%4 != 0 || block > len(b)-off {
+		block32 := bo.Uint32(b[off+4:])
+		if block32 < 12 || block32%4 != 0 || uint64(block32) > uint64(len(b)-off) {
 			return nil, ErrFormat
 		}
+		block = int(block32)
 		body := b[off+8 : off+block-4]
 		switch typ {
 		case 1: // interface description
@@ -184,18 +188,18 @@ func pcapngPackets(b []byte) ([]Packet, error) {
 			if len(body) < 20 {
 				return nil, ErrFormat
 			}
-			ifc := int(bo.Uint32(body))
-			capLen := int(bo.Uint32(body[12:]))
-			if ifc >= len(ifcs) || capLen > len(body)-20 {
+			ifc32, capLen32 := bo.Uint32(body), bo.Uint32(body[12:])
+			if uint64(ifc32) >= uint64(len(ifcs)) || uint64(capLen32) > uint64(len(body)-20) {
 				return nil, ErrFormat
 			}
+			ifc, capLen := int(ifc32), int(capLen32)
 			ts := uint64(bo.Uint32(body[4:]))<<32 | uint64(bo.Uint32(body[8:]))
 			out = append(out, Packet{Link: ifcs[ifc].link, Time: stamp(ts, ifcs[ifc].unit), Data: body[20 : 20+capLen]})
 		case 3: // simple packet, interface 0, no time stamp
 			if len(body) < 4 || len(ifcs) == 0 {
 				return nil, ErrFormat
 			}
-			capLen := min(int(bo.Uint32(body)), len(body)-4)
+			capLen := int(min(uint64(bo.Uint32(body)), uint64(len(body)-4)))
 			out = append(out, Packet{Link: ifcs[0].link, Data: body[4 : 4+capLen]})
 		}
 	}

@@ -58,6 +58,26 @@ const (
 	hardQueue = softQueue + 8192
 )
 
+// Transmit flow control with Security. What the security answers to the
+// peer waits in the transmit queue until the send window has room, which
+// only acknowledgements from the peer make. A peer that keeps sending while
+// it acknowledges slowly would otherwise make the queue grow without
+// bound, so the queue is bounded in two steps, in octets of ASDU.
+var (
+	// txSoftLimit is the queued octets above which received I frames are no
+	// longer acknowledged, as at softQueue: a conformant peer then stops
+	// after k further frames. Frames are still read: only the peer's
+	// acknowledgements drain the queue. It holds two of the longest
+	// security messages (IEC TS 60870-5-7, Association Response with a
+	// certificate of 65535 octets), so a normal exchange never reaches it.
+	txSoftLimit = 1 << 17
+
+	// txHardLimit is the queued octets above which the link ends with
+	// iec104.ErrProtocol: the peer went on sending past its window of k
+	// unacknowledged I frames (IEC 60870-5-104, 5.5).
+	txHardLimit = 1 << 20
+)
+
 // Config configures a Link. Params must be valid.
 type Config struct {
 	Role    Role
@@ -240,6 +260,8 @@ type Link struct {
 	// while the security cannot protect it yet.
 	txq  []txFrame
 	held *sendReq
+	// txBytes is the number of ASDU octets in txq.
+	txBytes int
 }
 
 // New starts the protocol machine on an established connection. The Link
@@ -489,13 +511,18 @@ func (l *Link) run() {
 			if err = l.flush(); err != nil {
 				break
 			}
+			if l.txBytes > txHardLimit {
+				err = fmt.Errorf("%w: %d octets of security output wait for acknowledgement, limit %d",
+					iec104.ErrProtocol, l.txBytes, txHardLimit)
+				break
+			}
 		}
 		frameCh := l.frameCh
 		queued := l.queueLen()
 		if queued >= hardQueue {
 			frameCh = nil
 		}
-		if l.throttled = queued >= softQueue; !l.throttled && l.recvUnacked >= l.cfg.Params.W {
+		if l.throttled = queued >= softQueue || l.txBytes >= txSoftLimit; !l.throttled && l.recvUnacked >= l.cfg.Params.W {
 			// Acknowledgements that were withheld while throttled.
 			if err = l.sendS(); err != nil {
 				break
@@ -650,6 +677,7 @@ func (l *Link) onSecurity(now time.Time) error {
 func (l *Link) enqueue(frames [][]byte) {
 	for _, f := range frames {
 		l.txq = append(l.txq, txFrame{asdu: f})
+		l.txBytes += len(f)
 	}
 }
 
@@ -678,6 +706,7 @@ func (l *Link) protect(r *sendReq) {
 			tf.req = r
 		}
 		l.txq = append(l.txq, tf)
+		l.txBytes += len(f)
 	}
 }
 
@@ -694,6 +723,7 @@ func (l *Link) flush() error {
 		f := l.txq[0]
 		l.txq[0] = txFrame{}
 		l.txq = l.txq[1:]
+		l.txBytes -= len(f.asdu)
 		var acked func()
 		var epoch *atomic.Uint64
 		if f.req != nil {
@@ -707,7 +737,7 @@ func (l *Link) flush() error {
 			return err
 		}
 	}
-	l.txq = nil
+	l.txq, l.txBytes = nil, 0
 	return nil
 }
 
@@ -718,7 +748,7 @@ func (l *Link) dropTx(err error) {
 			f.req.done <- err
 		}
 	}
-	l.txq = nil
+	l.txq, l.txBytes = nil, 0
 	if r := l.held; r != nil {
 		l.held = nil
 		if r.take() {
@@ -989,7 +1019,7 @@ func (l *Link) onU(fn apci.UFunction) error {
 
 	case apci.StartDTAct, apci.StopDTAct:
 		if l.cfg.Role != Controlled {
-			l.cfg.Log.Warn("ignoring U frame from controlled station", "function", fn.String())
+			l.cfg.Log.Debug("ignoring U frame from controlled station", "function", fn.String())
 			return nil
 		}
 		if fn == apci.StartDTAct {
@@ -1024,7 +1054,7 @@ func (l *Link) onU(fn apci.UFunction) error {
 
 	case apci.StartDTCon:
 		if _, ok := l.pending[apci.StartDTAct]; !ok {
-			l.cfg.Log.Warn("ignoring unsolicited confirmation", "function", fn.String())
+			l.cfg.Log.Debug("ignoring unsolicited confirmation", "function", fn.String())
 			return nil
 		}
 		l.setState(started)
@@ -1033,7 +1063,7 @@ func (l *Link) onU(fn apci.UFunction) error {
 
 	case apci.StopDTCon:
 		if _, ok := l.pending[apci.StopDTAct]; !ok {
-			l.cfg.Log.Warn("ignoring unsolicited confirmation", "function", fn.String())
+			l.cfg.Log.Debug("ignoring unsolicited confirmation", "function", fn.String())
 			return nil
 		}
 		if l.recvUnacked > 0 {

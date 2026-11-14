@@ -10,7 +10,10 @@
 // None of it is part of IEC 60870-5-102. It is applied only where the
 // caller asks for it: set [Profile] as iec102.Params.Profile to decode the
 // bodies below, and use [Login], [Logout] and [SetTime] on a client. The
-// generic packages never send or expect an REE ASDU on their own.
+// generic packages never send or expect an REE ASDU on their own. On a
+// server, [Session] answers the session requests; its session state
+// follows the last access key received, so a C_AC_NA_2 with a wrong key
+// closes an open session.
 //
 // We hold no REE document. The sources are, as for package iec102: the
 // names the Beckhoff TS650x manual lists for 128..190 (section 4.2, without

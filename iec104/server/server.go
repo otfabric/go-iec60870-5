@@ -16,6 +16,7 @@ import (
 	"github.com/otfabric/go-iec60870-5/asdu"
 	iec104 "github.com/otfabric/go-iec60870-5/iec104"
 	"github.com/otfabric/go-iec60870-5/iec104/apci"
+	"github.com/otfabric/go-iec60870-5/internal/callback"
 	"github.com/otfabric/go-iec60870-5/internal/logx"
 	"github.com/otfabric/go-iec60870-5/sec"
 )
@@ -196,10 +197,18 @@ func (s *Server) Serve(ln net.Listener) error {
 
 func (s *Server) accept(conn net.Conn) {
 	remote := conn.RemoteAddr()
-	if f := s.opts.accept; f != nil && !f(remote) {
-		s.log.Warn("connection rejected", "remote", remote.String(), "reason", "not accepted")
-		_ = conn.Close()
-		return
+	if f := s.opts.accept; f != nil {
+		ok := false
+		if callback.Call(s.log, "accept filter", func() { ok = f(remote) }) != nil {
+			s.log.Warn("connection rejected", "remote", remote.String(), "reason", "accept filter did not return normally")
+			_ = conn.Close()
+			return
+		}
+		if !ok {
+			s.log.Warn("connection rejected", "remote", remote.String(), "reason", "not accepted")
+			_ = conn.Close()
+			return
+		}
 	}
 	var grp *group
 	for _, g := range s.groups {

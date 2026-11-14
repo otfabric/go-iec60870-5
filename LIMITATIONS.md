@@ -123,7 +123,9 @@ own list: [docs/iec104/LIMITATIONS.md](docs/iec104/LIMITATIONS.md).
   link); a station that never runs out of data makes that request end at
   its deadline.
 - `ree.Session.OnSetTime` receives the time b of C_CS_TA_2 as received;
-  checking it is the application's.
+  checking it is the application's. The session state of `ree.Session`
+  follows the last access key received: a C_AC_NA_2 with a wrong key
+  closes a session that is open.
 
 ## IEC 60870-5-103
 
@@ -147,8 +149,8 @@ own list: [docs/iec104/LIMITATIONS.md](docs/iec104/LIMITATIONS.md).
 - The 23 h rule for the IV bit is tested with a shortened timeout only.
 - The time correction covers the frame time, not internal delays.
 - The client cannot abort a disturbance transfer. One that ends with
-  `ErrInvalid` (a value or channel beyond what its ASDU 26 announced)
-  leaves the equipment in its transfer: the client sends no abort (TOO 3,
+  `ErrInvalid` (a value or channel beyond what its ASDU 26 announced, or
+  a channel offered for another FAN) leaves the equipment in its transfer: the client sends no abort (TOO 3,
   9, 17).
 - A time synchronization that cannot be applied is answered with ASDU 6
   with IV set; clause 7.4.2 defines no negative answer (interpretation 13
