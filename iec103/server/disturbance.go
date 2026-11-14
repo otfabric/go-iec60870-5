@@ -9,7 +9,9 @@ import (
 )
 
 // DisturbanceSource supplies the recorded disturbances for the transfer of
-// clause 7.4.7. Calls come from the server's handler goroutine.
+// clause 7.4.7. Calls come from the server's handler goroutine, under the
+// rules of the [Handler]: a method that does not return normally closes
+// the server.
 type DisturbanceSource interface {
 	// List returns the recorded disturbances, at most
 	// [iec103.MaxDisturbances], for ASDU 23.
@@ -97,13 +99,17 @@ func (s *Server) disturbance(a *iec103.ASDU, o iec103.DisturbanceOrder) {
 			return
 		case iec103.TOOSelectFault:
 			rec, ok := src.Record(o.FAN)
-			noc, noe := 0, 0
+			noc, noe, longest := 0, 0, 0
 			if ok && len(rec.Channels) > 0 {
 				noc, noe = len(rec.Channels), len(rec.Channels[0].Values)
+				for _, ch := range rec.Channels {
+					longest = max(longest, len(ch.Values))
+				}
 			}
 			// NOC is one octet and NOE two (clauses 7.2.6.10, 7.2.6.11): a
-			// record that does not fit them cannot be announced.
-			if !ok || noc > math.MaxUint8 || noe > math.MaxUint16 {
+			// record that does not fit them cannot be announced. Every
+			// channel counts: the NFE of its values is two octets too.
+			if !ok || noc > math.MaxUint8 || longest > math.MaxUint16 {
 				s.end(fun, iec103.TOOEndDataAbortProt, o.TOV, o.FAN, iec103.ACCGlobal)
 				return
 			}

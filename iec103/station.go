@@ -28,6 +28,19 @@ var (
 	// ErrAborted reports a disturbance data transfer the protection
 	// equipment aborted (clause 7.4.7, TOO 34, 37 or 40).
 	ErrAborted = errors.New("iec103: transfer aborted by the protection equipment")
+	// ErrInHandler reports a client request called on one of the client's
+	// own goroutines, from its Handler or OnState, where the answer it
+	// waits for cannot arrive: the link loop waits for that goroutine. The
+	// request is not sent.
+	ErrInHandler = errors.New("iec103: request from inside a handler")
+	// ErrResultLimit reports a request whose answer has more ASDUs than
+	// the client's Config.MaxResult allows: the request ends there, with
+	// the answers so far.
+	ErrResultLimit = errors.New("iec103: result limit reached")
+	// ErrOverflow reports a request that missed answers: they arrived
+	// faster than the request took them, beyond the 1024 ASDUs a request
+	// buffers.
+	ErrOverflow = errors.New("iec103: answers arrived faster than they were taken")
 )
 
 // State is the state of the link as seen by one station.

@@ -99,9 +99,11 @@ identifiers. `NewSlogLogger` implements it through
 | Warn | `connection rejected` (server) | `remote`, `reason` |
 | Warn | `accept failed` (server; Serve retries after `retry_in`) | `retry_in`, `error` |
 | Warn | `event queue full, dropping the oldest events` (server; once per overflow) | `group`, `size` |
+| Warn | `file transfer refused: the session has the most transfers open` (server, `FileServer.MaxTransfers`) | `open`, `max` |
 | Info | `redundancy group switched over` (server) | `group`, `session`, `previous` |
 | Warn | `ignoring unsolicited confirmation`, `ignoring U frame from controlled station` | `function` |
 | Error | `handler panic` (server) | `asdu`, `panic`, `stack` |
+| Error | `callback did not return normally` (client: `Handler`, `state handler`, `start handler`, `switch handler`; the client is closed) | `callback`, `value`, `stack` |
 
 Every entry carries `component` (`iec104.client` or `iec104.server`). Client
 entries carry `remote`; entries of a server session carry `session`,
@@ -233,17 +235,21 @@ through `Config.Logger`; nil is silent. They have no metrics interface.
 | Debug | `interrogation cycle aborted`, `ASDU for another common address dropped` (IEC 103 server) | - |
 | Debug | `unexpected ASDU in disturbance data transfer` (IEC 103 client) | - |
 | Warn | `time synchronization after initialization failed`, `general interrogation after initialization failed` (IEC 103 client) | `error` |
+| Error | `callback did not return normally` (every client and server, and the `link` stations with `link.Config.Logger`; the station stops and `Err` reports it) | `callback`, `value`, `stack` |
 
 Every entry carries `component` and `link` (the link address). The
 component is `<standard>.<role>`: `iec101.client`, `iec101.server`,
 `iec102.client`, `iec102.server`, `iec103.client`, `iec103.server` (and
-`iec104.client`, `iec104.server` for IEC 104). The error field is `error`
-in every package.
+`iec104.client`, `iec104.server` for IEC 104). The `link` stations log as
+`link.primary`, `link.secondary` and `link.balanced`, without the `link`
+field; a station whose `Config.Link.Logger` is nil gives its link its own
+`Config.Logger`. The error field is `error` in every package.
 
 State without logs:
 
 - `State()` on every client and server (`Done()` and `Err()` as well on
-  the IEC 101 stations, `Done()` on the IEC 102 server), and
+  every serial client and server: why it stopped, a callback that did not
+  return normally included), and
   `Config.OnState`, called for every change of the link state. The
   `WaitUp` of the IEC 101 and IEC 103 clients returns after `OnState` for
   the change to `StateUp` has returned.

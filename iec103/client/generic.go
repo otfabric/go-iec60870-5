@@ -43,11 +43,15 @@ func genericMatch(ca uint8, inf iec103.InfoNumber, rii uint8, causes ...iec103.C
 	}
 }
 
-// collect reads the answers of w until one with CONT = 0.
+// collect reads the answers of w until one with CONT = 0, at most
+// Config.MaxResult of them.
 func (c *Client) collect(ctx context.Context, w *waiter, res *GenericResult) error {
 	for {
 		a, err := c.wait(ctx, w)
 		if err != nil {
+			return err
+		}
+		if err := c.limit(len(res.ASDUs), "generic service"); err != nil {
 			return err
 		}
 		res.ASDUs = append(res.ASDUs, a)
@@ -306,7 +310,7 @@ func (c *Client) GenericInterrogation(ctx context.Context) ([]iec103.DataSet, er
 	}
 	defer c.unwatch(w)
 	var out []iec103.DataSet
-	for {
+	for n := 0; ; n++ {
 		a, err := c.wait(ctx, w)
 		if err != nil {
 			return out, fmt.Errorf("iec103: general interrogation of generic data: %w", err)
@@ -314,6 +318,9 @@ func (c *Client) GenericInterrogation(ctx context.Context) ([]iec103.DataSet, er
 		b, _ := a.Body.(iec103.GenericData)
 		if a.Inf == iec103.InfGenericGI {
 			return out, nil
+		}
+		if err := c.limit(n, "general interrogation of generic data"); err != nil {
+			return out, err
 		}
 		out = append(out, b.Sets...)
 	}

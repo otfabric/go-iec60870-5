@@ -145,10 +145,19 @@ rec, err := c.Disturbance(ctx, iec103.FunDistance, fan)
   `NoInitGI` are set. The identification (ASDU 5) is kept and available
   through `Identification`.
 - Every received ASDU reaches `Handler`, the answers to requests included.
+  A request, `Send`, `Broadcast` or `BroadcastClockSync` called from
+  `Handler` or `OnState` on one of the client's goroutines returns
+  `iec103.ErrInHandler` at once and is not sent; both may call `Close`,
+  which then returns at once. A callback that does not return normally is
+  logged with its stack and stops the client; `Err` reports it.
 - One request of each kind at a time (`ErrBusy`), as clauses 7.4.4, 7.4.7
   and 7.4.8.4 require. `RequestTimeout` (10 s) applies to a context without
   deadline; give a disturbance transfer a longer one. A request returns at
-  its deadline even while the link layer is still repeating its frame.
+  its deadline even while the link layer is still repeating its frame. A
+  request collects at most `Config.MaxResult` ASDUs (65536 by default),
+  then ends with `iec103.ErrResultLimit` and the answers so far; one that
+  missed answers returns `iec103.ErrOverflow`. A request in flight at
+  Close, and every request after it, returns `iec103.ErrClosed`.
 
 ## Protection equipment
 

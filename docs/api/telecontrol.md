@@ -22,6 +22,12 @@ var ErrBusy = errors.New("telecontrol: identical request pending")
 
 ErrBusy reports a request that cannot be issued because an identical one is still awaiting its answer: the answers could not be told apart.
 
+```go
+var ErrResultLimit = errors.New("telecontrol: result limit reached")
+```
+
+ErrResultLimit reports a collecting request ([Requester.Collect](#func-requester-collect)) whose station sent more ASDUs than [Requester.MaxResult](#func-requester-maxresult) allows: the request ends there, with the ASDUs collected so far.
+
 ## Functions
 
 ### func Confirmation
@@ -96,6 +102,10 @@ type Requester struct {
 	// Timeout bounds every request whose context has no earlier deadline.
 	// Zero means no bound beyond the context.
 	Timeout time.Duration
+	// MaxResult bounds the ASDUs one collecting request returns: the one
+	// that would exceed it ends the request with [ErrResultLimit]. Zero
+	// means no bound beyond the context.
+	MaxResult int
 
 }
 ```
@@ -116,7 +126,7 @@ ClockSync sends a clock synchronization command (C\_CS\_NA\_1).
 func (r *Requester) Collect(ctx context.Context, req *asdu.ASDU, cause asdu.Cause) ([]*asdu.ASDU, error)
 ```
 
-Collect sends req and collects the process data the station sends with cause until the activation termination of req arrives. On error the data collected so far is returned with it.
+Collect sends req and collects the process data the station sends with cause until the activation termination of req arrives. On error the data collected so far is returned with it. An ASDU beyond MaxResult ends the request with ErrResultLimit.
 
 #### func (Requester) Command
 

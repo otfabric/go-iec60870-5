@@ -52,9 +52,9 @@ func NewPrimary(rw io.ReadWriter, cfg Config) (*Primary, error) {
 	if err != nil {
 		return nil, err
 	}
-	pt := newPort(rw, cfg)
+	pt := newPort(rw, cfg, "link.primary")
 	pr := &Primary{p: pt, x: newExchanger(pt, false), fcb: map[uint16]bool{}}
-	go pt.run(func(f ft12.Frame) {
+	go pt.run("link", func(f ft12.Frame) {
 		if f.Kind == ft12.KindSingle || !Control(f.Control).PRM() {
 			pr.x.offer(f)
 		}
@@ -65,16 +65,25 @@ func NewPrimary(rw io.ReadWriter, cfg Config) (*Primary, error) {
 // Close stops the station and waits for its goroutines. It closes rw when
 // rw is an io.Closer; the reader goroutine returns only when that Close
 // unblocks Read, so a transport whose Close does not leaves Close waiting.
-// Close is safe to call more than once and from several goroutines: the
-// first call closes the transport and returns its error; later calls
+// For a transport that is not an io.Closer Close does not wait for the
+// reader: it ends when its pending Read returns, and delivers nothing
+// more. Close is safe to call more than once and from several goroutines:
+// the first call closes the transport and returns its error; later calls
 // return nil.
+//
+// Called from a callback (Config.OnFrame, Config.OnDiscard), Close does
+// not wait for the goroutine the callback runs on: it returns once the
+// station is stopped, and that goroutine ends when the callback has
+// returned.
 func (pr *Primary) Close() error { return pr.p.close() }
 
 // Done is closed when the station stops: after Close or a transport
-// failure (see Err).
+// failure, or when a callback did not return normally (see Err).
 func (pr *Primary) Done() <-chan struct{} { return pr.p.readDone }
 
-// Err returns the transport error that stopped the station, if any.
+// Err returns the error that stopped the station, if any: a transport
+// error, or a callback that did not return normally (wrapping
+// [ErrClosed]).
 func (pr *Primary) Err() error { return pr.p.err() }
 
 // nextFCB toggles and returns the FCB for a new message to addr.

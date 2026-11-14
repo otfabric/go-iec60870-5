@@ -11,6 +11,8 @@ import (
 
 	"github.com/otfabric/go-iec60870-5/asdu"
 	iec104 "github.com/otfabric/go-iec60870-5/iec104"
+	"github.com/otfabric/go-iec60870-5/internal/callback"
+	"github.com/otfabric/go-iec60870-5/internal/logx"
 )
 
 // Group is a redundancy group in the sense of IEC 60870-5-104: several
@@ -155,13 +157,22 @@ func (g *Group) tellSwitches(wait bool) {
 		next := g.switches[0]
 		g.switches = g.switches[1:]
 		g.switchMu.Unlock()
-		g.onSwitch(next)
+		if err := callback.Call(g.log(), "switch handler", func() { g.onSwitch(next) }); err != nil {
+			// Still marked as the switcher: Close does not wait for it.
+			_ = g.Close()
+			g.switchMu.Lock()
+			g.switches = nil
+			break
+		}
 		g.switchMu.Lock()
 	}
 	g.switching = false
 	g.switcher.Store(0)
 	g.switchIdle.Broadcast()
 }
+
+// log returns the logger of the group's connections.
+func (g *Group) log() *logx.Logger { return g.clients[0].log }
 
 // wake makes the supervisor look at the group again.
 func (g *Group) wake() {

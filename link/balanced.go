@@ -14,9 +14,9 @@ import (
 // BalancedHandler is the user of a balanced station: it receives the
 // peer's user data. Calls come from the station's reader goroutine, one at
 // a time, and must return quickly. They run with the station's secondary
-// state locked, so the handler must not call Close, which waits for that
-// goroutine: call it in a new goroutine (go b.Close()), which returns once
-// the handler has returned. The handler may call Send and the other
+// state locked. The handler may call Close, which then does not wait for
+// the reader goroutine (see [SecondaryHandler]); a handler that does not
+// return normally stops the station. The handler may call Send and the other
 // primary methods only from another goroutine: their answers arrive on
 // the goroutine the handler blocks. The data passed to UserData is a copy
 // the handler may keep; the station also keeps it to recognise a
@@ -76,29 +76,24 @@ func NewBalanced(rw io.ReadWriter, cfg Config, bc BalancedConfig, h BalancedHand
 	if bc.Addr > cfg.FT12.MaxAddr() || bc.Remote > cfg.FT12.MaxAddr() {
 		return nil, fmt.Errorf("%w: address does not fit %d octet(s)", ErrInvalidConfig, cfg.FT12.AddrSize)
 	}
-	pt := newPort(rw, cfg)
+	pt := newPort(rw, cfg, "link.balanced")
 	b := &Balanced{p: pt, x: newExchanger(pt, bc.DIR), bc: bc, h: h}
 	b.x.alt, b.x.altOK = bc.Addr, true
-	go pt.run(b.receive)
+	go pt.run("BalancedHandler", b.receive)
 	return b, nil
 }
 
-// Close stops the station and waits for its goroutines. It closes rw when
-// rw is an io.Closer; the reader goroutine returns only when that Close
-// unblocks Read, so a transport whose Close does not leaves Close waiting.
-// Close is safe to call more than once and from several goroutines: the
-// first call closes the transport and returns its error; later calls
-// return nil.
-//
-// A handler must not call Close: Close waits for the reader goroutine that
-// runs the handler. Call it in a new goroutine (go b.Close()); it returns
-// once the handler has returned.
+// Close stops the station and waits for its goroutines, as
+// [Primary.Close] does. Called from the handler or another callback, Close
+// does not wait for the goroutine the call runs on: it returns once the
+// station is stopped, and that goroutine ends when the call has returned.
 func (b *Balanced) Close() error { return b.p.close() }
 
-// Done is closed when the station stops.
+// Done is closed when the station stops (see [Primary.Done]).
 func (b *Balanced) Done() <-chan struct{} { return b.p.readDone }
 
-// Err returns the transport error that stopped the station, if any.
+// Err returns the error that stopped the station, if any (see
+// [Primary.Err]).
 func (b *Balanced) Err() error { return b.p.err() }
 
 func (b *Balanced) receive(f ft12.Frame) {

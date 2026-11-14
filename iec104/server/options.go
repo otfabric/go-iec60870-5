@@ -30,6 +30,9 @@ type options struct {
 	accept      func(remote net.Addr) bool
 	onState     func(s *Session, state iec104.State, err error)
 	security    func(group string, aim uint16) (*sec.Endpoint, error)
+	// failpoint, when not nil, is called at named points inside the
+	// server where a test wants to hold it. Tests only.
+	failpoint func(name string)
 }
 
 func defaultOptions() options {

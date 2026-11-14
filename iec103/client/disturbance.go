@@ -180,7 +180,7 @@ func (t *transfer) tags(rec *iec103.Disturbance, reasons *[]string) error {
 		return err
 	}
 	ok, first := true, true
-	for {
+	for n := 0; ; n++ {
 		a, err := t.next(iec103.TypeTags)
 		if err != nil {
 			return err
@@ -191,6 +191,9 @@ func (t *transfer) tags(rec *iec103.Disturbance, reasons *[]string) error {
 				*reasons = append(*reasons, fmt.Sprintf("tags ended with TOO %d", e.TOO))
 			}
 			break
+		}
+		if err := t.c.limit(n, "request for tags"); err != nil {
+			return err
 		}
 		tg := a.Body.(iec103.Tags)
 		// Clause 7.4.7: the initial states come first, with position 0.

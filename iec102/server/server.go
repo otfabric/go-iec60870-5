@@ -34,20 +34,23 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	iec60870 "github.com/otfabric/go-iec60870-5"
 	"github.com/otfabric/go-iec60870-5/iec102"
+	"github.com/otfabric/go-iec60870-5/internal/callback"
 	"github.com/otfabric/go-iec60870-5/internal/logx"
 	"github.com/otfabric/go-iec60870-5/link"
 )
 
 // Handler handles the control-direction ASDUs the server does not answer
 // itself. Calls are made one at a time from a goroutine of the server; the
-// handler answers through the Server, whose methods it may call, all but
-// Close. Close waits for the goroutine that calls the handler: a handler
-// that stops the station calls Close in a new goroutine (go s.Close()),
-// which returns once the handler has returned.
+// handler answers through the Server, whose methods it may call. Close
+// from the handler does not wait for the handler's goroutine: it returns
+// at once, and the close completes when the handler has returned. A
+// handler that does not return normally is logged with its stack and
+// closes the server; [Server.Err] reports it.
 //
 // The ASDU is the handler's own: a new one is decoded for each call and the
 // server keeps no reference to it, so the handler may keep or modify it.
@@ -89,6 +92,8 @@ type Config struct {
 	// Store holds the records the server serves. Nil serves none.
 	Store *Store
 	// Clock returns the station's time for C_TI_NA_2. Nil means time.Now.
+	// A Clock that does not return normally closes the server, as for the
+	// Handler.
 	Clock func() time.Time
 
 	// Handler handles the other control-direction ASDUs. Nil refuses them
@@ -98,9 +103,9 @@ type Config struct {
 	QueueSize int
 	// OnState is called with each change of the link state: from the
 	// station's link goroutine on a reset of remote link, and from Close
-	// for StateClosed. It must return quickly and must not call Close,
-	// which waits for that goroutine; call Close in a new goroutine
-	// instead.
+	// for StateClosed. It must return quickly. It may call Close, which
+	// then does not wait for the link goroutine. An OnState that does not
+	// return normally is logged and closes the server, as for the Handler.
 	OnState func(s iec102.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger
@@ -124,6 +129,11 @@ type Server struct {
 
 	closeOnce sync.Once
 	closeErr  error
+
+	workID   atomic.Uint64 // the goroutine of work
+	onReader atomic.Uint64 // the link goroutine, while it calls OnState
+	failMu   sync.Mutex
+	failed   error // why a callback stopped the server
 }
 
 // New starts a server on rw. Close stops it and closes rw when it is an
@@ -153,7 +163,11 @@ func New(rw io.ReadWriter, cfg Config) (*Server, error) {
 		in:     make(chan []byte, 16),
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	sec, err := link.NewSecondary(rw, cfg.Link, cfg.LinkAddr, (*linkUser)(s))
+	lc := cfg.Link
+	if lc.Logger == nil {
+		lc.Logger = cfg.Logger
+	}
+	sec, err := link.NewSecondary(rw, lc, cfg.LinkAddr, (*linkUser)(s))
 	if err != nil {
 		s.cancel()
 		return nil, fmt.Errorf("%w: %w", iec102.ErrInvalidConfig, err)
@@ -166,26 +180,68 @@ func New(rw io.ReadWriter, cfg Config) (*Server, error) {
 
 // Close stops the station. Close is safe to call more than once and from
 // several goroutines: the first call closes the transport and returns its
-// error; later calls return nil. It must not be called from the Handler or
-// OnState (see [Handler]).
+// error; later calls return nil.
+//
+// Called from the Handler, the Clock or OnState, Close cannot wait for the
+// goroutine it runs on: it stops the server and returns nil at once, and
+// the close completes, StateClosed reported included, when that callback
+// has returned.
 func (s *Server) Close() error {
+	if id := callback.Goroutine(); id == s.workID.Load() || id == s.onReader.Load() {
+		s.closeAsync()
+		return nil
+	}
+	return s.close()
+}
+
+func (s *Server) closeAsync() {
+	s.cancel()
+	go func() { _ = s.close() }()
+}
+
+// stop ends the server after a callback did not return normally: Err
+// reports err from now on, unless the server was closing already.
+func (s *Server) stop(err error) {
+	s.failMu.Lock()
+	if s.failed == nil && s.ctx.Err() == nil {
+		s.failed = fmt.Errorf("%w: %w", iec102.ErrClosed, err)
+	}
+	s.failMu.Unlock()
+	s.closeAsync()
+}
+
+func (s *Server) close() error {
 	first := false
 	s.closeOnce.Do(func() {
 		first = true
 		s.cancel()
 		s.closeErr = s.sec.Close()
 		s.wg.Wait()
-		s.setState(iec102.StateClosed, nil)
 	})
-	if first {
-		return s.closeErr
+	if !first {
+		return nil
 	}
-	return nil
+	// Outside the Once: OnState(StateClosed) may call Close.
+	s.setState(iec102.StateClosed, nil)
+	return s.closeErr
 }
 
-// Done is closed when the station stops: after Close or a transport
-// failure.
+// Done is closed when the station stops: after Close, a transport
+// failure, or a callback that did not return normally. Err tells which.
 func (s *Server) Done() <-chan struct{} { return s.sec.Done() }
+
+// Err returns the error that stopped the station: the transport's, or that
+// of a callback that did not return normally (wrapping
+// [iec102.ErrClosed]); nil while it runs or after Close.
+func (s *Server) Err() error {
+	s.failMu.Lock()
+	failed := s.failed
+	s.failMu.Unlock()
+	if failed != nil {
+		return failed
+	}
+	return s.sec.Err()
+}
 
 // State returns the link state: up after the first reset of remote link.
 func (s *Server) State() iec102.State {
@@ -215,8 +271,10 @@ func (s *Server) setState(st iec102.State, err error) {
 	s.state = st
 	s.mu.Unlock()
 	s.log.Info("link state", "state", st.String(), "error", err)
-	if s.cfg.OnState != nil {
-		s.cfg.OnState(st, err)
+	if f := s.cfg.OnState; f != nil {
+		if cerr := callback.Call(s.log, "OnState", func() { f(st, err) }); cerr != nil {
+			s.stop(cerr)
+		}
 	}
 }
 
@@ -281,22 +339,38 @@ func (u *linkUser) Reset(user bool) {
 		s.mu.Lock()
 		s.queue = nil
 		s.mu.Unlock()
+		s.onReader.Store(callback.Goroutine())
 		s.setState(iec102.StateUp, nil)
+		s.onReader.Store(0)
 	}
 }
 
 func (s *Server) work() {
 	defer s.wg.Done()
+	s.workID.Store(callback.Goroutine())
 	for {
 		select {
 		case data := <-s.in:
+			if s.ctx.Err() != nil {
+				return // Close from a callback came first
+			}
 			a, err := iec102.Decode(data, s.cfg.Params)
 			if err != nil {
 				s.log.Warn("undecodable ASDU dropped", "error", err)
 				continue
 			}
-			if err := s.serve(a); err != nil {
-				s.log.Warn("answer not queued", "asdu", a.String(), "error", err)
+			// serve calls the application's Handler or Clock.
+			name := "Handler"
+			if r, ok := a.Body.(iec102.Read); ok && r.T == iec102.C_TI_NA_2 {
+				name = "Clock"
+			}
+			var serr error
+			if cerr := callback.Call(s.log, name, func() { serr = s.serve(a) }); cerr != nil {
+				s.stop(cerr)
+				return
+			}
+			if serr != nil {
+				s.log.Warn("answer not queued", "asdu", a.String(), "error", serr)
 			}
 		case <-s.ctx.Done():
 			return

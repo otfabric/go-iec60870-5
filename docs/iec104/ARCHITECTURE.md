@@ -200,6 +200,7 @@ reports when the peer has acknowledged that I frame, and only then is the
 event removed. A session that stops or ends returns its in-flight events to
 pending, in their original order. That is what makes delivery "at least
 once" across a switchover without the application tracking anything.
+`Server.Close` waits for the pump goroutines to end.
 
 ## Testing
 

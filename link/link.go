@@ -8,9 +8,13 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	iec60870 "github.com/otfabric/go-iec60870-5"
 	"github.com/otfabric/go-iec60870-5/ft12"
+	"github.com/otfabric/go-iec60870-5/internal/callback"
+	"github.com/otfabric/go-iec60870-5/internal/logx"
 )
 
 // Errors. They are wrapped with detail; test with errors.Is.
@@ -98,17 +102,25 @@ type Config struct {
 	FrameGap time.Duration
 
 	// OnFrame, when set, is called for every frame sent (tx true) and
-	// received. It runs on the station's goroutines and must not block
-	// or call Close, which waits for those goroutines. f.Data of a sent
-	// frame is the caller's data, of a received one the copy the
-	// station delivers: neither may be modified.
+	// received. It runs on the station's goroutines and must not block.
+	// It may call Close, which then does not wait for the goroutine the
+	// call runs on (see [Primary.Close]). f.Data of a sent frame is the
+	// caller's data, of a received one the copy the station delivers:
+	// neither may be modified.
 	OnFrame func(tx bool, f ft12.Frame)
 
 	// OnDiscard, when set, is called for octets that do not form a
 	// valid frame (line noise, checksum errors). It runs on the
-	// station's reader goroutine and must not call Close. b is the
-	// decoder's buffer, valid only during the call: copy what is kept.
+	// station's reader goroutine and may call Close, as OnFrame may. b
+	// is the decoder's buffer, valid only during the call: copy what is
+	// kept.
 	OnDiscard func(b []byte, err error)
+
+	// Logger receives the log entries of the station. A callback (OnFrame,
+	// OnDiscard, the station's handler) that does not return normally is
+	// logged as an error with its stack, and stops the station: Done is
+	// closed and Err reports it, wrapping [ErrClosed]. Nil is silent.
+	Logger iec60870.Logger
 }
 
 func (c Config) withDefaults() (Config, error) {
@@ -153,6 +165,11 @@ type Status struct {
 type port struct {
 	cfg Config
 	rw  io.ReadWriter
+	log *logx.Logger
+
+	// readerID and writerID are the goroutines of run and writer, so that
+	// close called from a callback on one of them does not wait for it.
+	readerID, writerID atomic.Uint64
 
 	tx chan ft12.Frame // frames for the writer goroutine
 
@@ -169,8 +186,8 @@ type port struct {
 	writeDone chan struct{}
 }
 
-func newPort(rw io.ReadWriter, cfg Config) *port {
-	p := &port{cfg: cfg, rw: rw, tx: make(chan ft12.Frame, 16), done: make(chan struct{}), readDone: make(chan struct{}), writeDone: make(chan struct{})}
+func newPort(rw io.ReadWriter, cfg Config, component string) *port {
+	p := &port{cfg: cfg, rw: rw, log: logx.New(cfg.Logger, component), tx: make(chan ft12.Frame, 16), done: make(chan struct{}), readDone: make(chan struct{}), writeDone: make(chan struct{})}
 	go p.writer()
 	return p
 }
@@ -180,6 +197,7 @@ func newPort(rw io.ReadWriter, cfg Config) *port {
 // stations answer from the reader while their peer does the same).
 func (p *port) writer() {
 	defer close(p.writeDone)
+	p.writerID.Store(callback.Goroutine())
 	var buf []byte
 	for {
 		select {
@@ -195,7 +213,10 @@ func (p *port) writer() {
 			}
 			buf, _ = f.Append(buf[:0], p.cfg.FT12) // validated by write
 			if p.cfg.OnFrame != nil {
-				p.cfg.OnFrame(true, f)
+				if err := callback.Call(p.log, "OnFrame", func() { p.cfg.OnFrame(true, f) }); err != nil {
+					p.fail(err)
+					return
+				}
 			}
 			if _, err := p.rw.Write(buf); err != nil {
 				select {
@@ -212,11 +233,20 @@ func (p *port) writer() {
 }
 
 // run reads frames until the transport fails or the port is closed, and
-// hands each to deliver. Data is copied.
-func (p *port) run(deliver func(ft12.Frame)) {
+// hands each to deliver, the station's handling of a frame, which calls
+// the application's handler. Data is copied. A frame read after the
+// station stopped is not delivered.
+func (p *port) run(handler string, deliver func(ft12.Frame)) {
 	defer close(p.readDone)
+	p.readerID.Store(callback.Goroutine())
 	d := ft12.NewDecoder(p.rw, p.cfg.FT12)
-	d.OnDiscard = p.cfg.OnDiscard
+	if f := p.cfg.OnDiscard; f != nil {
+		d.OnDiscard = func(b []byte, err error) {
+			if cerr := callback.Call(p.log, "OnDiscard", func() { f(b, err) }); cerr != nil {
+				p.fail(cerr)
+			}
+		}
+	}
 	d.Gap = p.cfg.FrameGap
 	for {
 		f, err := d.Next()
@@ -229,14 +259,37 @@ func (p *port) run(deliver func(ft12.Frame)) {
 			p.shutdown()
 			return
 		}
+		select {
+		case <-p.done:
+			return // closed, or stopped by a callback
+		default:
+		}
 		if f.Data != nil {
 			f.Data = append([]byte(nil), f.Data...)
 		}
 		if p.cfg.OnFrame != nil {
-			p.cfg.OnFrame(false, f)
+			if err := callback.Call(p.log, "OnFrame", func() { p.cfg.OnFrame(false, f) }); err != nil {
+				p.fail(err)
+				return
+			}
 		}
-		deliver(f)
+		if err := callback.Call(p.log, handler, func() { deliver(f) }); err != nil {
+			p.fail(err)
+			return
+		}
 	}
+}
+
+// fail stops the station after a callback did not return normally: err,
+// wrapped in ErrClosed, is what Err reports.
+func (p *port) fail(err error) {
+	select {
+	case <-p.done:
+	default:
+		p.setErr(fmt.Errorf("%w: %w", ErrClosed, err))
+	}
+	p.shutdown()
+	_ = p.closeTransport() // unblock the reader
 }
 
 // write queues f for the writer goroutine.
@@ -285,17 +338,26 @@ func (p *port) closeTransport() error {
 // It is safe to call more than once and from several goroutines: the
 // first call closes the transport and returns its error, later calls
 // return nil. The reader returns only when closing the transport unblocks
-// its Read, so the transport must be an io.Closer whose Close does.
+// its Read: without an io.Closer, close does not wait for it, and it ends
+// when its pending Read returns, delivering nothing more. Called on the
+// reader or the writer goroutine (from a callback), close does not wait
+// for that goroutine, which ends when the callback has returned.
 func (p *port) close() error {
 	p.shutdown()
 	err := p.closeTransport()
-	<-p.readDone
-	<-p.writeDone
+	id := callback.Goroutine()
+	if _, ok := p.rw.(io.Closer); ok && id != p.readerID.Load() {
+		<-p.readDone
+	}
+	if id != p.writerID.Load() {
+		<-p.writeDone
+	}
 	return err
 }
 
-// Err returns the error that stopped the reader, nil while it runs or
-// after Close.
+// Err returns the error that stopped the reader (a transport error, or a
+// callback that did not return normally), nil while it runs or after
+// Close.
 func (p *port) err() error {
 	select {
 	case <-p.readDone:

@@ -83,8 +83,9 @@ type Config struct {
 
 	// OnState is called with each change of the link state, from the
 	// goroutine that changed it: the link's reader (unbalanced), the
-	// server's supervisor (balanced), or Close. It must not call Close,
-	// which waits for those goroutines: call it in a new goroutine.
+	// server's supervisor (balanced), or Close. It may call Close, as the
+	// Handler may; one that does not return normally closes the server,
+	// as for the Handler.
 	OnState func(s iec101.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger
@@ -101,7 +102,7 @@ type Handler interface {
 }
 ```
 
-Handler handles the control-direction ASDUs of the controlling station. Calls are made one at a time from a goroutine of the server; a handler answers through the Server (Confirm, Terminate, Send, ...), which only queues. It must not call Close: Close waits for the handler's goroutine. Call it in a new goroutine (go s.Close()); it returns once the handler has returned.
+Handler handles the control-direction ASDUs of the controlling station. Calls are made one at a time from a goroutine of the server; a handler answers through the Server (Confirm, Terminate, Send, ...), which only queues. It may call Close, which then does not wait for the handler's goroutine: it returns at once and the close completes when the handler has returned. A handler that does not return normally is logged with its stack and closes the server; [Server.Err](#func-server-err) reports it.
 
 ### type HandlerFunc
 
@@ -132,6 +133,12 @@ type Server struct {
 
 	// received requests for the handler goroutine
 
+	// handlerID and superID are the goroutines of handle and of the
+	// balanced supervisor; onReader is the reader goroutine of the link
+	// while it calls OnState.
+
+	// why a callback stopped the server
+
 }
 ```
 
@@ -151,7 +158,9 @@ New starts a controlled station on rw. Close stops it and closes rw when it is a
 func (s *Server) Close() error
 ```
 
-Close stops the station and waits for its goroutines. Close is safe to call more than once and from several goroutines: the first call closes the transport and returns its error; later calls return nil. It must not be called from the Handler or Config.OnState (see there).
+Close stops the station and waits for its goroutines. Close is safe to call more than once and from several goroutines: the first call closes the transport and returns its error; later calls return nil.
+
+Called from the Handler or Config.OnState on one of the server's goroutines, Close cannot wait for that goroutine: it stops the server and returns nil at once, and the close completes, StateClosed reported included, when the callback has returned.
 
 #### func (Server) Confirm
 
@@ -175,7 +184,7 @@ Done is closed when the station stops: after Close, or when the transport fails 
 func (s *Server) Err() error
 ```
 
-Err returns the transport error that stopped the station, nil while it runs or after Close.
+Err returns the error that stopped the station: the transport's, or that of a callback that did not return normally (wrapping [iec101.ErrClosed](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec101#ErrClosed)); nil while it runs or after Close.
 
 #### func (Server) Negative
 

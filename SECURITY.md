@@ -46,7 +46,14 @@ IEC 103 server does not apply a time synchronization flagged invalid or
 outside the CP56Time2a years 1970 to 2069, and holds its clock offset
 within ±36525 days. The IEC 102 client takes as an answer only what
 repeats the request's information object, and drains the rest of an
-unfinished answer before the next request.
+unfinished answer before the next request. The clients of IEC 101, 102
+and 103 bound the ASDUs one request collects (`Config.MaxResult`, an
+error wrapping `telecontrol.ErrResultLimit`, `iec102.ErrResultLimit` or
+`iec103.ErrResultLimit`), so a station that keeps answering ends the
+request at the bound instead of growing it until its deadline. A
+callback of a serial station (a handler, OnState, `link.Config.OnFrame`
+and `OnDiscard`) that does not return normally is logged with its stack
+and stops that station only; `Err` reports it.
 
 ### IEC 60870-5-104 Has No Built-In Security
 
@@ -136,7 +143,8 @@ Gaps against the TS, open:
 ### Input Handling
 
 - Every received APDU and ASDU is length- and structure-checked before use; malformed input closes the connection (APDU) or is dropped (ASDU) and cannot cause a panic. The decoders are fuzzed
-- Memory per connection is bounded, except for the files a `FileServer` with a `Sink` accepts, whose number per session is not capped: frames are at most 255 octets, a security message is reassembled up to the longest the A-Profile defines (above), and a slow handler stops acknowledgements and ultimately reading instead of queueing without limit
+- Memory per connection is bounded: a `FileServer` has at most `FileServer.MaxTransfers` transfers open per session (`DefaultMaxTransfers`, 16), files fetched and delivered together, and refuses one more like a file it does not have; frames are at most 255 octets, a security message is reassembled up to the longest the A-Profile defines (above), and a slow handler stops acknowledgements and ultimately reading instead of queueing without limit
 - A file section that a controlling station announces (F_SR_NA_1) reserves no memory before its data arrives: an upload grows only with the segments received
 - A TLS handshake must complete within `t0`; a peer that connects and stays silent does not hold a session
+- A Handler, state handler, start handler or switch handler of `iec104/client` that does not return normally is logged with its stack and closes that client (or its group) only; the state handler is told "disconnected" with an error that wraps `iec104.ErrClosed`
 - A panic in a server handler closes that session only

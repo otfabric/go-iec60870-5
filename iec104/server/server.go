@@ -62,6 +62,9 @@ type Server struct {
 
 	groups []*group
 	done   chan struct{} // closed by Close
+	// pumps counts the goroutines of the event queues, which Close waits
+	// for; one is added only under mu while the server is not closed.
+	pumps sync.WaitGroup
 
 	// closing is what Close took over: written under mu by the first
 	// Close, and err by the goroutine that finishes it, before it closes
@@ -285,6 +288,25 @@ func (s *Server) remove(sess *Session) {
 	s.mu.Unlock()
 }
 
+// startPump counts the goroutine of an event queue for Close, and reports
+// false once the server is closed: the queue then has nothing to send to.
+func (s *Server) startPump() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false
+	}
+	s.pumps.Add(1)
+	return true
+}
+
+// at marks a named point for tests; see options.failpoint.
+func (s *Server) at(name string) {
+	if f := s.opts.failpoint; f != nil {
+		f(name)
+	}
+}
+
 func (s *Server) isClosed() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -348,12 +370,11 @@ func (s *Server) Broadcast(ctx context.Context, a *asdu.ASDU) (int, error) {
 
 // Close stops listening and closes every session, as [Session.Close] does:
 // when it returns no handler is running or will run. The event queues of
-// the redundancy groups ([Server.Enqueue]) stop sending at Close; the
-// goroutine of each ends when the send it may be in has ended, which Close
-// does not wait for. Serve returns [ErrServerClosed]. Close is safe to call
-// more than once and from several goroutines; called from a callback of a
-// session it returns at once and the close completes when the callback has
-// returned.
+// the redundancy groups ([Server.Enqueue]) stop sending at Close, and
+// Close waits for the goroutine of each to end. Serve returns
+// [ErrServerClosed]. Close is safe to call more than once and from several
+// goroutines; called from a callback of a session it returns at once and
+// the close completes when the callback has returned.
 func (s *Server) Close() error {
 	s.mu.Lock()
 	first := !s.closed
@@ -391,6 +412,9 @@ func (s *Server) Close() error {
 				<-sess.link.Dispatched()
 				s.remove(sess)
 			}
+			// The event queues: their sessions are gone, so a send in
+			// progress has ended.
+			s.pumps.Wait()
 			close(s.closing.done)
 		}()
 	}

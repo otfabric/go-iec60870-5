@@ -74,6 +74,9 @@ type FileSink interface {
 	StoreFile(s *Session, ca asdu.CommonAddr, ioa asdu.IOA, name uint16, file File) error
 }
 
+// DefaultMaxTransfers is the default of [FileServer.MaxTransfers].
+const DefaultMaxTransfers = 16
+
 // FileTypes lists the type identifications a [FileServer] handles, for
 // registering it with [Mux.Handle]: the calls and acknowledgements of a
 // controlling station that fetches a file or the directory, and what it
@@ -114,9 +117,9 @@ var ErrFileNotAcknowledged = errors.New("iec104: file transfer not acknowledged"
 // A file the [FileSource] does not have, or the [FileSink] does not accept,
 // is refused by mirroring the request with cause "unknown information object
 // address". A length or checksum that does not match what arrived is
-// acknowledged negatively. A session transfers any number of files at once,
-// one per address and direction; starting an address again starts over.
-// Transfers end with their session.
+// acknowledged negatively. A session transfers up to
+// [FileServer.MaxTransfers] files at once, one per address and direction;
+// starting an address again starts over. Transfers end with their session.
 //
 // Register it for [FileTypes]:
 //
@@ -142,6 +145,18 @@ type FileServer struct {
 	// is not called for a transfer that ends because its session did. Set
 	// it before the server starts.
 	OnDone func(s *Session, ca asdu.CommonAddr, ioa asdu.IOA, name uint16, err error)
+
+	// MaxTransfers bounds the transfers one session has open at once,
+	// files fetched and files delivered together. A selection or a file
+	// ready beyond it is refused like a file the station does not have,
+	// until a transfer of that session ends. The bound keeps the memory a
+	// session holds in check: an open delivery keeps what arrived of up to
+	// [asdu.MaxFileLength] octets, and IEC 60870-5-101 7.4.11 has the
+	// files of a station transferred one after the other, so an ordinary
+	// controlling station has one or two open. Zero means
+	// [DefaultMaxTransfers]; negative means no bound, as before v0.6.0.
+	// Set it before the server starts.
+	MaxTransfers int
 
 	source FileSource
 
@@ -186,6 +201,36 @@ func NewFileServer(source FileSource) *FileServer {
 		uploads:   make(map[fileKey]*fileUpload),
 		watched:   make(map[*Session]struct{}),
 	}
+}
+
+// full reports whether session s has as many transfers open as
+// MaxTransfers allows, and logs the refusal.
+func (f *FileServer) full(s *Session) bool {
+	limit := f.MaxTransfers
+	if limit == 0 {
+		limit = DefaultMaxTransfers
+	}
+	if limit < 0 {
+		return false
+	}
+	n := 0
+	f.mu.Lock()
+	for k := range f.transfers {
+		if k.s == s {
+			n++
+		}
+	}
+	for k := range f.uploads {
+		if k.s == s {
+			n++
+		}
+	}
+	f.mu.Unlock()
+	if n < limit {
+		return false
+	}
+	s.log.Warn("file transfer refused: the session has the most transfers open", "open", n, "max", limit)
+	return true
 }
 
 func fileChecksum(sections ...[]byte) (sum uint8) {
@@ -342,7 +387,7 @@ func (f *FileServer) receive(s *Session, a *asdu.ASDU) error {
 		if old := f.takeUpload(key); old != nil && f.OnDone != nil {
 			f.OnDone(s, key.ca, key.ioa, old.name, ErrFileNotAcknowledged)
 		}
-		if f.Sink == nil || o.Qualifier&asdu.FileNegative != 0 ||
+		if f.Sink == nil || o.Qualifier&asdu.FileNegative != 0 || f.full(s) ||
 			!f.Sink.AcceptFile(s, a.CommonAddr, o.IOA, o.Name, int(o.Length)) {
 			return refuse()
 		}
@@ -488,7 +533,7 @@ func (f *FileServer) call(s *Session, a *asdu.ASDU, o asdu.FileCall) error {
 		}
 		var file File
 		ok := false
-		if f.source != nil {
+		if f.source != nil && !f.full(s) {
 			file, ok = f.source.OpenFile(s, a.CommonAddr, o.IOA, o.Name)
 		}
 		if !ok {

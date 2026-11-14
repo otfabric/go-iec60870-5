@@ -24,11 +24,13 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	iec60870 "github.com/otfabric/go-iec60870-5"
 	"github.com/otfabric/go-iec60870-5/asdu"
 	"github.com/otfabric/go-iec60870-5/iec101"
+	"github.com/otfabric/go-iec60870-5/internal/callback"
 	"github.com/otfabric/go-iec60870-5/internal/logx"
 	"github.com/otfabric/go-iec60870-5/link"
 	"github.com/otfabric/go-iec60870-5/telecontrol"
@@ -40,6 +42,10 @@ const (
 	DefaultRequestTimeout = 10 * time.Second
 	DefaultRetryInterval  = 2 * time.Second
 	DefaultTestInterval   = 10 * time.Second
+	// DefaultMaxResult is the default of Config.MaxResult: an
+	// interrogation of 65536 ASDUs, each of one or more objects, is far
+	// beyond what a controlled station holds.
+	DefaultMaxResult = 65536
 )
 
 // Config configures a client.
@@ -66,6 +72,12 @@ type Config struct {
 	// test function for link. Zero means [DefaultTestInterval]; negative
 	// disables the test.
 	TestInterval time.Duration
+	// MaxResult bounds the ASDUs one interrogation or counter
+	// interrogation collects: the request that would collect more ends
+	// with an error wrapping [telecontrol.ErrResultLimit], with the ASDUs
+	// so far, instead of growing until its deadline. Zero means
+	// [DefaultMaxResult]; negative means no bound, as before v0.6.0.
+	MaxResult int
 
 	// Handler receives every monitor-direction ASDU that is not a mirror of
 	// a request: spontaneous and cyclic data, and the data that answers an
@@ -74,24 +86,30 @@ type Config struct {
 	// of 256 (in balanced transmission the link refuses user data, DFC
 	// set, while more than half of them wait).
 	//
-	// The Handler must not wait for the station. While it runs nothing
-	// empties the queue, so a request made from it waits for answers that
-	// cannot get in once the queue is full (unbalanced: the poller waits
-	// for room; balanced: the link refuses them), and fails at its
-	// deadline when the station sends more ASDUs than that first (an
-	// interrogation of more than 256 objects, say). In unbalanced
-	// transmission Send waits for the poller in the same way. Make such
-	// calls from another goroutine. The Handler must not call Close
-	// either: Close waits for its goroutine. Call it in a new goroutine
-	// (go c.Close()); it returns once the Handler has returned.
+	// The Handler must not wait for the station: while it runs nothing
+	// empties the queue, and the answers a request waits for go through
+	// it. A request method that waits for an answer (Interrogate,
+	// CounterInterrogate, Read, Command, Deactivate, ClockSync,
+	// TestCommand, ResetProcess, MeasureDelay) called from the Handler
+	// returns [iec101.ErrInHandler] at once. Send and SetDelay wait only
+	// for the link layer; in unbalanced transmission that is the poller,
+	// which waits for room in the queue, so they too are best made from
+	// another goroutine. The Handler may call Close, which then does not
+	// wait for the Handler's goroutine: it returns at once, the Handler is
+	// not called again, and the client completes the close when the
+	// Handler has returned. A Handler that does not return normally is
+	// logged with its stack and closes the client; Err reports it.
 	Handler func(a *asdu.ASDU)
 	// OnState is called with each change of the link state, from the
 	// goroutine that changed it: one of the client's own goroutines, or
 	// Close. WaitUp returns only after OnState for the change to StateUp
 	// has returned, so what the callback sets up is in place when WaitUp
 	// returns. State reports a change before OnState for it is called.
-	// OnState must not call Close, which waits for those goroutines: call
-	// it in a new goroutine.
+	// Called on one of the client's goroutines, OnState cannot have a
+	// request answered: the request methods, Send and SetDelay return
+	// [iec101.ErrInHandler]; start them in a new goroutine. It may call
+	// Close, as the Handler may. An OnState that does not return normally
+	// is logged and closes the client, as for the Handler.
 	OnState func(s iec101.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger
@@ -118,6 +136,12 @@ type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	// handlerID and superID are the goroutines of deliver and of the
+	// supervisor (poller), on which the callbacks run.
+	handlerID, superID atomic.Uint64
+	failMu             sync.Mutex
+	failed             error // why a callback stopped the client
 }
 
 type sendReq struct {
@@ -149,6 +173,12 @@ func New(rw io.ReadWriter, cfg Config) (*Client, error) {
 	if cfg.TestInterval == 0 {
 		cfg.TestInterval = DefaultTestInterval
 	}
+	switch {
+	case cfg.MaxResult == 0:
+		cfg.MaxResult = DefaultMaxResult
+	case cfg.MaxResult < 0:
+		cfg.MaxResult = 0 // no bound
+	}
 	c := &Client{
 		cfg:     cfg,
 		log:     logx.New(cfg.Logger, "iec101.client", "link", cfg.LinkAddr),
@@ -157,16 +187,20 @@ func New(rw io.ReadWriter, cfg Config) (*Client, error) {
 		upCh:    make(chan struct{}),
 		kick:    make(chan struct{}, 1),
 	}
-	c.req = telecontrol.Requester{Params: p.ASDU, Send: c.send, Timeout: cfg.RequestTimeout}
+	c.req = telecontrol.Requester{Params: p.ASDU, Send: c.send, Timeout: cfg.RequestTimeout, MaxResult: cfg.MaxResult}
 	c.ctx, c.cancel = context.WithCancel(context.Background())
+	lc := p.Link
+	if lc.Logger == nil {
+		lc.Logger = cfg.Logger
+	}
 	if p.Mode == iec101.ModeBalanced {
-		c.bal, err = link.NewBalanced(rw, p.Link,
+		c.bal, err = link.NewBalanced(rw, lc,
 			link.BalancedConfig{Addr: cfg.OwnAddr, Remote: cfg.LinkAddr, DIR: true}, balancedUser{c})
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", iec101.ErrInvalidConfig, err)
 		}
 	} else {
-		c.pri, err = link.NewPrimary(rw, p.Link)
+		c.pri, err = link.NewPrimary(rw, lc)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %w", iec101.ErrInvalidConfig, err)
 		}
@@ -190,9 +224,16 @@ func (c *Client) Done() <-chan struct{} {
 	return c.pri.Done()
 }
 
-// Err returns the transport error that stopped the station, nil while it
-// runs or after Close.
+// Err returns the error that stopped the station: the transport's, or that
+// of a callback that did not return normally (wrapping
+// [iec101.ErrClosed]); nil while it runs or after Close.
 func (c *Client) Err() error {
+	c.failMu.Lock()
+	failed := c.failed
+	c.failMu.Unlock()
+	if failed != nil {
+		return failed
+	}
 	if c.bal != nil {
 		return c.bal.Err()
 	}
@@ -238,11 +279,24 @@ func (c *Client) WaitUp(ctx context.Context) error {
 }
 
 // Close stops the station and waits for its goroutines. Outstanding
-// requests fail with [iec101.ErrClosed]. Close is safe to call more than
-// once and from several goroutines: the first call closes the transport
-// and returns its error; later calls return nil. It must not be called
-// from Config.Handler or Config.OnState (see there).
+// requests, and requests made afterwards, fail with [iec101.ErrClosed].
+// Close is safe to call more than once and from several goroutines: the
+// first call closes the transport and returns its error; later calls
+// return nil.
+//
+// Called from Config.Handler or Config.OnState on one of the client's
+// goroutines, Close cannot wait for that goroutine: it stops the client
+// and returns nil at once, and the close completes, StateClosed reported
+// included, when the callback has returned.
 func (c *Client) Close() error {
+	if c.own() {
+		c.closeAsync()
+		return nil
+	}
+	return c.close()
+}
+
+func (c *Client) close() error {
 	c.mu.Lock()
 	if c.state == iec101.StateClosed {
 		c.mu.Unlock()
@@ -250,6 +304,9 @@ func (c *Client) Close() error {
 	}
 	c.mu.Unlock()
 	c.cancel()
+	// Before the goroutines are joined: a request waiting for an answer
+	// learns at once that none will come.
+	c.req.FailAll(iec101.ErrClosed)
 	var err error
 	if c.bal != nil {
 		err = c.bal.Close()
@@ -260,6 +317,41 @@ func (c *Client) Close() error {
 	c.setState(iec101.StateClosed, nil)
 	c.req.FailAll(iec101.ErrClosed)
 	return err
+}
+
+// closeAsync stops the client from one of its own goroutines and completes
+// the close on a new one.
+func (c *Client) closeAsync() {
+	c.cancel()
+	c.req.FailAll(iec101.ErrClosed)
+	go func() { _ = c.close() }()
+}
+
+// own reports whether the caller runs on one of the client's goroutines:
+// the Handler's or the supervisor's.
+func (c *Client) own() bool {
+	id := callback.Goroutine()
+	return id == c.handlerID.Load() || id == c.superID.Load()
+}
+
+// stop ends the client after a callback did not return normally: Err
+// reports err from now on, unless the client was closing already.
+func (c *Client) stop(err error) {
+	c.failMu.Lock()
+	if c.failed == nil && c.ctx.Err() == nil {
+		c.failed = fmt.Errorf("%w: %w", iec101.ErrClosed, err)
+	}
+	c.failMu.Unlock()
+	c.closeAsync()
+}
+
+// inHandler returns [iec101.ErrInHandler] for a request made on one of the
+// client's own goroutines.
+func (c *Client) inHandler(what string) error {
+	if c.own() {
+		return fmt.Errorf("%w: %s", iec101.ErrInHandler, what)
+	}
+	return nil
 }
 
 func (c *Client) setState(s iec101.State, err error) {
@@ -283,12 +375,15 @@ func (c *Client) setState(s iec101.State, err error) {
 		}
 	}
 	c.mu.Unlock()
-	if s == iec101.StateDown {
+	if s == iec101.StateDown && c.ctx.Err() == nil {
 		c.req.FailAll(fmt.Errorf("%w: %w", iec101.ErrLinkDown, err))
 	}
 	c.log.Info("link state", "state", s.String(), "error", err)
-	if c.cfg.OnState != nil {
-		c.cfg.OnState(s, err)
+	if f := c.cfg.OnState; f != nil {
+		if cerr := callback.Call(c.log, "OnState", func() { f(s, err) }); cerr != nil {
+			c.stop(cerr)
+			return
+		}
 	}
 	if s == iec101.StateUp {
 		// WaitUp returns only now, after OnState(StateUp) returned, and
@@ -328,11 +423,16 @@ func (c *Client) receive(data []byte) {
 
 func (c *Client) deliver() {
 	defer c.wg.Done()
+	c.handlerID.Store(callback.Goroutine())
 	for {
 		select {
 		case a := <-c.handled:
-			if c.cfg.Handler != nil {
-				c.cfg.Handler(a)
+			// Not after Close from a callback, which may have come first.
+			if h := c.cfg.Handler; h != nil && c.ctx.Err() == nil {
+				if err := callback.Call(c.log, "Handler", func() { h(a) }); err != nil {
+					c.stop(err)
+					return
+				}
 			}
 		case <-c.ctx.Done():
 			return
@@ -343,6 +443,13 @@ func (c *Client) deliver() {
 // send transmits a control-direction ASDU and returns when the link layer
 // confirmed it.
 func (c *Client) send(ctx context.Context, a *asdu.ASDU) error {
+	if c.ctx.Err() != nil {
+		return iec101.ErrClosed
+	}
+	if c.superID.Load() == callback.Goroutine() {
+		// The supervisor is the goroutine that would send it.
+		return fmt.Errorf("%w: %s", iec101.ErrInHandler, a.Type)
+	}
 	if c.State() != iec101.StateUp {
 		return iec101.ErrLinkDown
 	}
@@ -369,6 +476,9 @@ func (c *Client) send(ctx context.Context, a *asdu.ASDU) error {
 	// the FCB in doubt), but the request ends at its deadline.
 	select {
 	case err := <-r.done:
+		if err != nil && c.ctx.Err() != nil {
+			return iec101.ErrClosed // the link failed because of Close
+		}
 		return err
 	case <-ctx.Done():
 		return ctx.Err()
@@ -408,6 +518,7 @@ func (c *Client) sleep(d time.Duration) bool {
 
 func (c *Client) runUnbalanced() {
 	defer c.wg.Done()
+	c.superID.Store(callback.Goroutine())
 	addr := c.cfg.LinkAddr
 	var acd, dfc bool
 	for c.ctx.Err() == nil {
@@ -497,6 +608,7 @@ func (c *Client) runUnbalanced() {
 // half way.
 func (c *Client) runBalanced() {
 	defer c.wg.Done()
+	c.superID.Store(callback.Goroutine())
 	var test *time.Timer
 	var testC <-chan time.Time
 	if c.cfg.TestInterval > 0 {
@@ -558,17 +670,31 @@ func (u balancedUser) Busy() bool { return len(u.c.handled) > cap(u.c.handled)/2
 // Interrogate runs an interrogation (C_IC_NA_1) with qualifier qoi
 // ([asdu.QOIStation] or [asdu.QOIGroup]) and returns the data the station
 // sent with the matching cause until the activation termination.
+//
+// More ASDUs than Config.MaxResult end it with an error wrapping
+// [telecontrol.ErrResultLimit]. Called from the Handler or OnState it
+// returns [iec101.ErrInHandler].
 func (c *Client) Interrogate(ctx context.Context, ca asdu.CommonAddr, qoi asdu.QOI) ([]*asdu.ASDU, error) {
+	if err := c.inHandler("interrogation"); err != nil {
+		return nil, err
+	}
 	return c.req.Interrogate(ctx, ca, qoi)
 }
 
-// CounterInterrogate runs a counter interrogation (C_CI_NA_1).
+// CounterInterrogate runs a counter interrogation (C_CI_NA_1), bounded by
+// Config.MaxResult as Interrogate is.
 func (c *Client) CounterInterrogate(ctx context.Context, ca asdu.CommonAddr, request, freeze uint8) ([]*asdu.ASDU, error) {
+	if err := c.inHandler("counter interrogation"); err != nil {
+		return nil, err
+	}
 	return c.req.CounterInterrogate(ctx, ca, request, freeze)
 }
 
 // Read reads one information object (C_RD_NA_1).
 func (c *Client) Read(ctx context.Context, ca asdu.CommonAddr, ioa asdu.IOA) (*asdu.ASDU, error) {
+	if err := c.inHandler("read"); err != nil {
+		return nil, err
+	}
 	return c.req.Read(ctx, ca, ioa)
 }
 
@@ -576,26 +702,41 @@ func (c *Client) Read(ctx context.Context, ca asdu.CommonAddr, ioa asdu.IOA) (*a
 // confirmation. For select-before-operate call it twice, first with the
 // object's Select set. A refusal is a [*telecontrol.NegativeError].
 func (c *Client) Command(ctx context.Context, ca asdu.CommonAddr, obj asdu.InformationObject) error {
+	if err := c.inHandler("command"); err != nil {
+		return err
+	}
 	return c.req.Command(ctx, ca, obj, false)
 }
 
 // Deactivate cancels a selected command (cause deactivation).
 func (c *Client) Deactivate(ctx context.Context, ca asdu.CommonAddr, obj asdu.InformationObject) error {
+	if err := c.inHandler("deactivation"); err != nil {
+		return err
+	}
 	return c.req.Command(ctx, ca, obj, true)
 }
 
 // ClockSync synchronizes the station's clock (C_CS_NA_1).
 func (c *Client) ClockSync(ctx context.Context, ca asdu.CommonAddr, t time.Time) error {
+	if err := c.inHandler("clock synchronization"); err != nil {
+		return err
+	}
 	return c.req.ClockSync(ctx, ca, t)
 }
 
 // TestCommand sends C_TS_NA_1 with the fixed test bit pattern.
 func (c *Client) TestCommand(ctx context.Context, ca asdu.CommonAddr) error {
+	if err := c.inHandler("test command"); err != nil {
+		return err
+	}
 	return c.req.TestCommand(ctx, ca, false)
 }
 
 // ResetProcess sends a reset process command (C_RP_NA_1).
 func (c *Client) ResetProcess(ctx context.Context, ca asdu.CommonAddr, qualifier uint8) error {
+	if err := c.inHandler("reset process"); err != nil {
+		return err
+	}
 	return c.req.ResetProcess(ctx, ca, qualifier)
 }
 
@@ -610,5 +751,8 @@ func (c *Client) SetDelay(ctx context.Context, ca asdu.CommonAddr, d time.Durati
 // procedure (C_CD_NA_1, cause activation). See
 // [telecontrol.Requester.MeasureDelay].
 func (c *Client) MeasureDelay(ctx context.Context, ca asdu.CommonAddr) (time.Duration, error) {
+	if err := c.inHandler("delay acquisition"); err != nil {
+		return 0, err
+	}
 	return c.req.MeasureDelay(ctx, ca)
 }

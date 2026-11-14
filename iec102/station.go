@@ -24,6 +24,10 @@ var (
 	// request mirrored with the P/N bit or one of the causes 13..18. The
 	// error is a [*RefusedError].
 	ErrNegative = errors.New("iec102: request refused")
+	// ErrResultLimit reports a request whose answer has more ASDUs than
+	// the client's Config.MaxResult allows: the request ends there, with
+	// the ASDUs so far.
+	ErrResultLimit = errors.New("iec102: result limit reached")
 )
 
 // RefusedError is the refusal of a request; errors.Is(err, ErrNegative)

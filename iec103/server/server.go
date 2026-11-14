@@ -33,12 +33,14 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	iec60870 "github.com/otfabric/go-iec60870-5"
 	"github.com/otfabric/go-iec60870-5/cp"
 	"github.com/otfabric/go-iec60870-5/ft12"
 	"github.com/otfabric/go-iec60870-5/iec103"
+	"github.com/otfabric/go-iec60870-5/internal/callback"
 	"github.com/otfabric/go-iec60870-5/internal/logx"
 	"github.com/otfabric/go-iec60870-5/link"
 )
@@ -49,9 +51,10 @@ import (
 // disturbance orders (ASDUs 24 and 25) when no [DisturbanceSource] is
 // configured, and any private ASDU. Calls are made one at a time from a
 // goroutine of the server; the handler answers through the Server, whose
-// methods it may call, all but Close. Close waits for the goroutine that
-// calls the handler: a handler that stops the station calls Close in a new
-// goroutine (go s.Close()), which returns once the handler has returned.
+// methods it may call. Close from the handler does not wait for the
+// handler's goroutine: it returns at once, and the close completes when
+// the handler has returned. A handler that does not return normally is
+// logged with its stack and closes the server; [Server.Err] reports it.
 //
 // The ASDU is the handler's own: a new one is decoded for each call and the
 // server keeps no reference to it, so the handler may keep or modify it.
@@ -132,13 +135,15 @@ type Config struct {
 	// synchronization is always answered.
 	AnswerBroadcastSync bool
 	// OnTimeSync is called with each synchronization time the server
-	// applies, from the goroutine that calls the Handler.
+	// applies, from the goroutine that calls the Handler, under the same
+	// rules as the Handler.
 	OnTimeSync func(t time.Time, broadcast bool)
 
 	// OnState is called with each change of the link state: from the
 	// station's link goroutine on a reset, and from Close for
-	// StateClosed. It must return quickly and must not call Close, which
-	// waits for that goroutine; call Close in a new goroutine instead.
+	// StateClosed. It must return quickly. It may call Close, which then
+	// does not wait for the link goroutine. An OnState that does not
+	// return normally is logged and closes the server, as for the Handler.
 	OnState func(s iec103.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger
@@ -180,6 +185,11 @@ type Server struct {
 
 	closeOnce sync.Once
 	closeErr  error
+
+	handleID atomic.Uint64 // the goroutine of handle
+	onReader atomic.Uint64 // the link goroutine, while it calls OnState
+	failMu   sync.Mutex
+	failed   error // why a callback stopped the server
 }
 
 // queued is a monitor-direction ASDU waiting to be polled; cycle marks the
@@ -248,8 +258,12 @@ func New(rw io.ReadWriter, cfg Config) (*Server, error) {
 		s.ca = cfg.LinkAddr
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
+	lc := cfg.Link
+	if lc.Logger == nil {
+		lc.Logger = cfg.Logger
+	}
 	var err error
-	s.sec, err = link.NewSecondary(rw, cfg.Link, uint16(cfg.LinkAddr), secondaryUser{s})
+	s.sec, err = link.NewSecondary(rw, lc, uint16(cfg.LinkAddr), secondaryUser{s})
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", iec103.ErrInvalidConfig, err)
 	}
@@ -260,21 +274,67 @@ func New(rw io.ReadWriter, cfg Config) (*Server, error) {
 
 // Close stops the station. Close is safe to call more than once and from
 // several goroutines: the first call closes the transport and returns its
-// error; later calls return nil. It must not be called from the Handler,
-// OnState or OnTimeSync (see [Handler]).
+// error; later calls return nil.
+//
+// Called from the Handler, OnTimeSync, the [DisturbanceSource] or OnState,
+// Close cannot wait for the goroutine it runs on: it stops the server and
+// returns nil at once, and the close completes, StateClosed reported
+// included, when that callback has returned.
 func (s *Server) Close() error {
+	if id := callback.Goroutine(); id == s.handleID.Load() || id == s.onReader.Load() {
+		s.closeAsync()
+		return nil
+	}
+	return s.close()
+}
+
+func (s *Server) closeAsync() {
+	s.cancel()
+	go func() { _ = s.close() }()
+}
+
+// stop ends the server after a callback did not return normally: Err
+// reports err from now on, unless the server was closing already.
+func (s *Server) stop(err error) {
+	s.failMu.Lock()
+	if s.failed == nil && s.ctx.Err() == nil {
+		s.failed = fmt.Errorf("%w: %w", iec103.ErrClosed, err)
+	}
+	s.failMu.Unlock()
+	s.closeAsync()
+}
+
+func (s *Server) close() error {
 	first := false
 	s.closeOnce.Do(func() {
 		first = true
 		s.cancel()
 		s.closeErr = s.sec.Close()
 		s.wg.Wait()
-		s.setState(iec103.StateClosed, nil)
 	})
-	if first {
-		return s.closeErr
+	if !first {
+		return nil
 	}
-	return nil
+	// Outside the Once: OnState(StateClosed) may call Close.
+	s.setState(iec103.StateClosed, nil)
+	return s.closeErr
+}
+
+// Done is closed when the station stops: after Close, a transport
+// failure, or a callback that did not return normally. Err tells which.
+func (s *Server) Done() <-chan struct{} { return s.sec.Done() }
+
+// Err returns the error that stopped the station: the transport's, or that
+// of a callback that did not return normally (wrapping
+// [iec103.ErrClosed]); nil while it runs or after Close.
+func (s *Server) Err() error {
+	s.failMu.Lock()
+	failed := s.failed
+	s.failMu.Unlock()
+	if failed != nil {
+		return failed
+	}
+	return s.sec.Err()
 }
 
 // State returns the link state: up once the controlling system reset the
@@ -297,8 +357,10 @@ func (s *Server) setState(st iec103.State, err error) {
 	s.state = st
 	s.mu.Unlock()
 	s.log.Info("link state", "state", st.String(), "error", err)
-	if s.cfg.OnState != nil {
-		s.cfg.OnState(st, err)
+	if f := s.cfg.OnState; f != nil {
+		if cerr := callback.Call(s.log, "OnState", func() { f(st, err) }); cerr != nil {
+			s.stop(cerr)
+		}
 	}
 }
 
@@ -551,14 +613,34 @@ func (s *Server) receive(data []byte, broadcast bool) bool {
 
 func (s *Server) handle() {
 	defer s.wg.Done()
+	s.handleID.Store(callback.Goroutine())
 	for {
 		select {
 		case m := <-s.in:
-			s.dispatch(m)
+			if s.ctx.Err() != nil {
+				return // Close from a callback came first
+			}
+			if err := callback.Call(s.log, s.callee(m.a), func() { s.dispatch(m) }); err != nil {
+				s.stop(err)
+				return
+			}
 		case <-s.ctx.Done():
 			return
 		}
 	}
+}
+
+// callee names the application callback dispatch calls for a, if any.
+func (s *Server) callee(a *iec103.ASDU) string {
+	switch a.Body.(type) {
+	case iec103.TimeSync:
+		return "OnTimeSync"
+	case iec103.DisturbanceOrder:
+		if s.cfg.Disturbances != nil && a.Cause == iec103.CauseDisturbanceData {
+			return "DisturbanceSource"
+		}
+	}
+	return "Handler"
 }
 
 func (s *Server) dispatch(m inbound) {
@@ -699,7 +781,9 @@ func (s *Server) reset(clear bool) {
 	s.dist = nil
 	s.cmdPending = false
 	s.mu.Unlock()
+	s.onReader.Store(callback.Goroutine())
 	s.setState(iec103.StateUp, nil)
+	s.onReader.Store(0)
 	if first {
 		s.identify(s.cfg.StartCause, true)
 	}

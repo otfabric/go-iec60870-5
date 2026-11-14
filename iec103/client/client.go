@@ -30,12 +30,14 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	iec60870 "github.com/otfabric/go-iec60870-5"
 	"github.com/otfabric/go-iec60870-5/cp"
 	"github.com/otfabric/go-iec60870-5/ft12"
 	"github.com/otfabric/go-iec60870-5/iec103"
+	"github.com/otfabric/go-iec60870-5/internal/callback"
 	"github.com/otfabric/go-iec60870-5/internal/logx"
 	"github.com/otfabric/go-iec60870-5/link"
 )
@@ -45,6 +47,8 @@ const (
 	DefaultPollInterval   = 100 * time.Millisecond
 	DefaultRequestTimeout = 10 * time.Second
 	DefaultRetryInterval  = 2 * time.Second
+	// DefaultMaxResult is the default of Config.MaxResult.
+	DefaultMaxResult = 65536
 )
 
 // BroadcastAddr is the link address of send/no reply to all stations
@@ -84,6 +88,13 @@ type Config struct {
 	// RetryInterval is the pause before the link is initialized again
 	// after a failure. Zero means [DefaultRetryInterval].
 	RetryInterval time.Duration
+	// MaxResult bounds the ASDUs one request collects (Interrogate, the
+	// generic services, the tags of a disturbance data transfer): the
+	// request that would collect more ends with an error wrapping
+	// [iec103.ErrResultLimit], with the answers so far, instead of growing
+	// until its deadline. Zero means [DefaultMaxResult]; negative means no
+	// bound, as before v0.6.0.
+	MaxResult int
 
 	// Location is the time zone of the time tags; nil means UTC.
 	Location *time.Location
@@ -93,14 +104,16 @@ type Config struct {
 	// on a goroutine of its own, in order, through a queue of 256 ASDUs;
 	// while the queue is full the link loop waits, and with it every
 	// request. So the Handler must not wait for the client: a request
-	// issued from it (Interrogate, Command, ClockSync, the generic
-	// services, DisturbanceList, Disturbance, also Send) stalls once the
-	// queue fills behind it, and ends only at its deadline. Issue requests
-	// from another goroutine. The Handler may call the methods that do
-	// not wait (State, CommonAddr, Identification, IdentificationFor), and
-	// must not call Close, which waits for the Handler's goroutine: call
-	// it in a new goroutine (go c.Close()), which returns once the Handler
-	// has returned.
+	// called from it (Interrogate, Command, ClockSync, the generic
+	// services, DisturbanceList, Disturbance, also Send, Broadcast and
+	// BroadcastClockSync) returns [iec103.ErrInHandler] at once, without
+	// sending. Issue requests from another goroutine. The Handler may call
+	// the methods that do not wait (State, CommonAddr, Identification,
+	// IdentificationFor), and Close, which then does not wait for the
+	// Handler's goroutine: it returns at once, the Handler is not called
+	// again, and the close completes when the Handler has returned. A
+	// Handler that does not return normally is logged with its stack and
+	// closes the client; Err reports it.
 	//
 	// The ASDU is shared: the same value is returned by the request that
 	// collects it and by Identification and IdentificationFor. Treat it as
@@ -112,8 +125,11 @@ type Config struct {
 	// WaitUp returns only after OnState for the change to StateUp has
 	// returned, so what the callback sets up is in place when WaitUp
 	// returns. State reports a change before OnState for it is called.
-	// While OnState runs the link loop waits: it must not wait for a
-	// request, and must not call Close; start either in a new goroutine.
+	// While OnState runs the link loop waits: a request called from it
+	// returns [iec103.ErrInHandler] at once; start one in a new goroutine.
+	// OnState may call Close, as the Handler may. An OnState that does
+	// not return normally is logged and closes the client, as for the
+	// Handler.
 	OnState func(s iec103.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger
@@ -149,6 +165,11 @@ type Client struct {
 
 	closeOnce sync.Once
 	closeErr  error
+
+	handlerID atomic.Uint64 // the goroutine of deliver
+	runID     atomic.Uint64 // the goroutine of the link loop
+	failMu    sync.Mutex
+	failed    error // why a callback stopped the client
 }
 
 type sendReq struct {
@@ -176,7 +197,17 @@ func New(rw io.ReadWriter, cfg Config) (*Client, error) {
 	if cfg.RetryInterval <= 0 {
 		cfg.RetryInterval = DefaultRetryInterval
 	}
-	pri, err := link.NewPrimary(rw, cfg.Link)
+	switch {
+	case cfg.MaxResult == 0:
+		cfg.MaxResult = DefaultMaxResult
+	case cfg.MaxResult < 0:
+		cfg.MaxResult = 0 // no bound
+	}
+	lc := cfg.Link
+	if lc.Logger == nil {
+		lc.Logger = cfg.Logger
+	}
+	pri, err := link.NewPrimary(rw, lc)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", iec103.ErrInvalidConfig, err)
 	}
@@ -203,12 +234,22 @@ func New(rw io.ReadWriter, cfg Config) (*Client, error) {
 	return c, nil
 }
 
-// Done is closed when the transport failed or the client was closed.
+// Done is closed when the transport failed, the client was closed, or a
+// callback did not return normally.
 func (c *Client) Done() <-chan struct{} { return c.pri.Done() }
 
-// Err returns the transport error that stopped the client, nil while it
-// runs or after Close.
-func (c *Client) Err() error { return c.pri.Err() }
+// Err returns the error that stopped the client: the transport's, or that
+// of a callback that did not return normally (wrapping
+// [iec103.ErrClosed]); nil while it runs or after Close.
+func (c *Client) Err() error {
+	c.failMu.Lock()
+	failed := c.failed
+	c.failMu.Unlock()
+	if failed != nil {
+		return failed
+	}
+	return c.pri.Err()
+}
 
 // State returns the link state.
 func (c *Client) State() iec103.State {
@@ -271,22 +312,88 @@ func (c *Client) IdentificationFor(cause iec103.Cause) *iec103.ASDU {
 	return c.idents[cause]
 }
 
-// Close stops the station. Outstanding requests fail with
-// [iec103.ErrClosed]. Close is safe to call more than once and from
-// several goroutines: the first call closes the transport and returns its
-// error; later calls return nil. It must not be called from the Handler or
-// OnState (see [Config]).
+// Close stops the station. Outstanding requests, and requests made
+// afterwards, fail with [iec103.ErrClosed]. Close is safe to call more
+// than once and from several goroutines: the first call closes the
+// transport and returns its error; later calls return nil.
+//
+// Called from the Handler or OnState, Close cannot wait for the goroutine
+// it runs on: it stops the client and returns nil at once, and the close
+// completes, StateClosed reported included, when that callback has
+// returned.
 func (c *Client) Close() error {
+	if c.own() {
+		c.closeAsync()
+		return nil
+	}
+	return c.close()
+}
+
+// own reports whether the caller runs on the goroutine of the Handler or
+// of the link loop, which calls OnState.
+func (c *Client) own() bool {
+	id := callback.Goroutine()
+	return id == c.handlerID.Load() || id == c.runID.Load()
+}
+
+func (c *Client) closeAsync() {
+	c.cancel()
+	go func() { _ = c.close() }()
+}
+
+// stop ends the client after a callback did not return normally: Err
+// reports err from now on, unless the client was closing already.
+func (c *Client) stop(err error) {
+	c.failMu.Lock()
+	if c.failed == nil && c.ctx.Err() == nil {
+		c.failed = fmt.Errorf("%w: %w", iec103.ErrClosed, err)
+	}
+	c.failMu.Unlock()
+	c.closeAsync()
+}
+
+func (c *Client) close() error {
 	first := false
 	c.closeOnce.Do(func() {
 		first = true
 		c.cancel()
 		c.closeErr = c.pri.Close()
 		c.wg.Wait()
-		c.setState(iec103.StateClosed, nil)
 	})
-	if first {
-		return c.closeErr
+	if !first {
+		return nil
+	}
+	// Outside the Once: OnState(StateClosed) may call Close.
+	c.setState(iec103.StateClosed, nil)
+	return c.closeErr
+}
+
+// inHandler returns [iec103.ErrClosed] after Close, and
+// [iec103.ErrInHandler] for a request on the goroutine of the Handler or
+// of the link loop, whose answer cannot arrive.
+func (c *Client) inHandler() error {
+	if c.ctx.Err() != nil {
+		return iec103.ErrClosed
+	}
+	if c.own() {
+		return iec103.ErrInHandler
+	}
+	return nil
+}
+
+// closed maps err to [iec103.ErrClosed] once the client is closing.
+func (c *Client) closed(err error) error {
+	if c.ctx.Err() != nil {
+		return iec103.ErrClosed
+	}
+	return err
+}
+
+// limit returns an error wrapping [iec103.ErrResultLimit] when a request
+// that collected n ASDUs may not collect one more.
+func (c *Client) limit(n int, what string) error {
+	if c.cfg.MaxResult > 0 && n >= c.cfg.MaxResult {
+		return fmt.Errorf("%w: more than %d ASDUs answer the %s", iec103.ErrResultLimit, c.cfg.MaxResult, what)
 	}
 	return nil
 }
@@ -319,8 +426,11 @@ func (c *Client) setState(s iec103.State, err error) {
 	}
 	c.mu.Unlock()
 	c.log.Info("link state", "state", s.String(), "error", err)
-	if c.cfg.OnState != nil {
-		c.cfg.OnState(s, err)
+	if f := c.cfg.OnState; f != nil {
+		if cerr := callback.Call(c.log, "OnState", func() { f(s, err) }); cerr != nil {
+			c.stop(cerr)
+			return
+		}
 	}
 	if s == iec103.StateUp {
 		// WaitUp returns only now, after OnState(StateUp) returned, and
@@ -374,11 +484,16 @@ func (c *Client) receive(data []byte) {
 
 func (c *Client) deliver() {
 	defer c.wg.Done()
+	c.handlerID.Store(callback.Goroutine())
 	for {
 		select {
 		case a := <-c.handled:
-			if c.cfg.Handler != nil {
-				c.cfg.Handler(a)
+			// Not after Close from the Handler, which may have come first.
+			if h := c.cfg.Handler; h != nil && c.ctx.Err() == nil {
+				if err := callback.Call(c.log, "Handler", func() { h(a) }); err != nil {
+					c.stop(err)
+					return
+				}
 			}
 		case <-c.ctx.Done():
 			return
@@ -412,8 +527,12 @@ func (c *Client) Broadcast(a *iec103.ASDU) error {
 }
 
 // up returns the channel closed when the link goes down, or ErrLinkDown
-// (ErrClosed) when it is not up.
+// (ErrClosed) when it is not up. On the client's own goroutines it
+// returns ErrInHandler.
 func (c *Client) up() (<-chan struct{}, error) {
+	if err := c.inHandler(); err != nil {
+		return nil, err
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	switch c.state {
@@ -438,13 +557,16 @@ func (c *Client) broadcast(r sendReq) error {
 	select {
 	case c.bcasts <- r:
 	case <-down:
-		return iec103.ErrLinkDown
+		return c.closed(iec103.ErrLinkDown)
 	case <-c.ctx.Done():
 		return iec103.ErrClosed
 	}
 	select {
 	case err := <-r.done:
-		return err
+		if err != nil {
+			return c.closed(err)
+		}
+		return nil
 	case <-c.ctx.Done():
 		return iec103.ErrClosed
 	}
@@ -464,7 +586,7 @@ func (c *Client) submit(ctx context.Context, r sendReq) error {
 	select {
 	case c.sends <- r:
 	case <-down:
-		return iec103.ErrLinkDown
+		return c.closed(iec103.ErrLinkDown)
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-c.ctx.Done():
@@ -475,7 +597,10 @@ func (c *Client) submit(ctx context.Context, r sendReq) error {
 	// request ends at its deadline.
 	select {
 	case err := <-r.done:
-		return err
+		if err != nil {
+			return c.closed(err)
+		}
+		return nil
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-c.ctx.Done():
@@ -536,6 +661,7 @@ func (c *Client) initLink() (link.Status, error) {
 
 func (c *Client) run() {
 	defer c.wg.Done()
+	c.runID.Store(callback.Goroutine())
 	addr := uint16(c.cfg.LinkAddr)
 	var acd, dfc bool
 	for c.ctx.Err() == nil {
@@ -652,10 +778,10 @@ type waiter struct {
 	overflow bool
 }
 
-// errOverflow reports a waiter that missed answers.
-var errOverflow = errors.New("iec103: answers arrived faster than they were taken")
-
 func (c *Client) watch(match func(*iec103.ASDU) bool) (*waiter, error) {
+	if err := c.inHandler(); err != nil {
+		return nil, err
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	switch c.state {
@@ -687,7 +813,7 @@ func (c *Client) wait(ctx context.Context, w *waiter) (*iec103.ASDU, error) {
 	over := w.overflow
 	c.mu.Unlock()
 	if over {
-		return nil, errOverflow
+		return nil, iec103.ErrOverflow
 	}
 	select {
 	case a := <-w.ch:
@@ -695,7 +821,7 @@ func (c *Client) wait(ctx context.Context, w *waiter) (*iec103.ASDU, error) {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-w.down:
-		return nil, iec103.ErrLinkDown
+		return nil, c.closed(iec103.ErrLinkDown)
 	case <-c.ctx.Done():
 		return nil, iec103.ErrClosed
 	}
@@ -739,6 +865,8 @@ func lock(m *sync.Mutex) error {
 // whose SIN is not the scan number are left out: clause 7.4.3 has the
 // control system discard GI answers of an earlier cycle. Generic data
 // (ASDU 10, the general interrogation of generic data) is not part of it.
+// An answer of more ASDUs than Config.MaxResult ends it with the answers
+// so far and an error wrapping [iec103.ErrResultLimit].
 func (c *Client) Interrogate(ctx context.Context) ([]*iec103.ASDU, error) {
 	if err := lock(&c.giMu); err != nil {
 		return nil, err
@@ -775,6 +903,9 @@ func (c *Client) Interrogate(ctx context.Context) ([]*iec103.ASDU, error) {
 			if b.SIN != scn {
 				continue
 			}
+		}
+		if err := c.limit(len(out), "general interrogation"); err != nil {
+			return out, err
 		}
 		out = append(out, a)
 	}

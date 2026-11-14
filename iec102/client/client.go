@@ -47,10 +47,12 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	iec60870 "github.com/otfabric/go-iec60870-5"
 	"github.com/otfabric/go-iec60870-5/iec102"
+	"github.com/otfabric/go-iec60870-5/internal/callback"
 	"github.com/otfabric/go-iec60870-5/internal/logx"
 	"github.com/otfabric/go-iec60870-5/link"
 )
@@ -59,6 +61,10 @@ import (
 const (
 	DefaultPollInterval   = 50 * time.Millisecond
 	DefaultRequestTimeout = 30 * time.Second
+	// DefaultMaxResult is the default of Config.MaxResult: 131072 ASDUs
+	// hold more than three years of quarter-hour integration periods, one
+	// period to an ASDU.
+	DefaultMaxResult = 1 << 17
 )
 
 // Config configures a client.
@@ -85,22 +91,32 @@ type Config struct {
 	// RequestTimeout bounds every request whose context has no deadline.
 	// Zero means [DefaultRequestTimeout]; long load profiles need more.
 	RequestTimeout time.Duration
+	// MaxResult bounds the ASDUs one request collects: the request that
+	// would collect more ends with an error wrapping
+	// [iec102.ErrResultLimit], with the ASDUs so far, instead of growing
+	// until its deadline. Zero means [DefaultMaxResult]; negative means no
+	// bound, as before v0.6.0.
+	MaxResult int
 
 	// Handler receives the ASDUs that answer no request: those of another
 	// common address. It runs on a goroutine of its own, in order, through
 	// a queue of 64 ASDUs; one that does not fit is dropped and logged. It
 	// may call the client's methods: a request from it waits for the
-	// request in progress like any other. It must not call Close, which
-	// waits for the Handler's goroutine: call it in a new goroutine
-	// (go c.Close()), which returns once the Handler has returned. The ASDU
-	// is the Handler's own: the client keeps no reference to it.
+	// request in progress like any other. It may call Close, which then
+	// does not wait for the Handler's goroutine: it returns at once, the
+	// Handler is not called again, and the close completes when the
+	// Handler has returned. A Handler that does not return normally is
+	// logged with its stack and closes the client; Err reports it. The
+	// ASDU is the Handler's own: the client keeps no reference to it.
 	Handler func(a *iec102.ASDU)
 	// OnState is called with each change of the link state, from the
 	// goroutine of the request that changed it (while that request holds
 	// the request slot), or from Close for StateClosed. It must return
 	// quickly. It must not issue a request, which waits for the request
-	// slot the calling request holds, nor call Close; start them in a new
-	// goroutine.
+	// slot the calling request holds; start one in a new goroutine. It may
+	// call Close; the request then fails with [iec102.ErrClosed]. An
+	// OnState that does not return normally is logged and closes the
+	// client, as for the Handler; the request fails with ErrClosed.
 	OnState func(s iec102.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger
@@ -139,6 +155,10 @@ type Client struct {
 
 	closeOnce sync.Once
 	closeErr  error
+
+	handlerID atomic.Uint64 // the goroutine of deliver
+	failMu    sync.Mutex
+	failed    error // why a callback stopped the client
 }
 
 // New starts a controlling station on rw. Close stops it and closes rw
@@ -161,7 +181,17 @@ func New(rw io.ReadWriter, cfg Config) (*Client, error) {
 	if cfg.RequestTimeout <= 0 {
 		cfg.RequestTimeout = DefaultRequestTimeout
 	}
-	pri, err := link.NewPrimary(rw, cfg.Link)
+	switch {
+	case cfg.MaxResult == 0:
+		cfg.MaxResult = DefaultMaxResult
+	case cfg.MaxResult < 0:
+		cfg.MaxResult = 0 // no bound
+	}
+	lc := cfg.Link
+	if lc.Logger == nil {
+		lc.Logger = cfg.Logger
+	}
+	pri, err := link.NewPrimary(rw, lc)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", iec102.ErrInvalidConfig, err)
 	}
@@ -188,24 +218,69 @@ func (c *Client) State() iec102.State {
 // CommonAddr returns the common address of ASDU the requests carry.
 func (c *Client) CommonAddr() uint16 { return c.cfg.CommonAddr }
 
-// Close stops the station. Outstanding requests fail with
-// [iec102.ErrClosed]. Close is safe to call more than once and from
-// several goroutines: the first call closes the transport and returns its
-// error; later calls return nil. It must not be called from the Handler or
-// OnState (see [Config]).
+// Done is closed when the station stops: after Close, when the transport
+// fails, or when a callback did not return normally. Err tells which.
+func (c *Client) Done() <-chan struct{} { return c.pri.Done() }
+
+// Err returns the error that stopped the station: the transport's, or that
+// of a callback that did not return normally (wrapping
+// [iec102.ErrClosed]); nil while it runs or after Close.
+func (c *Client) Err() error {
+	c.failMu.Lock()
+	failed := c.failed
+	c.failMu.Unlock()
+	if failed != nil {
+		return failed
+	}
+	return c.pri.Err()
+}
+
+// Close stops the station. Outstanding requests, and requests made
+// afterwards, fail with [iec102.ErrClosed]. Close is safe to call more
+// than once and from several goroutines: the first call closes the
+// transport and returns its error; later calls return nil.
+//
+// Called from the Handler, Close cannot wait for the Handler's goroutine:
+// it stops the client and returns nil at once, and the close completes,
+// StateClosed reported included, when the Handler has returned.
 func (c *Client) Close() error {
+	if c.handlerID.Load() == callback.Goroutine() {
+		c.closeAsync()
+		return nil
+	}
+	return c.close()
+}
+
+func (c *Client) closeAsync() {
+	c.cancel()
+	go func() { _ = c.close() }()
+}
+
+// stop ends the client after a callback did not return normally: Err
+// reports err from now on, unless the client was closing already.
+func (c *Client) stop(err error) {
+	c.failMu.Lock()
+	if c.failed == nil && c.ctx.Err() == nil {
+		c.failed = fmt.Errorf("%w: %w", iec102.ErrClosed, err)
+	}
+	c.failMu.Unlock()
+	c.closeAsync()
+}
+
+func (c *Client) close() error {
 	first := false
 	c.closeOnce.Do(func() {
 		first = true
 		c.cancel()
 		c.closeErr = c.pri.Close()
 		c.wg.Wait()
-		c.setState(iec102.StateClosed, nil)
 	})
-	if first {
-		return c.closeErr
+	if !first {
+		return nil
 	}
-	return nil
+	// Outside the Once: OnState(StateClosed) may call Close.
+	c.setState(iec102.StateClosed, nil)
+	return c.closeErr
 }
 
 func (c *Client) setState(s iec102.State, err error) {
@@ -217,18 +292,25 @@ func (c *Client) setState(s iec102.State, err error) {
 	c.state = s
 	c.mu.Unlock()
 	c.log.Info("link state", "state", s.String(), "error", err)
-	if c.cfg.OnState != nil {
-		c.cfg.OnState(s, err)
+	if f := c.cfg.OnState; f != nil {
+		if cerr := callback.Call(c.log, "OnState", func() { f(s, err) }); cerr != nil {
+			c.stop(cerr)
+		}
 	}
 }
 
 func (c *Client) deliver() {
 	defer c.wg.Done()
+	c.handlerID.Store(callback.Goroutine())
 	for {
 		select {
 		case a := <-c.handled:
-			if c.cfg.Handler != nil {
-				c.cfg.Handler(a)
+			// Not after Close from the Handler, which may have come first.
+			if h := c.cfg.Handler; h != nil && c.ctx.Err() == nil {
+				if err := callback.Call(c.log, "Handler", func() { h(a) }); err != nil {
+					c.stop(err)
+					return
+				}
 			}
 		case <-c.ctx.Done():
 			return
@@ -301,7 +383,9 @@ func (c *Client) init(ctx context.Context) error {
 // Request sends a and collects the station's answers until the request is
 // complete by rule until. It returns every ASDU of the station's common
 // address received meanwhile, the mirrors included. A refusal returns the
-// answers so far and an [*iec102.RefusedError].
+// answers so far and an [*iec102.RefusedError]. An answer of more ASDUs
+// than Config.MaxResult ends the request with the ASDUs so far and an
+// error wrapping [iec102.ErrResultLimit].
 //
 // When an earlier request ended before its answer was complete, Request
 // first polls the station until it reports no more data, dropping what of
@@ -383,6 +467,9 @@ func (c *Client) Request(ctx context.Context, a *iec102.ASDU, until Until) (_ []
 		if r.CommonAddr != a.CommonAddr {
 			c.handoff(r)
 			continue
+		}
+		if c.cfg.MaxResult > 0 && len(out) >= c.cfg.MaxResult {
+			return out, fmt.Errorf("%w: more than %d ASDUs answer %s", iec102.ErrResultLimit, c.cfg.MaxResult, a.Type)
 		}
 		out = append(out, r)
 		if !c.mirrors(r, a, obj) {

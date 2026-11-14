@@ -382,7 +382,9 @@ type FileServer struct {
     Sink      FileSink
     Directory func(s *Session, ca asdu.CommonAddr, ioa asdu.IOA) []asdu.FileDirectoryEntry
     OnDone    func(s *Session, ca asdu.CommonAddr, ioa asdu.IOA, name uint16, err error)
+    MaxTransfers int // open transfers per session; 0: DefaultMaxTransfers, negative: no bound
 }
+const DefaultMaxTransfers = 16
 func NewFileServer(source FileSource) *FileServer
 func (f *FileServer) HandleASDU(s *Session, a *asdu.ASDU)
 
@@ -410,7 +412,13 @@ mux.Handle(server.NewFileServer(source), server.FileTypes...)
 
 - `NewFile` splits content into sections; a `FileSource` may also return
   sections of its own. A file has at most 254 sections and 16 MiB − 1.
-- A session can transfer several files at once, one per address. Selecting
+- A session can transfer several files at once, one per address and
+  direction, up to `MaxTransfers` (default `DefaultMaxTransfers`, 16),
+  files fetched and delivered together. A selection or a file ready beyond
+  it is refused with "unknown information object address" until a
+  transfer of that session ends; negative `MaxTransfers` leaves the number
+  open, as before v0.6.0. The bound keeps the memory a session holds in
+  check: an open delivery keeps what arrived of up to 16 MiB − 1. Selecting
   an address again starts over. Transfers end with their session.
 - `OnDone` reports the end of a transfer: `nil` once the file was
   acknowledged, `ErrFileNotAcknowledged` after a negative acknowledgement, a
@@ -462,7 +470,8 @@ a time: the one that started data transfer last.
 - a full queue drops its oldest event; `Dropped` counts them.
 
 `Pending(group)` is the number of events queued or awaiting acknowledgement.
-`Broadcast` and `Session.Send` bypass the queue.
+`Broadcast` and `Session.Send` bypass the queue. `Close` stops the queues and
+waits for the goroutine of each to end.
 
 ### Session
 
@@ -943,5 +952,10 @@ Errors: `ErrInvalidStart`, `ErrInvalidLength`, `ErrInvalidControl`,
 - A start handler (`WithStartHandler`) runs on its own goroutine and may call
   any method. A switch handler (`WithSwitchHandler`) is called one call at a
   time, in order, and may call the group, `Switchover` and `Close` included.
+- A client `Handler`, state handler, start handler or switch handler that
+  does not return normally is logged with its stack and closes its client
+  (the switch handler: its group): the state handler is told
+  "disconnected" with an error that wraps `iec104.ErrClosed` and names the
+  callback, and the process goes on.
 - `asdu.ASDU` values passed to handlers are owned by the receiver; values
   passed to `Send` are not retained.

@@ -196,7 +196,7 @@ func (g *group) enqueue(raw []byte) {
 		// Not under mu: the logger is the application's.
 		g.srv.log.Warn("event queue full, dropping the oldest events", "group", g.name, "size", g.limit)
 	}
-	if start {
+	if start && g.srv.startPump() {
 		go g.pump()
 	}
 	g.signal()
@@ -338,9 +338,11 @@ func (g *group) next() (*queued, *Session) {
 // pump delivers the queue to the active connection, in order. Send blocks
 // while the connection's window is full, which is the flow control.
 func (g *group) pump() {
+	defer g.srv.pumps.Done()
 	for {
 		item, s := g.next()
 		if item == nil {
+			g.srv.at("pump-end")
 			return
 		}
 		ctx, cancel := context.WithCancel(s.ctx)

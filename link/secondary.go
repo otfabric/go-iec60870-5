@@ -14,9 +14,10 @@ import (
 // primary's user data and supplies the data the primary polls. Calls come
 // from the station's reader goroutine, one at a time, and must return
 // quickly: the primary is waiting for the response. They run with the
-// station's state locked, so the handler must not call Close, which waits
-// for that goroutine: call it in a new goroutine (go s.Close()), which
-// returns once the handler has returned.
+// station's state locked. The handler may call Close, which then does not
+// wait for the reader goroutine: it returns once the station is stopped,
+// and no frame is answered after the call. A handler that does not return
+// normally stops the station (see [Config.Logger]).
 //
 // The station keeps what Class1 and Class2 return, to send it again when
 // the primary repeats its request (FCB not toggled): the handler must not
@@ -112,27 +113,22 @@ func NewSecondary(rw io.ReadWriter, cfg Config, addr uint16, h SecondaryHandler)
 	if addr > cfg.FT12.MaxAddr() {
 		return nil, ErrInvalidConfig
 	}
-	s := &Secondary{p: newPort(rw, cfg), addr: addr, h: h}
-	go s.p.run(s.receive)
+	s := &Secondary{p: newPort(rw, cfg, "link.secondary"), addr: addr, h: h}
+	go s.p.run("SecondaryHandler", s.receive)
 	return s, nil
 }
 
-// Close stops the station and waits for its goroutines. It closes rw when
-// rw is an io.Closer; the reader goroutine returns only when that Close
-// unblocks Read, so a transport whose Close does not leaves Close waiting.
-// Close is safe to call more than once and from several goroutines: the
-// first call closes the transport and returns its error; later calls
-// return nil.
-//
-// A handler must not call Close: Close waits for the reader goroutine that
-// runs the handler. Call it in a new goroutine (go s.Close()); it returns
-// once the handler has returned.
+// Close stops the station and waits for its goroutines, as
+// [Primary.Close] does. Called from the handler or another callback, Close
+// does not wait for the goroutine the call runs on: it returns once the
+// station is stopped, and that goroutine ends when the call has returned.
 func (s *Secondary) Close() error { return s.p.close() }
 
-// Done is closed when the station stops.
+// Done is closed when the station stops (see [Primary.Done]).
 func (s *Secondary) Done() <-chan struct{} { return s.p.readDone }
 
-// Err returns the transport error that stopped the station, if any.
+// Err returns the error that stopped the station, if any (see
+// [Primary.Err]).
 func (s *Secondary) Err() error { return s.p.err() }
 
 func (s *Secondary) receive(f ft12.Frame) {

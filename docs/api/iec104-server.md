@@ -33,6 +33,12 @@ const DefaultEventQueue = 1024
 
 DefaultEventQueue is the number of events a redundancy group buffers when [WithEventQueue](#func-witheventqueue) is not used.
 
+```go
+const DefaultMaxTransfers = 16
+```
+
+DefaultMaxTransfers is the default of [FileServer.MaxTransfers](#func-fileserver-maxtransfers).
+
 ## Variables
 
 ```go
@@ -116,6 +122,18 @@ type FileServer struct {
 	// it before the server starts.
 	OnDone func(s *Session, ca asdu.CommonAddr, ioa asdu.IOA, name uint16, err error)
 
+	// MaxTransfers bounds the transfers one session has open at once,
+	// files fetched and files delivered together. A selection or a file
+	// ready beyond it is refused like a file the station does not have,
+	// until a transfer of that session ends. The bound keeps the memory a
+	// session holds in check: an open delivery keeps what arrived of up to
+	// [asdu.MaxFileLength] octets, and IEC 60870-5-101 7.4.11 has the
+	// files of a station transferred one after the other, so an ordinary
+	// controlling station has one or two open. Zero means
+	// [DefaultMaxTransfers]; negative means no bound, as before v0.6.0.
+	// Set it before the server starts.
+	MaxTransfers int
+
 }
 ```
 
@@ -139,7 +157,7 @@ and delivers one like this, the station doing the calling:
 	last segment     F_LS_NA_1 (LSQ 3)  ->  F_AF_NA_1 (AFQ 3)  ack section
 	last section     F_LS_NA_1 (LSQ 1)  ->  F_AF_NA_1 (AFQ 1)  ack file
 
-A file the [FileSource](#type-filesource) does not have, or the [FileSink](#type-filesink) does not accept, is refused by mirroring the request with cause "unknown information object address". A length or checksum that does not match what arrived is acknowledged negatively. A session transfers any number of files at once, one per address and direction; starting an address again starts over. Transfers end with their session.
+A file the [FileSource](#type-filesource) does not have, or the [FileSink](#type-filesink) does not accept, is refused by mirroring the request with cause "unknown information object address". A length or checksum that does not match what arrived is acknowledged negatively. A session transfers up to [FileServer.MaxTransfers](#func-fileserver-maxtransfers) files at once, one per address and direction; starting an address again starts over. Transfers end with their session.
 
 Register it for FileTypes:
 
@@ -435,6 +453,8 @@ type Server struct {
 	// accepted, TLS handshake in progress
 
 	// closed by Close
+	// pumps counts the goroutines of the event queues, which Close waits
+	// for; one is added only under mu while the server is not closed.
 
 	// closing is what Close took over: written under mu by the first
 	// Close, and err by the goroutine that finishes it, before it closes
@@ -479,7 +499,7 @@ The sessions are served one after the other. A session whose send window is full
 func (s *Server) Close() error
 ```
 
-Close stops listening and closes every session, as [Session.Close](#func-session-close) does: when it returns no handler is running or will run. The event queues of the redundancy groups ([Server.Enqueue](#func-server-enqueue)) stop sending at Close; the goroutine of each ends when the send it may be in has ended, which Close does not wait for. Serve returns ErrServerClosed. Close is safe to call more than once and from several goroutines; called from a callback of a session it returns at once and the close completes when the callback has returned.
+Close stops listening and closes every session, as [Session.Close](#func-session-close) does: when it returns no handler is running or will run. The event queues of the redundancy groups ([Server.Enqueue](#func-server-enqueue)) stop sending at Close, and Close waits for the goroutine of each to end. Serve returns ErrServerClosed. Close is safe to call more than once and from several goroutines; called from a callback of a session it returns at once and the close completes when the callback has returned.
 
 #### func (Server) Dropped
 

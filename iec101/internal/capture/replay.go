@@ -58,8 +58,29 @@ type Station struct {
 	Steps  []Step
 
 	mu       sync.Mutex
-	next     int      // index of the next step
-	received [][]byte // ASDUs received
+	next     int           // index of the next step
+	received [][]byte      // ASDUs received
+	changed  chan struct{} // closed at the next step played or request received
+}
+
+// Changed returns a channel that is closed when the station next plays a
+// step or receives a request: a test waits on it instead of polling Next
+// and Done.
+func (s *Station) Changed() <-chan struct{} {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.changed == nil {
+		s.changed = make(chan struct{})
+	}
+	return s.changed
+}
+
+// notify wakes the waiters of Changed. The caller holds mu.
+func (s *Station) notify() {
+	if s.changed != nil {
+		close(s.changed)
+		s.changed = nil
+	}
 }
 
 // Received returns the ASDUs the controlling station sent.
@@ -165,6 +186,7 @@ func (s *Station) request(data []byte) {
 	if s.next < len(s.Steps) && s.Steps[s.next].Request {
 		s.next++
 	}
+	s.notify()
 }
 
 func (s *Station) data() ft12.Frame {
@@ -175,5 +197,6 @@ func (s *Station) data() ft12.Frame {
 	}
 	d := s.Steps[s.next].Decoded
 	s.next++
+	s.notify()
 	return ft12.Frame{Kind: ft12.KindVariable, Control: byte(link.SecondaryControl(link.FuncUserData, s.ready(), false, false)), Addr: s.Addr, Data: d.Data}
 }
