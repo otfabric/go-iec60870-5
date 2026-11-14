@@ -40,10 +40,16 @@ func TestStateHandlerPanicClosesOnlyItsSession(t *testing.T) {
 		}))
 	c1 := connect(t, addr)
 	stillServes(t, srv, c1, 1)
-	c2 := connect(t, addr)
-	testutil.Eventually(t, "second session closed", func() bool {
-		return c2.TestCommand(context.Background(), 1) != nil
-	})
+	// The session may end before its STARTDT con is written, so Dial may
+	// fail; either way the second session does not serve.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if c2, err := client.Dial(ctx, addr, client.WithParams(testutil.Params())); err == nil {
+		t.Cleanup(func() { _ = c2.Close() })
+		testutil.Eventually(t, "second session closed", func() bool {
+			return c2.TestCommand(context.Background(), 1) != nil
+		})
+	}
 	stillServes(t, srv, c1, 1)
 	if s := srv.Sessions(); s[0].ID() != 1 {
 		t.Fatalf("session %d left, want 1", s[0].ID())
