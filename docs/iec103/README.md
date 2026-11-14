@@ -139,7 +139,13 @@ rec, err := c.Disturbance(ctx, iec103.FunDistance, fan)
   `ErrAborted`. The record holds at most the NOC channels of NOE values
   the ASDU 26 announced (clauses 7.2.6.10, 7.2.6.11): a value or a
   channel beyond them ends the transfer at once with `ErrInvalid`, and no
-  further order is sent (`TestDisturbanceWithinAnnounced`).
+  further order is sent (`TestDisturbanceWithinAnnounced`). The transfer
+  keeps to the selected fault (FAN): an ASDU 31 of another FAN is
+  skipped, a channel (ASDU 27) of another FAN ends it with `ErrInvalid`,
+  and a channel whose ASDUs 30 carry another FAN is acknowledged
+  negatively. ASDUs 30 that add nothing to the record (no values, or
+  another FAN) count against `Config.MaxResult` per channel
+  (`TestDisturbanceOtherFAN`, `TestDisturbanceEmptyValues`).
 - After every initialization the client synchronizes the time and runs a
   general interrogation (clause 7.4.1, figure 3) unless `NoInitTimeSync` /
   `NoInitGI` are set. The identification (ASDU 5) is kept and available
@@ -212,8 +218,13 @@ s.Send(measurands, server.Class2)
   aborted transfer. An implausible order ends the transfer in progress
   with TOO 34, then the list follows. The selection of a record with more
   than 255 channels or more than 65535 values per channel, which NOC and
-  NOE cannot announce, is answered with TOO 34 and no transfer starts
-  (`TestDisturbanceTooLarge`).
+  NOE cannot announce, or with a channel too long to fit the class 1
+  queue (`QueueSize`) at once, is answered with TOO 34 and no transfer
+  starts (`TestDisturbanceTooLarge`, `TestDisturbanceSelectNOE`). NOE
+  announces the longest channel. A channel's ASDUs 30 and the ASDU 31
+  that ends it are queued all or none: when the queue has no room for
+  them now, the channel ends with TOO 37 and the controlling station may
+  request it again (`TestDisturbanceChannelQueuedWhole`).
 
 ## Changes between releases
 

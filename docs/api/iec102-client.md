@@ -118,7 +118,7 @@ ReadProductSpec reads the manufacturer and product specification: C\_RD\_NA\_2 w
 func (c *Client) ReadSinglePoints(ctx context.Context, record uint8, from, to *iec102.TimeA) ([]iec102.SinglePoint, error)
 ```
 
-ReadSinglePoints reads the single-point information of record address record (a list address 50..55, Beckhoff TS650x manual, section 9.1.8): all of it with C\_SP\_NA\_2, or the time range from..to with C\_SP\_NB\_2 when both are given; cause 6.
+ReadSinglePoints reads the single-point information of record address record (a list address 50..55, Beckhoff TS650x manual, section 9.1.8): all of it with C\_SP\_NA\_2, or the time range from..to with C\_SP\_NB\_2 when both are given; cause 6. Single points of another record address are left out.
 
 #### func (Client) ReadTime
 
@@ -134,7 +134,7 @@ ReadTime reads the current system time of the station: C\_TI\_NA\_2 with cause 5
 func (c *Client) ReadTotals(ctx context.Context, record uint8, q iec102.Read) ([]iec102.IntegratedTotals, error)
 ```
 
-ReadTotals reads integrated totals with one of the read commands C\_CI\_NA\_2 .. C\_CI\_NU\_2 (q.T; the fields q carries depend on it, see iec102.Read) from record address record, with cause 6, and returns the integration periods the station sent, in order.
+ReadTotals reads integrated totals with one of the read commands C\_CI\_NA\_2 .. C\_CI\_NU\_2 (q.T; the fields q carries depend on it, see iec102.Read) from record address record, with cause 6, and returns the integration periods the station sent for that record address, in order. Integrated totals of another record address are not part of the answer and are left out. The type family of the answer is not checked: meters of the REE profile answer some reads with another family.
 
 #### func (Client) Request
 

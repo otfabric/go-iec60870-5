@@ -11,6 +11,7 @@ import (
 
 	"github.com/otfabric/go-iec60870-5/asdu"
 	iec104 "github.com/otfabric/go-iec60870-5/iec104"
+	"github.com/otfabric/go-iec60870-5/internal/callback"
 	"github.com/otfabric/go-iec60870-5/internal/logx"
 	"github.com/otfabric/go-iec60870-5/internal/secbind"
 	"github.com/otfabric/go-iec60870-5/sec"
@@ -38,11 +39,16 @@ type pendingAssoc struct {
 	refs int
 }
 
+// errFactory is why a session ends whose security endpoint factory (see
+// [WithSecurity]) did not return normally.
+var errFactory = errors.New("security endpoint factory did not return normally")
+
 // acquire returns the association of the controlling station aim for a
 // connection that names it: the kept one, or the pending one, made on
 // first use. pending reports the latter; the caller then calls release or
-// commit.
-func (a *associations) acquire(aim uint16) (ep *sec.Endpoint, pending bool, err error) {
+// commit. log logs a factory that does not return normally, which acquire
+// reports as errFactory.
+func (a *associations) acquire(aim uint16, log *logx.Logger) (ep *sec.Endpoint, pending bool, err error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if ep, ok := a.byAIM[aim]; ok {
@@ -52,7 +58,9 @@ func (a *associations) acquire(aim uint16) (ep *sec.Endpoint, pending bool, err 
 		p.refs++
 		return p.ep, true, nil
 	}
-	ep, err = a.newEndpoint(a.group, aim)
+	if cerr := callback.Call(log, "security endpoint factory", func() { ep, err = a.newEndpoint(a.group, aim) }); cerr != nil {
+		return nil, false, fmt.Errorf("%w: %w", errFactory, cerr)
+	}
 	if err != nil {
 		return nil, false, err
 	}
@@ -122,6 +130,8 @@ var errUnbound = errors.New("no association yet: waiting for a security message"
 type route struct {
 	set *associations
 	log *logx.Logger
+	// abort ends the session; nil in tests that have none.
+	abort func()
 
 	ep      atomic.Pointer[sec.Endpoint]
 	owner   any // the link, while data transfer is started and ep is nil
@@ -181,8 +191,11 @@ func (r *route) Receive(now time.Time, raw []byte) ([]byte, [][]byte, error) {
 	if aim, ok := sec.AssociationOf(raw, r.set.params); ok && (r.cand == nil || aim != r.candAIM) {
 		// The first message, or one that names another controlling station.
 		r.drop(r.owner)
-		ep, pending, err := r.set.acquire(aim)
+		ep, pending, err := r.set.acquire(aim, r.log)
 		if err != nil {
+			if errors.Is(err, errFactory) && r.abort != nil {
+				r.abort()
+			}
 			r.log.Warn("no association for the controlling station", "aim", aim, "error", err)
 			return nil, nil, err
 		}

@@ -520,6 +520,9 @@ type Endpoint struct {
 
 	// valid update keys
 
+	// The remote station's certificate and key of the Station Association
+	// that runs: remote only once the procedure authenticated them.
+
 	// controlling station
 
 	// reply timeouts in the running procedure
@@ -530,6 +533,8 @@ type Endpoint struct {
 	// the Session Initiation Request received (controlling) or sent (controlled)
 
 	// controlled station
+
+	// the Association Request answered with apSent
 
 	// no Session Initiation Request before this
 

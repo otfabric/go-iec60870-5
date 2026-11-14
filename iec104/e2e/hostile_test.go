@@ -1056,7 +1056,9 @@ func TestHostileStationFileTransfer(t *testing.T) {
 }
 
 // A station that announces section after section, each empty and each
-// acknowledged, never ends the file: the caller's context bounds it.
+// acknowledged, never ends the file: the client ends the transfer with
+// ErrProtocol once more sections were announced than a file can have
+// (one per name of section, IEC 60870-5-101 7.2.6.33).
 func TestHostileStationEndlessSections(t *testing.T) {
 	leaks := leakcheck.Check(t)
 	const ioa, name = 30000, 1
@@ -1076,14 +1078,14 @@ func TestHostileStationEndlessSections(t *testing.T) {
 	}
 	rogue := startRogue(t, script.serve)
 	c := dialRogue(t, rogue)
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	err := within(t, closeBound, "GetFile", func() error {
+	err := within(t, 10*time.Second, "GetFile", func() error {
 		_, err := c.GetFile(ctx, 1, ioa, name)
 		return err
 	})
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("GetFile: %v, want the context's deadline", err)
+	if !errors.Is(err, iec104.ErrProtocol) {
+		t.Fatalf("GetFile: %v, want ErrProtocol", err)
 	}
 	usable(t, c)
 	_ = c.Close()

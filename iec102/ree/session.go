@@ -43,7 +43,9 @@ func SetTime(ctx context.Context, c *client.Client, t iec102.TimeB) error {
 // standard reads depend on an open session.
 //
 // That a wrong key is answered with the P/N bit is an interpretation: none
-// of our sources shows a refused login.
+// of our sources shows a refused login. A C_AC_NA_2 with a wrong key also
+// closes a session that is open: the session state follows the last
+// access key received.
 type Session struct {
 	// Key is the access key of the measuring point.
 	Key uint32

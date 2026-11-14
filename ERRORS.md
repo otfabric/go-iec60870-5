@@ -18,6 +18,7 @@ companion standards add their own layers, described in
 - [Codec errors](#codec-errors)
 - [Application-layer security errors](#application-layer-security-errors)
 - [File transfer errors](#file-transfer-errors)
+- [Result bounds](#result-bounds)
 - [Context and timeouts](#context-and-timeouts)
 - [Retries](#retries)
 - [What is not an error](#what-is-not-an-error)
@@ -33,6 +34,8 @@ companion standards add their own layers, described in
 | Station answers with P/N = 1 or cause 44..47 | `*iec104.NegativeError` | stays up |
 | Answer does not arrive before the deadline | wraps `context.DeadlineExceeded` | stays up |
 | Request while the same one is pending | `iec104.ErrBusy` | stays up |
+| `Interrogate`, `CounterInterrogate` (`asdu.FreezeRead`) or `ListFiles` answered with more than `WithMaxResult` ASDUs or entries | wraps `telecontrol.ErrResultLimit`, with the results so far | stays up |
+| `GetFile` from a station that announces more than 255 sections | `iec104.ErrProtocol` | stays up |
 | Request method called from the client's `Handler` or state handler | `iec104.ErrInHandler` | stays up |
 | `Connect`/`Dial` could not establish the connection | `iec104.ErrConnectFailed`, wrapping the cause | - |
 | Client has no connection | `iec104.ErrNotConnected` | - |
@@ -41,6 +44,7 @@ companion standards add their own layers, described in
 | Peer closed, write or read failed | `iec104.ErrConnectionLost` | closed |
 | I frame not acknowledged or U frame not confirmed within `t1` | `iec104.ErrTimeout` | closed |
 | Malformed APDU, sequence error, I frame in STOPDT | `iec104.ErrProtocol` | closed |
+| With IEC 62351-5: more than 1 MiB of security output waits for the peer's acknowledgements | `iec104.ErrProtocol` | closed |
 | ASDU cannot be encoded | `asdu.Err…` | stays up |
 | Invalid `apci.Params` / `asdu.Params` at construction | `apci.ErrInvalidParams` / `asdu.ErrInvalidParams` | - |
 | Any other invalid option at construction | `iec104.ErrInvalidOption` | - |
@@ -86,6 +90,21 @@ methods turn both forms of refusal into `*iec104.NegativeError`:
 `CounterInterrogate` with `asdu.FreezeRead` return the ASDUs collected so
 far together with the error. `CounterInterrogate` with a freeze or reset
 qualifier returns at the confirmation and always with nil ASDUs.
+
+## Result bounds
+
+`client.WithMaxResult` (default `client.DefaultMaxResult`, 65536; a
+negative value is no bound) bounds what one collecting request returns:
+the ASDUs of `Interrogate` and of `CounterInterrogate` with
+`asdu.FreezeRead`, the directory entries of `ListFiles`. The answer that
+would exceed it ends the request with the results so far and an error
+wrapping `telecontrol.ErrResultLimit`; such a request is not retried. A
+request that waits for one answer (a command, `Read`, `ClockSync`, ...)
+queues at most 16 mirrors ahead of its answer and otherwise ends with an
+error wrapping `telecontrol.ErrResultLimit` too. `GetFile` ends with
+`iec104.ErrProtocol` when the station announces more than 255 sections,
+the most a file can have (one per name of section, IEC 60870-5-101
+7.2.6.33).
 
 ## Connection-fatal errors
 
@@ -296,6 +315,10 @@ answer has more ASDUs than `Config.MaxResult` (with the ASDUs so far), and wrap 
 layer is still repeating its user data; the exchange itself runs to its
 end, so the station may still receive it.
 
+A `link` exchange (`Primary`, `Balanced`) returns its context's error also
+while its frame waits for room in a full send queue, which a peer that
+stops reading leaves full.
+
 ## IEC 60870-5-103
 
 ### Codec (`iec103`)
@@ -304,7 +327,7 @@ end, so the station may still receive it.
 |---|---|
 | `iec103.ErrShort` | the ASDU ends before its last field, or a GID is shorter than its GDD announces |
 | `iec103.ErrTrailing` | octets after the information object of a compatible type identification |
-| `iec103.ErrInvalid` | a field out of range: more elements than the ASDU may carry (ASDU 3: 4, ASDU 9: 9, ASDU 23: 8, ASDU 29 and 30: 25, NGD/NDE: 63), GID length different from its GDD, a GDD with DATASIZE 0 or NUMBER outside 1..127 (7.2.6.32), an ASDU 11 with NDE 0 (7.2.6.35), a VSQ other than 81H for a single information object or with SQ = 1 for ASDUs 3, 9 and 23 (7.2.2), an accessor of `iec103.Value` used on the wrong data type; also a client request with an information number that is not a generic read or write, or a general command with a DCO that `iec103.CommandAllowed` refuses; also a disturbance transfer with a value or a channel beyond the NOC channels of NOE values its ASDU 26 announced (`Disturbance` returns the record so far), and `AnswerGI` / `AckCommand` of `iec103/server` with an ASDU that is not a general interrogation (ASDU 7) / general command (ASDU 20) |
+| `iec103.ErrInvalid` | a field out of range: more elements than the ASDU may carry (ASDU 3: 4, ASDU 9: 9, ASDU 23: 8, ASDU 29 and 30: 25, NGD/NDE: 63), GID length different from its GDD, a GDD with DATASIZE 0 or NUMBER outside 1..127 (7.2.6.32), an ASDU 11 with NDE 0 (7.2.6.35), a VSQ other than 81H for a single information object or with SQ = 1 for ASDUs 3, 9 and 23 (7.2.2), an accessor of `iec103.Value` used on the wrong data type; also a client request with an information number that is not a generic read or write, or a general command with a DCO that `iec103.CommandAllowed` refuses; also a disturbance transfer with a value or a channel beyond the NOC channels of NOE values its ASDU 26 announced, or a channel (ASDU 27) offered for another fault (FAN) than the one selected (`Disturbance` returns the record so far), and `AnswerGI` / `AckCommand` of `iec103/server` with an ASDU that is not a general interrogation (ASDU 7) / general command (ASDU 20) |
 | `iec103.ErrTooLong` | an ASDU longer than 253 octets (one FT 1.2 frame with a one-octet link address), or a data set or description element too large for one ASDU |
 
 A type identification outside tables 3 and 4, or a private cause of
@@ -317,7 +340,7 @@ transmission, is not an error: it decodes as `iec103.Raw`.
 | `iec103.ErrLinkDown` | a request while the link is not initialized; a pending request fails with it when the link is lost, and so does a broadcast (`Broadcast`, `BroadcastClockSync`) the link loop had not taken when the link went down |
 | `iec103.ErrClosed` | an operation on a closed client or server, a request in flight at Close, or an operation on a `client.StagedWrite` that was already executed or aborted; `Err` wraps it when a callback did not return normally |
 | `iec103.ErrInHandler` | a client request (also `Send`, `Broadcast`, `BroadcastClockSync`) called from `Config.Handler` or `Config.OnState` on one of the client's goroutines: it is not sent |
-| `iec103.ErrResultLimit` | a request that collects more ASDUs than `Config.MaxResult` (`Interrogate`, the generic services, the tags of a disturbance transfer); the answers so far are returned with it |
+| `iec103.ErrResultLimit` | a request that collects more ASDUs than `Config.MaxResult` (`Interrogate`, the generic services, the tags of a disturbance transfer); also a disturbance channel answered with more than `Config.MaxResult` ASDUs 30 that add nothing to the record (no values, or another FAN). The answers so far are returned with it |
 | `iec103.ErrOverflow` | a request missed answers: they arrived faster than it took them, beyond the 1024 ASDUs a request buffers |
 | `iec103.ErrInvalidConfig` | invalid configuration: link address 255, a server without function type (`Config.Fun` 0), a negative `Config.BitRate`, a start cause other than 5 or 6, an invalid `link.Config` |
 | `iec103.ErrBusy` | a request while another of the same kind is pending (command, GI, generic read, generic write, generic GI, disturbance transfer) |

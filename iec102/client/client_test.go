@@ -215,3 +215,49 @@ func TestMirrorOfAnotherRange(t *testing.T) {
 		t.Fatalf("ended by %v %+v", last, last.Body)
 	}
 }
+
+// TestReadOtherRecord: ReadTotals and ReadSinglePoints keep only the data
+// of the record address they read; data of another record address is not
+// part of the answer.
+func TestReadOtherRecord(t *testing.T) {
+	at := iec102.TimeAOf(time.Date(2024, 3, 2, 5, 0, 0, 0, time.UTC), nil)
+	q := iec102.Read{T: iec102.C_CI_NA_2}
+	totals := func(record uint8, v uint32) []byte {
+		return enc(t, iec102.New(iec102.CauseRequest, 1, record, iec102.IntegratedTotals{T: iec102.M_IT_TA_2, Time: at,
+			Totals: []iec102.IntegratedTotal{{Addr: 1, Value: v}}}))
+	}
+	st := &station{answers: [][]byte{
+		enc(t, iec102.New(iec102.CauseActivationCon, 1, 11, q)),
+		totals(12, 99),
+		totals(11, 5),
+		enc(t, iec102.New(iec102.CauseActivationTerm, 1, 11, q)),
+	}}
+	c := start(t, st, nil)
+	got, err := c.ReadTotals(tctx(t), 11, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Totals[0].Value != 5 {
+		t.Fatalf("totals %+v, want only record 11's", got)
+	}
+
+	sq := iec102.Read{T: iec102.C_SP_NA_2}
+	points := func(record uint8, addr uint8) []byte {
+		return enc(t, iec102.New(iec102.CauseRequest, 1, record, iec102.SinglePoints{Points: []iec102.SinglePoint{{Addr: addr, On: true}}}))
+	}
+	st.mu.Lock()
+	st.answers = [][]byte{
+		enc(t, iec102.New(iec102.CauseActivationCon, 1, 52, sq)),
+		points(53, 9),
+		points(52, 1),
+		enc(t, iec102.New(iec102.CauseActivationTerm, 1, 52, sq)),
+	}
+	st.mu.Unlock()
+	pts, err := c.ReadSinglePoints(tctx(t), 52, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pts) != 1 || pts[0].Addr != 1 {
+		t.Fatalf("points %+v, want only record 52's", pts)
+	}
+}

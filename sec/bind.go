@@ -19,6 +19,15 @@ import (
 // session keys), the candidate takes the association over with what it
 // established, as [Endpoint.Attach] does. A candidate is dropped by
 // [Endpoint.Detach] of its connection.
+//
+// Secure Data binds a connection under session keys established on an
+// earlier connection too, as long as they are within their limits: a
+// controlling station that keeps its session keys over a reconnect sends
+// data under them before it changes them, and refusing that data would
+// hold it until the keys run out. The sequence numbers still have to
+// increase. A Station Association completed on a candidate ends the
+// session: the connection binds without session keys, and the Session
+// Key Change follows on it.
 
 func init() {
 	secbind.ReceiveAs = func(ep, owner any, now time.Time, raw []byte) ([]byte, [][]byte, bool, error) {
@@ -43,6 +52,9 @@ func (e *Endpoint) receiveAs(owner any, now time.Time, raw []byte) (data []byte,
 		data, out, err = e.receive(now, raw)
 		return data, e.flushReports(now, out), true, err
 	}
+	// Keys that reached their limits are invalidated first, so that the
+	// candidate does not authenticate under them.
+	e.invalidateWornOut(now)
 	c := e.cands[owner]
 	if c == nil {
 		c = e.candidate()
@@ -81,7 +93,7 @@ func (e *Endpoint) candidate() *Endpoint {
 // keys and the sequence numbers e has now. The caller holds e.mu.
 func (c *Endpoint) follow(e *Endpoint) {
 	if !c.waitUH && c.skc != skcWaitKeyChange {
-		c.st, c.assoc, c.keys, c.mal, c.remote, c.remoteDH = e.st, e.assoc, e.keys, e.mal, e.remote, e.remoteDH
+		c.st, c.assoc, c.keys, c.mal, c.remote = e.st, e.assoc, e.keys, e.mal, e.remote
 		c.skc = skcNoAssociation
 		if c.assoc {
 			c.skc = skcIdle
@@ -100,15 +112,17 @@ func (e *Endpoint) takeOver(c *Endpoint, owner any, now time.Time) {
 	e.owner = owner
 	e.upLocked(now)
 	e.seq = c.seq
-	e.st, e.assoc, e.keys, e.mal, e.remote, e.remoteDH = c.st, c.assoc, c.keys, c.mal, c.remote, c.remoteDH
+	e.st, e.assoc, e.keys, e.mal, e.remote = c.st, c.assoc, c.keys, c.mal, c.remote
+	e.peerCert, e.peerDH, e.arRecv = c.peerCert, c.peerDH, c.arRecv
 	e.waitUH, e.saTimer, e.apSent, e.apRandom, e.uhValid, e.upSent = c.waitUH, c.saTimer, c.apSent, c.apRandom, c.uhValid, c.upSent
 	e.skc, e.skcTimer, e.sqRecv, e.spRandom, e.khValid, e.kpSent = c.skc, c.skcTimer, c.sqRecv, c.spRandom, c.khValid, c.kpSent
 	e.solicited = c.solicited
 	e.sess, e.dp, e.keySince, e.keyUses, e.txSeq, e.rxSeq = c.sess, c.dp, c.keySince, c.keyUses, c.txSeq, c.rxSeq
-	if c.authBy == StatSuccessfulSessionKeyChanges {
-		// Fresh session keys, established on this connection.
-		e.session, e.stale = c.session, false
-	}
+	// The session as the candidate left it: ended by a Station Association
+	// on it, and fresh after a Session Key Change on it. Otherwise its keys
+	// are of an earlier connection.
+	e.session = c.session
+	e.stale = e.session && c.authBy != StatSuccessfulSessionKeyChanges
 	e.save()
 	e.notify()
 }

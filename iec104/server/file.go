@@ -420,6 +420,13 @@ func (f *FileServer) receive(s *Session, a *asdu.ASDU) error {
 			u.want = -1
 			return nil
 		}
+		if need := len(*sec) + len(o.Data); need > cap(*sec) {
+			// Grows as append does, but never past the announced length,
+			// which the section reaches exactly when it is complete.
+			grown := make([]byte, len(*sec), min(u.want, max(2*cap(*sec), need)))
+			copy(grown, *sec)
+			*sec = grown
+		}
 		*sec = append(*sec, o.Data...)
 		u.received += len(o.Data)
 		return nil

@@ -99,17 +99,25 @@ func (s *Server) disturbance(a *iec103.ASDU, o iec103.DisturbanceOrder) {
 			return
 		case iec103.TOOSelectFault:
 			rec, ok := src.Record(o.FAN)
-			noc, noe, longest := 0, 0, 0
-			if ok && len(rec.Channels) > 0 {
-				noc, noe = len(rec.Channels), len(rec.Channels[0].Values)
+			noc, noe := 0, 0
+			if ok {
+				noc = len(rec.Channels)
 				for _, ch := range rec.Channels {
-					longest = max(longest, len(ch.Values))
+					noe = max(noe, len(ch.Values))
 				}
 			}
 			// NOC is one octet and NOE two (clauses 7.2.6.10, 7.2.6.11): a
-			// record that does not fit them cannot be announced. Every
-			// channel counts: the NFE of its values is two octets too.
-			if !ok || noc > math.MaxUint8 || longest > math.MaxUint16 {
+			// record that does not fit them cannot be announced. NOE is
+			// one number for every channel: the longest channel's, so that
+			// no channel carries values beyond the announced count (a
+			// shorter channel is acknowledged negatively). A channel that
+			// does not fit the class 1 queue at once (its ASDUs 30 and the
+			// ASDU 31 that ends it) cannot be sent either.
+			if !ok || noc > math.MaxUint8 || noe > math.MaxUint16 || channelASDUs(noe) > s.cfg.QueueSize {
+				if ok {
+					s.log.Warn("disturbance record not announced: NOC or NOE does not fit",
+						"fan", o.FAN, "channels", noc, "values", noe, "queue", s.cfg.QueueSize)
+				}
 				s.end(fun, iec103.TOOEndDataAbortProt, o.TOV, o.FAN, iec103.ACCGlobal)
 				return
 			}
@@ -198,19 +206,54 @@ func (s *Server) sendTags(fun iec103.FunctionType, rec *iec103.Disturbance) {
 	flush()
 }
 
+// channelASDUs is the number of ASDUs a channel of n values takes: ASDUs
+// 30 of at most [iec103.MaxValues] and the ASDU 31 that ends it.
+func channelASDUs(n int) int { return (n+iec103.MaxValues-1)/iec103.MaxValues + 1 }
+
 // sendChannel sends the values of channel acc in ASDUs 30 of at most
-// [iec103.MaxValues], then the end of the channel (clause 7.4.7).
+// [iec103.MaxValues], then the end of the channel (clause 7.4.7). The
+// ASDUs are queued together: when the class 1 queue has no room for all of
+// them, none is queued and the channel ends aborted by the equipment (TOO
+// 37), which the controlling station acknowledges negatively and may
+// request again.
 func (s *Server) sendChannel(fun iec103.FunctionType, rec *iec103.Disturbance, acc uint8) {
 	for _, ch := range rec.Channels {
 		if ch.ACC != acc {
 			continue
 		}
+		bodies := make([]iec103.Body, 0, channelASDUs(len(ch.Values)))
 		for i := 0; i < len(ch.Values); i += iec103.MaxValues {
 			j := min(i+iec103.MaxValues, len(ch.Values))
-			s.distSend(fun, iec103.DisturbanceValues{TOV: rec.TOV, FAN: rec.FAN, ACC: acc, NFE: uint16(i), Values: ch.Values[i:j]})
+			bodies = append(bodies, iec103.DisturbanceValues{TOV: rec.TOV, FAN: rec.FAN, ACC: acc, NFE: uint16(i), Values: ch.Values[i:j]})
 		}
-		s.end(fun, iec103.TOOEndChannel, rec.TOV, rec.FAN, acc)
+		bodies = append(bodies, iec103.EndOfTransmission{TOO: iec103.TOOEndChannel, TOV: rec.TOV, FAN: rec.FAN, ACC: acc})
+		if err := s.queueAll(fun, bodies); err != nil {
+			s.log.Warn("disturbance channel not queued", "fan", rec.FAN, "acc", acc, "asdus", len(bodies), "error", err)
+			s.end(fun, iec103.TOOEndChannelAbortPrt, rec.TOV, rec.FAN, acc)
+		}
 		return
 	}
 	s.end(fun, iec103.TOOEndChannelAbortPrt, rec.TOV, rec.FAN, acc)
+}
+
+// queueAll queues the disturbance data ASDUs as class 1 data, all or none.
+func (s *Server) queueAll(fun iec103.FunctionType, bodies []iec103.Body) error {
+	raws := make([]queued, 0, len(bodies))
+	for _, b := range bodies {
+		raw, err := iec103.New(iec103.CauseDisturbanceData, s.ca, fun, 0, b).AppendIn(nil, s.cfg.Location)
+		if err != nil {
+			return err
+		}
+		raws = append(raws, queued{raw: raw, cycle: noCycle})
+	}
+	if s.ctx.Err() != nil {
+		return iec103.ErrClosed
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.class[0])+len(raws) > s.cfg.QueueSize {
+		return ErrQueueFull
+	}
+	s.class[0] = append(s.class[0], raws...)
+	return nil
 }

@@ -4,6 +4,7 @@ package link
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"sync"
 
@@ -154,15 +155,18 @@ func (s *Secondary) receive(f ft12.Frame) {
 		return
 	}
 	if broadcast {
-		// Only send/no reply is allowed to the broadcast address.
-		if c.Func() == FuncUserDataNoRepl {
+		// Only send/no reply of user data is allowed to the broadcast
+		// address (IEC 60870-5-2 5.1); like an addressed message it is
+		// delivered only in a variable-length frame and when the
+		// handler's FunctionFilter serves function 4.
+		if c.Func() == FuncUserDataNoRepl && f.Kind == ft12.KindVariable && s.implemented(FuncUserDataNoRepl) {
 			s.h.UserData(f.Data, true)
 		}
 		return
 	}
 	if r := s.fcb.repeated(c, f); r != nil {
 		// Repetition: the primary did not get our response.
-		_ = s.p.write(*r)
+		_ = s.p.write(context.Background(), *r)
 		return
 	}
 	r := s.respond(c, f)
@@ -170,7 +174,7 @@ func (s *Secondary) receive(f ft12.Frame) {
 		return
 	}
 	s.fcb.remember(c, f, r)
-	_ = s.p.write(*r)
+	_ = s.p.write(context.Background(), *r)
 }
 
 // fcbState is the frame count bit bookkeeping of a secondary link

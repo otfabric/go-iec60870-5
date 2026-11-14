@@ -8,7 +8,7 @@ import "github.com/otfabric/go-iec60870-5/iec102/ree"
 
 Package ree is the Spanish REE profile of IEC 60870-5-102: the type identifications of the private range (128..255) that Spanish fiscal metering ("Protocolo de comunicaciones entre registradores y concentradores", Red Eléctrica de España) assigns, the meaning it gives to the low bits of the integrated totals' quality descriptor and the session procedure (access key and end of session).
 
-None of it is part of IEC 60870-5-102. It is applied only where the caller asks for it: set Profile as iec102.Params.Profile to decode the bodies below, and use [Login](#func-login), [Logout](#func-logout) and [SetTime](#func-settime) on a client. The generic packages never send or expect an REE ASDU on their own.
+None of it is part of IEC 60870-5-102. It is applied only where the caller asks for it: set Profile as iec102.Params.Profile to decode the bodies below, and use [Login](#func-login), [Logout](#func-logout) and [SetTime](#func-settime) on a client. The generic packages never send or expect an REE ASDU on their own. On a server, [Session](#type-session) answers the session requests; its session state follows the last access key received, so a C\_AC\_NA\_2 with a wrong key closes an open session.
 
 We hold no REE document. The sources are, as for package iec102: the names the Beckhoff TS650x manual lists for 128..190 (section 4.2, without layouts), the implementations gisce/iec870ree and daiiniel/IEC60870-5-102 (read for comparison only), the test vectors of gisce/iec870ree and the recorded traffic of an Actaris SL762B meter (session start with C\_AC\_NA\_2, read with C\_CI\_NU\_2). docs/iec102/INTEROPERABILITY.md lists each type with its source and confidence.
 
@@ -304,7 +304,7 @@ type Session struct {
 
 Session answers the REE session requests on a server: C\_AC\_NA\_2 is confirmed (cause 7) when the key matches and refused with the P/N bit otherwise, C\_FS\_NA\_2 is confirmed and closes the session, C\_CS\_TA\_2 is passed to OnSetTime and confirmed. Every other ASDU goes to Next, or is refused with cause 14 when Next is nil. The server does not make the standard reads depend on an open session.
 
-That a wrong key is answered with the P/N bit is an interpretation: none of our sources shows a refused login.
+That a wrong key is answered with the P/N bit is an interpretation: none of our sources shows a refused login. A C\_AC\_NA\_2 with a wrong key also closes a session that is open: the session state follows the last access key received.
 
 #### func (Session) HandleASDU
 

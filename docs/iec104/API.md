@@ -130,6 +130,7 @@ func (c *Client) Addr() string
 | `WithStartHandler(func(context.Context, *Client))` | none | Runs on its own goroutine after every connect and reconnect that started data transfer |
 | `WithSwitchHandler(func(*Client))` | none | `Group` only: the active connection changed |
 | `WithRequestTimeout(time.Duration)` | 10s | Bound for request methods when the context has no deadline, and for every attempt with `WithRetry`; ≤ 0 disables |
+| `WithMaxResult(int)` | `DefaultMaxResult` (65536) | Bound of what one collecting request returns: the ASDUs of `Interrogate` and `CounterInterrogate`, the entries of `ListFiles`. The answer beyond it ends the request with the results so far and an error wrapping `telecontrol.ErrResultLimit`, not retried; 0 is the default, negative is no bound |
 | `WithTLS(*tls.Config)` | none | TLS on top of the dialled connection |
 | `WithSecurity(*sec.Endpoint)` | none | IEC 62351-5 application-layer security; the endpoint must have role `sec.Controlling`. `Connect` returns once the secure session is established; share one endpoint among the clients of a `Group`, which serve one controlled station |
 | `WithDialer(Dialer)` | `net.Dialer` | Custom transport |
@@ -208,7 +209,9 @@ func (c *Client) ListFiles(ctx context.Context, ca asdu.CommonAddr, ioa asdu.IOA
   call, then section by section, checking the length and checksum of every
   section and of the file and acknowledging them. A file the station refuses
   is a `*iec104.NegativeError`; a length or checksum that does not match is
-  acknowledged negatively and returned as `ErrProtocol`. The request timeout
+  acknowledged negatively and returned as `ErrProtocol`. A station that
+  announces more than 255 sections, the most a file can have, ends the
+  transfer with `ErrProtocol` too. The request timeout
   bounds each wait for the station, the context the whole transfer. It is
   never retried.
 - `PutFile` delivers a file (file transfer in control direction): each
@@ -219,6 +222,11 @@ func (c *Client) ListFiles(ctx context.Context, ca asdu.CommonAddr, ioa asdu.IOA
 - `ListFiles` calls the directory at `ioa` (0: the station's default one)
   and collects `F_DR_TA_1` entries until the one with
   `asdu.FileLastOfDirectory`. It only reads and is retried under `WithRetry`.
+- `Interrogate`, `CounterInterrogate` with `asdu.FreezeRead` and
+  `ListFiles` collect at most `WithMaxResult` results (`DefaultMaxResult`,
+  65536) and then end with the results so far and an error wrapping
+  `telecontrol.ErrResultLimit`. A request that waits for one answer
+  queues at most 16 mirrors ahead of it.
 
 ### Retries
 
@@ -957,5 +965,10 @@ Errors: `ErrInvalidStart`, `ErrInvalidLength`, `ErrInvalidControl`,
   (the switch handler: its group): the state handler is told
   "disconnected" with an error that wraps `iec104.ErrClosed` and names the
   callback, and the process goes on.
+- A server `Handler`, state handler, `Metrics` hook, `WithAccept` filter or
+  `WithSecurity` endpoint factory that does not return normally is logged
+  with its stack and closes its session (the filter: rejects the
+  connection); the other sessions go on. After a `Handler` panic no
+  further ASDUs of that session reach the `Handler`.
 - `asdu.ASDU` values passed to handlers are owned by the receiver; values
   passed to `Send` are not retained.

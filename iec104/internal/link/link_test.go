@@ -88,6 +88,13 @@ func fastParams() apci.Params {
 
 func setup(t *testing.T, role Role, params apci.Params, mutate ...func(*recorder)) (*Link, *peer, *recorder) {
 	t.Helper()
+	return setupConfig(t, role, params, nil, mutate...)
+}
+
+// setupConfig is setup with a change to the Config of the link, such as
+// Security, when change is not nil.
+func setupConfig(t *testing.T, role Role, params apci.Params, change func(*Config), mutate ...func(*recorder)) (*Link, *peer, *recorder) {
+	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -115,7 +122,7 @@ func setup(t *testing.T, role Role, params apci.Params, mutate ...func(*recorder
 	for _, m := range mutate {
 		m(rec)
 	}
-	l := New(local, Config{
+	cfg := Config{
 		Role:   role,
 		Params: params,
 		Log:    logx.New(iec60870.NopLogger(), "test"),
@@ -133,7 +140,11 @@ func setup(t *testing.T, role Role, params apci.Params, mutate ...func(*recorder
 			rec.mu.Unlock()
 		},
 		OnClose: func(err error) { rec.closed <- err },
-	})
+	}
+	if change != nil {
+		change(&cfg)
+	}
+	l := New(local, cfg)
 	t.Cleanup(func() {
 		_ = l.Close()
 		_ = r.c.Close()

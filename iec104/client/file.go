@@ -8,6 +8,7 @@ import (
 
 	"github.com/otfabric/go-iec60870-5/asdu"
 	iec104 "github.com/otfabric/go-iec60870-5/iec104"
+	"github.com/otfabric/go-iec60870-5/telecontrol"
 )
 
 // GetFile downloads a file from the controlled station: the file transfer
@@ -108,7 +109,7 @@ func (c *Client) ofTransfer(req, a *asdu.ASDU, ioa asdu.IOA) bool {
 func (c *Client) getFile(ctx context.Context, req *asdu.ASDU, ioa asdu.IOA, name uint16) ([]byte, error) {
 	x, err := c.begin(ctx, req, func(a *asdu.ASDU) bool {
 		return c.ofTransfer(req, a, ioa)
-	})
+	}, queueBound{})
 	if err != nil {
 		return nil, err
 	}
@@ -135,6 +136,7 @@ func (c *Client) getFile(ctx context.Context, req *asdu.ASDU, ioa asdu.IOA, name
 
 	// The length is the station's claim: preallocate at most 64 KiB of it.
 	data := make([]byte, 0, min(ready.Length, 64<<10))
+	sections := 0
 	for {
 		a, o, err := f.next()
 		if err != nil {
@@ -161,6 +163,12 @@ func (c *Client) getFile(ctx context.Context, req *asdu.ASDU, ioa asdu.IOA, name
 			}
 			return data, nil
 		case asdu.SectionReady:
+			// A file has at most one section per name of section (NOS
+			// 1..255, IEC 60870-5-101 7.2.6.33): a station that announces
+			// more does not end the transfer.
+			if sections++; sections > maxSections {
+				return nil, fmt.Errorf("%w: file transfer: more than %d sections", iec104.ErrProtocol, maxSections)
+			}
 			section = v
 		default:
 			return nil, unexpected(o, "section ready or last section")
@@ -246,7 +254,7 @@ func (c *Client) PutFile(ctx context.Context, ca asdu.CommonAddr, ioa asdu.IOA, 
 func (c *Client) putFile(ctx context.Context, req *asdu.ASDU, ioa asdu.IOA, name uint16, sections [][]byte) error {
 	x, err := c.begin(ctx, req, func(a *asdu.ASDU) bool {
 		return c.ofTransfer(req, a, ioa)
-	})
+	}, queueBound{})
 	if err != nil {
 		return err
 	}
@@ -338,7 +346,9 @@ func (c *Client) putFile(ctx context.Context, req *asdu.ASDU, ioa asdu.IOA, name
 // selects a directory; 0 is the station's default one.
 //
 // A station without a directory answers with the mirrored call, which is
-// reported as [*iec104.NegativeError].
+// reported as [*iec104.NegativeError]. A directory of more entries than
+// [WithMaxResult] allows ends the request there with the entries so far
+// and an error wrapping [telecontrol.ErrResultLimit].
 func (c *Client) ListFiles(ctx context.Context, ca asdu.CommonAddr, ioa asdu.IOA) ([]asdu.FileDirectoryEntry, error) {
 	req := asdu.New(asdu.CauseRequest, ca, asdu.FileCall{IOA: ioa})
 	var entries []asdu.FileDirectoryEntry
@@ -352,7 +362,7 @@ func (c *Client) ListFiles(ctx context.Context, ca asdu.CommonAddr, ioa asdu.IOA
 func (c *Client) listFiles(ctx context.Context, req *asdu.ASDU) ([]asdu.FileDirectoryEntry, error) {
 	x, err := c.begin(ctx, req, func(a *asdu.ASDU) bool {
 		return a.Type == asdu.F_DR_TA_1 && a.Cause == asdu.CauseRequest && c.fromStation(req, a)
-	})
+	}, c.collecting(req))
 	if err != nil {
 		return nil, err
 	}
@@ -375,6 +385,10 @@ func (c *Client) listFiles(ctx context.Context, req *asdu.ASDU) ([]asdu.FileDire
 			if !ok {
 				continue
 			}
+			if limit := c.opts.maxResult; limit > 0 && len(entries) >= limit {
+				return entries, fmt.Errorf("%w: more than %d directory entries answer %s",
+					telecontrol.ErrResultLimit, limit, req.Type)
+			}
 			entries = append(entries, e)
 			if e.Status&asdu.FileLastOfDirectory != 0 {
 				return entries, nil
@@ -382,6 +396,10 @@ func (c *Client) listFiles(ctx context.Context, req *asdu.ASDU) ([]asdu.FileDire
 		}
 	}
 }
+
+// maxSections is the number of sections a downloaded file may have: one
+// per name of section other than 0.
+const maxSections = 255
 
 // sectionNumber returns the number on the wire (NOS, from 1) of the section
 // at index i (from 0). An index past section 255 returns 0, which no section

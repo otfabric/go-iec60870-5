@@ -23,6 +23,14 @@ A [Client](#type-client) owns one connection to a controlled station. It runs th
 
 All methods are safe for concurrent use.
 
+## Constants
+
+```go
+const DefaultMaxResult = 65536
+```
+
+DefaultMaxResult is the default bound of [WithMaxResult](#func-withmaxresult), as for the IEC 60870-5-101 client.
+
 ## Types
 
 ### type Client
@@ -172,7 +180,7 @@ Interrogate runs an interrogation (C\_IC\_NA\_1): it sends the command, waits fo
 
 qoi is [asdu.QOIStation](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#QOIStation) for a general interrogation or [asdu.QOIGroup](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#QOIGroup)(n) for one group. With ca set to [asdu.Broadcast](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#Broadcast) the answers of all stations are collected until the first termination.
 
-The collected ASDUs are also delivered to the [Handler](#type-handler): the same values, shared, so neither side may modify them. A large station can take longer than the default request timeout: pass a context with a suitable deadline. On error the ASDUs collected so far are returned alongside it.
+The collected ASDUs are also delivered to the [Handler](#type-handler): the same values, shared, so neither side may modify them. A large station can take longer than the default request timeout: pass a context with a suitable deadline. On error the ASDUs collected so far are returned alongside it. A station that sends more ASDUs than [WithMaxResult](#func-withmaxresult) allows ends the request there with an error wrapping [telecontrol.ErrResultLimit](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/telecontrol#ErrResultLimit).
 
 #### func (Client) ListFiles
 
@@ -182,7 +190,7 @@ func (c *Client) ListFiles(ctx context.Context, ca asdu.CommonAddr, ioa asdu.IOA
 
 ListFiles calls the directory of the controlled station (F\_SC\_NA\_1 with cause "request") and returns its entries (F\_DR\_TA\_1), collected until the entry the station marks as the last one ([asdu.FileLastOfDirectory](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#FileLastOfDirectory)). ioa selects a directory; 0 is the station's default one.
 
-A station without a directory answers with the mirrored call, which is reported as [\*iec104.NegativeError](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#NegativeError).
+A station without a directory answers with the mirrored call, which is reported as [\*iec104.NegativeError](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#NegativeError). A directory of more entries than [WithMaxResult](#func-withmaxresult) allows ends the request there with the entries so far and an error wrapping [telecontrol.ErrResultLimit](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/telecontrol#ErrResultLimit).
 
 #### func (Client) PutFile
 
@@ -534,6 +542,14 @@ func WithLogger(l iec60870.Logger) Option
 ```
 
 WithLogger sets the logger. Nil, the default, disables logging.
+
+#### func WithMaxResult
+
+```go
+func WithMaxResult(n int) Option
+```
+
+WithMaxResult bounds what one collecting request returns: the ASDUs of [Client.Interrogate](#func-client-interrogate) and [Client.CounterInterrogate](#func-client-counterinterrogate), the directory entries of [Client.ListFiles](#func-client-listfiles). The answer that would exceed n ends the request with what was collected so far and an error wrapping [telecontrol.ErrResultLimit](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/telecontrol#ErrResultLimit), instead of growing it until its deadline; such a request is not retried. Zero means DefaultMaxResult, negative means no bound. Choose n above the number of ASDUs the largest station sends in answer to a general interrogation.
 
 #### func WithMetrics
 

@@ -566,6 +566,9 @@ type Session struct {
 
 	// sec is the security of the session, nil without security.
 
+	// metrics are the metrics of the server as the session calls them,
+	// nil without metrics.
+
 }
 ```
 

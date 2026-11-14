@@ -112,7 +112,8 @@ when and why the client stopped; a `Handler` or `OnState` that does not
 return normally is logged with its stack and closes the client, and both
 may call `Close`, which then returns at once. The typed
 helpers are `ReadProductSpec`, `ReadTime`, `ReadTotals` (any of the 20 read
-commands C_CI_NA_2 .. C_CI_NU_2) and `ReadSinglePoints`.
+commands C_CI_NA_2 .. C_CI_NU_2) and `ReadSinglePoints`; both keep only
+the data of the requested record address.
 
 ## Integrated total station
 

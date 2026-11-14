@@ -1,5 +1,180 @@
 # Release notes
 
+## v0.7.0
+
+**Date:** 2026-11-14
+**Previous release:** v0.6.0
+
+Bounds on what a peer can make the IEC 104 client, the IEC 104 security
+and the serial stations hold, IEC 104 server callbacks that close only
+their own session when they do not return normally, session keys that
+the controlled station stops accepting at their limits, and disturbance
+transfers that keep to one fault. Five changes of behaviour are
+breaking; each says how to get the previous behaviour back where there
+is a way. The only new identifiers are `client.WithMaxResult` and
+`client.DefaultMaxResult` of `iec104/client`; none is removed or
+changed.
+
+### Breaking
+
+- `iec104/client`: `WithMaxResult` bounds what one collecting request
+  returns: the ASDUs of `Interrogate` and of `CounterInterrogate` with
+  `asdu.FreezeRead`, the directory entries of `ListFiles`. The answer
+  that would exceed it ends the request with the results so far and an
+  error wrapping `telecontrol.ErrResultLimit`, instead of growing it
+  until its deadline; such a request is not retried. The default is
+  `DefaultMaxResult`, 65536, as for the IEC 101 client. Why: a station
+  that keeps answering held the request's memory until its deadline.
+  Previous behaviour: `WithMaxResult(-1)`.
+- `iec104/server`: a state handler (`WithStateHandler`), a `Metrics` or
+  `HandlerMetrics` hook, an accept filter (`WithAccept`) or a security
+  endpoint factory (`WithSecurity`) that does not return normally is
+  logged at Error as `callback did not return normally` with its stack
+  and closes only its session (the accept filter: rejects only that
+  connection, logged as `connection rejected` with the reason `accept
+  filter did not return normally`); the server goes on serving the
+  others. After a `Handler` panic the session ends at once: ASDUs
+  already received on it are no longer delivered to the `Handler`.
+  Previous behaviour: the process ended (the Handler: the session closed
+  in the background and later ASDUs were still delivered). An
+  application that wants the process to end ends it itself in the
+  callback.
+- `sec`: `Trust` checks the key usage of the remote certificate and the
+  validity period of the authority certificates. A remote certificate
+  with a key usage extension that allows neither keyAgreement nor
+  digitalSignature is refused, and an authority certificate outside its
+  validity period authorizes nothing. Why: the key of the certificate
+  serves the key agreement of the Station Association, and an expired
+  authority issues nothing valid. Previous behaviour: for the authority
+  validity, `Config.IgnoreValidity` (which also skips the validity
+  check of the station certificate); for the key usage there is none:
+  issue the certificate with keyAgreement or digitalSignature, or
+  without the extension.
+- `sec`: a Station Association completed at the controlled station ends
+  its session: the session keys of the earlier association are no longer
+  accepted, `Ready` reports false, and the Session Key Change that
+  follows sets up new ones (IEC TS 60870-5-7:2025 Table 15). Why: new
+  update keys replace the association the session keys were sent under.
+  There is no way back; a controlling station that follows the TS, this
+  module's included, changes the session keys right after the
+  association.
+- `iec103/server`: the ASDUs 30 of a disturbance channel and the ASDU 31
+  that ends it are queued all or none. When the class 1 queue has no
+  room for all of them the channel ends with TOO 37 (aborted by the
+  protection equipment), which the controlling station acknowledges
+  negatively and may request again. The selection of a record whose
+  longest channel cannot fit the class 1 queue at all is answered with
+  TOO 34 and no transfer starts. Why: a channel cut at the queue bound
+  went out with values missing.
+  Previous behaviour, for long records: raise `Config.QueueSize`.
+
+### Added
+
+- `iec104/client`: `WithMaxResult` and `DefaultMaxResult` (above).
+
+### Changed
+
+- `iec104/client`: a request that waits for one answer (`Command`,
+  `Read`, `ClockSync`, ...) queues at most 16 mirrors of earlier requests
+  ahead of its answer, and otherwise ends with an error wrapping
+  `telecontrol.ErrResultLimit`.
+- `iec104/client`: `GetFile` ends with `iec104.ErrProtocol` when the
+  station announces more than 255 sections, the most a file can have (one
+  per name of section, IEC 60870-5-101 7.2.6.33).
+- `telecontrol`: `Requester.Collect` queues at most `MaxResult` plus a
+  small margin while its request is still being sent.
+- `iec104`: with IEC 62351-5, security output waiting for the peer's
+  acknowledgements is bounded: above 128 KiB received I frames are no
+  longer acknowledged, so a conformant peer stops after `k` more; a peer
+  that keeps sending past its window is closed with `ErrProtocol` above
+  1 MiB.
+- `iec104`: ignored or unsolicited STARTDT/STOPDT frames are logged at
+  Debug instead of Warn.
+- `sec`: a controlled station stops accepting session keys as soon as
+  they reach `Settings.KeyUses` or their lifetime, not only at its next
+  `Tick`: it discards the message that finds them so, counts the
+  invalidation and asks for new keys at once. `Ready` and
+  `Status().Ready` report false from then.
+- `sec`: the remote certificate of an association (`Status().Remote`) is
+  taken only once the Station Association has authenticated it.
+- `sec`: a connection not yet bound to an association answers one
+  Station Association request per request timeout; a repeated request
+  gets the same answer, with the same random data.
+- `iec103/server`: NOE announces the longest channel of a record, so
+  that no channel carries values beyond it.
+- `link`: a broadcast reaches `SecondaryHandler.UserData` only as
+  send/no reply in a variable-length frame, and only when the handler's
+  `FunctionFilter` serves function 4, as an addressed message.
+- `ci`: the Extended workflow validates its `fuzztime` and `chaos_seeds`
+  inputs and passes them to the shell through the environment.
+
+### Fixed
+
+- `iec104/client`: a callback that stops the client while it is still
+  connecting is named in the "disconnected" notice, as after the connect.
+- `link`: an exchange (`Primary`, `Balanced`) ends with its context also
+  while its frame waits for room in a full send queue, which a peer that
+  stops reading leaves full.
+- `link`: Close on a transport that is not an `io.Closer` no longer waits
+  for a writer blocked in `Write`; the writer ends when that `Write`
+  returns and writes nothing more.
+- `iec103/client`: `Disturbance` keeps to the selected fault (FAN,
+  IEC 60870-5-103 7.4.7): it skips an end of transmission of another
+  FAN, ends with `iec103.ErrInvalid` (and the record so far) on a channel
+  offered for another FAN, and acknowledges negatively a channel whose
+  disturbance values carry another FAN. Disturbance values that add
+  nothing to the record (no values, or another FAN) count against
+  `Config.MaxResult` per channel.
+- `iec102/client`: `ReadTotals` and `ReadSinglePoints` keep only the data
+  of the requested record address.
+- `iec104/server`: `FileServer` upload sections no longer hold more
+  capacity than their announced length.
+- `internal/pcapio`: capture lengths are checked before they are
+  converted to `int`, which is 32 bits wide on some platforms.
+
+### Documentation
+
+- `iec102/ree`: `Session` documents that its state follows the last
+  access key received, so a C_AC_NA_2 with a wrong key closes an open
+  session.
+- SECURITY.md, LIMITATIONS.md, ERRORS.md (new section Result bounds),
+  ARCHITECTURE.md, OBSERVABILITY.md, TESTING.md, docs/REQUIREMENTS.md
+  (LK-9, LK-16), docs/iec102, docs/iec103 (interpretations 14 and 15),
+  docs/iec104/API.md, docs/iec104/ARCHITECTURE.md,
+  docs/iec104/INTEROPERABILITY.md and docs/iec104/LIMITATIONS.md follow
+  the changes above; docs/api is regenerated.
+
+### Tests
+
+- Result and queue bounds: `iec104/client` `TestInterrogateResultLimit`,
+  `TestListFilesResultLimit`, `TestGetFileSectionLimit`,
+  `TestExchangeQueueBound`; `telecontrol.TestCollectQueueBound`.
+- Security output: `iec104/internal/link`
+  `TestSecurityOutputSlowAcknowledgementStaysBounded`,
+  `TestSecurityOutputPeerPastWindowIsClosed`.
+- `iec104/server` callbacks: `TestStateHandlerPanicClosesOnlyItsSession`,
+  `TestMetricsPanicClosesOnlyItsSession`,
+  `TestAcceptFilterPanicRejectsOnlyThatConnection`,
+  `TestEndpointFactoryPanicEndsTheSession`,
+  `TestHandlerPanicStopsDelivery`.
+- `sec`: `TestControlledKeyUsesEnforced`,
+  `TestControlledKeyLifetimeAtUse`, `TestAssociationEndsSession`,
+  `TestRemoteAfterAuthentication`, `TestCandidateAssociationRequests`,
+  `TestCandidateKeyUses`, `TestCandidateAssociationEndsSession`,
+  `TestTrustKeyUsage`, `TestTrustAuthorityValidity`.
+- `link`: `TestExchangeEndsWithContextOnFullQueue`,
+  `TestCloseWithoutCloserBlockedWrite`, `TestCloseWithoutCloserIdleWriter`,
+  `TestSecondaryBroadcastKindAndFilter`.
+- IEC 103 disturbance data: `iec103/e2e` `TestDisturbanceOtherFAN`,
+  `TestDisturbanceEmptyValues`; `iec103/server`
+  `TestDisturbanceChannelQueuedWhole`, `TestDisturbanceSelectNOE`.
+- `iec102/client.TestReadOtherRecord`,
+  `internal/pcapio.TestPacketsLengthsBeyondInt32`; the `iec104/e2e`
+  station that announces sections without end now expects
+  `iec104.ErrProtocol` after 255 sections.
+
+---
+
 ## v0.6.0
 
 **Date:** 2026-11-14

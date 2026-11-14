@@ -406,8 +406,8 @@ for what it protects and where it came from.
 | Key wrap (KWA) | 2, AES-256 key wrap (RFC 3394) |
 | MAC algorithms (MAL) | 3 HMAC-SHA-256/8, 4 HMAC-SHA-256/16 (default), 7 and 8 HMAC-SHA3-256/8 and /16. Over TCP/IP a controlled station accepts 4 and 8 by default (TS 9.3.3), on serial links (`Config.Serial`) 3 and 7 (TS 9.3.2); `AcceptMAC` lists others |
 | Data protection (DPA) | the MAC algorithms above, 11 AES-256-GCM; accepted by default: the MACs of the link and 11 (TS 9.5.2, 9.5.3) |
-| Key usage limits | 24 h and 65535 messages at the controlling station, twice that at the controlled station (TS Table 9, lower ends of the recommended ranges) |
-| Certificates | X.509, self-signed and pinned, or issued by a trusted Central Authority, optionally restricted by subject |
+| Key usage limits | 24 h and 65535 messages at the controlling station, twice that at the controlled station (TS Table 9, lower ends of the recommended ranges); the controlled station stops accepting the keys the moment they reach a limit, counts the invalidation and asks for new keys |
+| Certificates | X.509, self-signed and pinned, or issued by a trusted Central Authority, optionally restricted by subject; a key usage extension, where present, must allow keyAgreement or digitalSignature; an authority must be within its validity period (unless `IgnoreValidity`) |
 | Role-based access control | the seven roles of IEC TS 60870-5-7, configured per association; refusals with cause 17; file deletion needs FILEMNGT; without MONITOR DATA no monitor-direction data (types 1 to 44) is sent to the association (TS 8.2) |
 | Several controlling stations at one station | yes, one association per AIM, made on first contact or refused |
 | Security statistics and events | counters (0 to 2^31-1) and mnemonics locally (`Endpoint.Statistics`, `Config.OnEvent`); M_IT_TB_1 reports, cause spontaneous, at the IOAs and thresholds of `Config.Reports` (TS 5.4.2.3, 9.7, Table 10 defaults); the four revocation counters stay 0 (no revocation checking) |
@@ -432,8 +432,14 @@ compatible with it:
   Association; failed attempts are repeated with a backoff from
   `Settings.ReplyTimeout` doubling to one minute.
 - A Central Authority certificate is checked by its signature on the
-  station certificate only, which accepts the authority certificates of
-  cB-Sigma that carry no basic constraints.
+  station certificate and its validity period only, which accepts the
+  authority certificates of cB-Sigma that carry no basic constraints.
+- A Station Association completed at the controlled station ends the
+  session: the session keys of the earlier association are not accepted
+  again, and the Session Key Change that follows it (TS Table 15) sets up
+  new ones. A connection not yet bound to the association answers a
+  repeated Association Request with the same response, and another one
+  only after the request timeout.
 
 Where the two differ in what a controlled station permits:
 

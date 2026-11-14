@@ -475,7 +475,7 @@ NewPrimary starts a primary station on rw. Close stops it; rw is closed when it 
 func (pr *Primary) Close() error
 ```
 
-Close stops the station and waits for its goroutines. It closes rw when rw is an io.Closer; the reader goroutine returns only when that Close unblocks Read, so a transport whose Close does not leaves Close waiting. For a transport that is not an io.Closer Close does not wait for the reader: it ends when its pending Read returns, and delivers nothing more. Close is safe to call more than once and from several goroutines: the first call closes the transport and returns its error; later calls return nil.
+Close stops the station and waits for its goroutines. It closes rw when rw is an io.Closer; the reader goroutine returns only when that Close unblocks Read, so a transport whose Close does not leaves Close waiting. For a transport that is not an io.Closer Close does not wait for the reader: it ends when its pending Read returns, and delivers nothing more. Nor does it then wait for a writer blocked in Write (a peer that stops reading): the writer ends when that Write returns, and writes nothing more. Close is safe to call more than once and from several goroutines: the first call closes the transport and returns its error; later calls return nil.
 
 Called from a callback (Config.OnFrame, Config.OnDiscard), Close does not wait for the goroutine the callback runs on: it returns once the station is stopped, and that goroutine ends when the callback has returned.
 

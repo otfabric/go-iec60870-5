@@ -96,14 +96,14 @@ identifiers. `NewSlogLogger` implements it through
 | Warn | `reconnect failed` (client) | `retry_in`, `error` |
 | Warn | `connection terminated` (`t1` or a protocol violation) | `error` |
 | Warn | `dropping undecodable ASDU` | `error` |
-| Warn | `connection rejected` (server) | `remote`, `reason` |
+| Warn | `connection rejected` (server; `reason` is `not accepted`, or `accept filter did not return normally`) | `remote`, `reason` |
 | Warn | `accept failed` (server; Serve retries after `retry_in`) | `retry_in`, `error` |
 | Warn | `event queue full, dropping the oldest events` (server; once per overflow) | `group`, `size` |
 | Warn | `file transfer refused: the session has the most transfers open` (server, `FileServer.MaxTransfers`) | `open`, `max` |
 | Info | `redundancy group switched over` (server) | `group`, `session`, `previous` |
-| Warn | `ignoring unsolicited confirmation`, `ignoring U frame from controlled station` | `function` |
-| Error | `handler panic` (server) | `asdu`, `panic`, `stack` |
-| Error | `callback did not return normally` (client: `Handler`, `state handler`, `start handler`, `switch handler`; the client is closed) | `callback`, `value`, `stack` |
+| Debug | `ignoring unsolicited confirmation`, `ignoring U frame from controlled station` | `function` |
+| Error | `handler panic` (server; the session is closed) | `asdu`, `panic`, `stack` |
+| Error | `callback did not return normally` (client: `Handler`, `state handler`, `start handler`, `switch handler`; the client is closed. Server: `state handler`, the `Metrics` hooks (`Metrics.OnConnect` and the other methods), `HandlerMetrics.OnHandled`, `security endpoint factory`, which close the session, and `accept filter`, which rejects the connection) | `callback`, `value`, `stack` |
 
 Every entry carries `component` (`iec104.client` or `iec104.server`). Client
 entries carry `remote`; entries of a server session carry `session`,
@@ -232,8 +232,10 @@ through `Config.Logger`; nil is silent. They have no metrics interface.
 | Warn | `send failed` (IEC 101 server) | `error` |
 | Warn | `handler queue full, ASDU dropped` (IEC 102 client), `answer not queued` (IEC 102 server) | - |
 | Warn | `identification not queued`, `disturbance data not queued` (IEC 103 server) | - |
+| Warn | `disturbance channel not queued` (IEC 103 server; the channel ends with TOO 37) | `fan`, `acc`, `asdus`, `error` |
+| Warn | `disturbance record not announced: NOC or NOE does not fit` (IEC 103 server; the selection ends with TOO 34) | `fan`, `channels`, `values`, `queue` |
 | Debug | `interrogation cycle aborted`, `ASDU for another common address dropped` (IEC 103 server) | - |
-| Debug | `unexpected ASDU in disturbance data transfer` (IEC 103 client) | - |
+| Debug | `unexpected ASDU in disturbance data transfer`, `end of transmission of another fault in disturbance data transfer` (IEC 103 client) | `asdu` |
 | Warn | `time synchronization after initialization failed`, `general interrogation after initialization failed` (IEC 103 client) | `error` |
 | Error | `callback did not return normally` (every client and server, and the `link` stations with `link.Config.Logger`; the station stops and `Err` reports it) | `callback`, `value`, `stack` |
 
