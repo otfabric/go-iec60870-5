@@ -150,8 +150,11 @@ func TestCallbackThatDoesNotReturnNormally(t *testing.T) {
 	}
 	nothing := func(*testing.T, *client.Client, *server.Server) {}
 	sites := []site{
-		{"client Handler", true, func(cc *client.Config, _ *server.Config) {
+		{"client Handler", true, func(cc *client.Config, sc *server.Config) {
 			cc.Handler = func(*asdu.ASDU) { panic(stopValue) }
+			// Without end of initialization the trigger's ASDU is the
+			// first the Handler gets, after stations has seen the link up.
+			sc.NoEndOfInit = true
 		}, spontaneous},
 		{"client OnState", true, func(cc *client.Config, _ *server.Config) {
 			cc.OnState = func(st iec101.State, _ error) {
