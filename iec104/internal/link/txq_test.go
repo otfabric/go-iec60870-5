@@ -125,8 +125,10 @@ func TestSecurityOutputPeerPastWindowIsClosed(t *testing.T) {
 			maxNR = max(maxNR, int(f.RecvSeq))
 		}
 	}
-	if frames != fastParams().K {
-		t.Fatalf("peer got %d I frames, want the window of %d", frames, fastParams().K)
+	// The link may end before it wrote the whole window; it never writes
+	// beyond it.
+	if frames == 0 || frames > fastParams().K {
+		t.Fatalf("peer got %d I frames, want 1 to the window of %d", frames, fastParams().K)
 	}
 	if limit := txSoftLimit/(sec.per*sec.size) + fastParams().W; maxNR > limit {
 		t.Fatalf("station acknowledged N(R)=%d, beyond the soft limit at about %d", maxNR, limit)

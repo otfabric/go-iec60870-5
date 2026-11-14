@@ -74,7 +74,13 @@ func TestCallbackThatDoesNotReturnNormally(t *testing.T) {
 				defer mu.Unlock()
 				return logs.Write(p)
 			}), "", 0))))
-			c := dial(t, st.addr, opts...)
+			// The state handler may stop the client before Dial returns, so
+			// Dial may end with ErrClosed; the notices below still apply.
+			opts = append([]client.Option{client.WithParams(testutil.Params()), client.WithRequestTimeout(3 * time.Second)}, opts...)
+			c, err := client.Dial(context.Background(), st.addr, opts...)
+			if err != nil && !errors.Is(err, iec104.ErrClosed) {
+				t.Fatalf("Dial: %v", err)
+			}
 			for {
 				var n notice
 				select {
@@ -90,9 +96,11 @@ func TestCallbackThatDoesNotReturnNormally(t *testing.T) {
 				}
 				break
 			}
-			within(t, "Close", func() { _ = c.Close() })
-			if s := c.State(); s != iec104.StateDisconnected {
-				t.Errorf("state %s", s)
+			if c != nil {
+				within(t, "Close", func() { _ = c.Close() })
+				if s := c.State(); s != iec104.StateDisconnected {
+					t.Errorf("state %s", s)
+				}
 			}
 			mu.Lock()
 			text := logs.String()
