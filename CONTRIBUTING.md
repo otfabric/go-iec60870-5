@@ -72,7 +72,7 @@ Run `make` (or `make help`) for the full list of targets.
 - A new `asdu` type identification must appear in the round-trip test (`TestRoundTripAllTypes` fails for a registered type without coverage) and in the INTEROPERABILITY document of its standard
 - Protocol machine behaviour is tested in `link` and `iec104/internal/link` with scripted peers, where the exact frames are visible
 - Tests must pass with `-race` and must not depend on timing beyond generous upper bounds
-- A change to a protocol machine or to a type a reference fixture covers must keep the interop suite of its standard green (the Interop workflow runs them on every push except Markdown-only changes). The `interop` packages hold this repository's scenarios and assertions; the reference stacks belong to [otfabric/iec60870-5-interop](https://github.com/otfabric/iec60870-5-interop) and are consumed as images only
+- A change to a protocol machine or to a type a reference fixture covers must keep the interop suite of its standard green (the Interop workflow runs them on every pull request except Markdown-only changes). The `interop` packages hold this repository's scenarios and assertions; the reference stacks belong to [otfabric/iec60870-5-interop](https://github.com/otfabric/iec60870-5-interop) and are consumed as images only
 
 ### Documentation
 

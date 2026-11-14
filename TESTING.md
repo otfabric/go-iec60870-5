@@ -22,7 +22,7 @@ How to run each test tier of go-iec60870-5. What is implemented and at which evi
 | Recorded traffic, files unchanged | `make captures-verify` (the SHA256SUMS of `iec104`, `iec101`, `iec103` and `iec102/testdata/captures`) | `sha256sum` or `shasum` | CI workflow, job Captures |
 | Recorded traffic, the full recordings | `make captures-extended` | network (GitHub), 251 MB | no |
 | Recorded traffic, regenerate the tshark oracle, the manifest and the fuzz seeds | `make captures-oracle`, `make captures-manifest` | `tshark` for the oracle | no |
-| IEC 104 interop with reference images | `make interop` | Docker | Interop workflow, every push and pull request except Markdown-only changes |
+| IEC 104 interop with reference images | `make interop` | Docker | Interop workflow, every pull request except Markdown-only changes |
 | IEC 101 interop (lib60870-C, cB-Sigma, digitalpetri) | `make interop-iec101` | Docker | Interop workflow, job `iec101` |
 | IEC 103 interop (vitusdong, ARIEC103, Open103, go-iecp5) | `make interop-iec103` | Docker | Interop workflow, job `iec103` |
 | IEC 102 interop (gisce/iec870ree against the server) | `make interop-iec102` | Docker; the iec60870-5-interop v0.5.0 image, pinned by digest | Interop workflow, job `iec102` |
@@ -102,4 +102,16 @@ When a target fails, `go test` writes the input to `testdata/fuzz/<Target>/` in 
 
 1. Copy the file into `testdata/fuzz/<Target>/` if it came from CI.
 2. Reproduce it: `go test -run '<Target>/<file>' ./<package>`.
-3. Fix the decoder and commit the file with the fix. Plain `go test` then runs it on every push.
+3. Fix the decoder and commit the file with the fix. Plain `go test` then runs it on every pull request.
+
+## When CI runs
+
+| Event | Workflow | What runs |
+|---|---|---|
+| Pull request | `pr.yml` | `docs.yml` (docsync, otfabric-policy) always; `ci.yml`, `interop.yml` unless every changed file is documentation; then `OT Fabric Required Checks` |
+| Push to a branch | none | nothing; dispatch `ci.yml`, `interop.yml` to test a branch without a pull request |
+| Push to `main` | `docs.yml` | the light checks; the merged commit was tested as the pull request's merge commit |
+| Schedule | `extended.yml` | the scheduled runs, on `main` |
+| Release | `release.yml` | the release workflow tests the release commit again |
+
+Documentation means an added or modified `*.md` file outside `.github/`, `testdata/` and `vendor/`, other than `AGENTS.md` and `CLAUDE.md`. A deleted or renamed document, or any other file, runs everything. `OT Fabric Required Checks` fails unless every job that applies succeeded; its summary lists them.

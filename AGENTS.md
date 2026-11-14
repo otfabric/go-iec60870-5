@@ -6,7 +6,7 @@ Pure Go implementation of the IEC 60870-5 telecontrol family with no dependencie
 
 ## Organisation standards
 
-This repository follows **otfabric/engineering policy 1.4**, profile **protocol-library** (`.otfabric/policy.yaml`, mode `enforce`). Organisation skills: `otfabric` Claude Code plugin. Where this file and the organisation standards disagree, this file wins here — say so in your report.
+This repository follows **otfabric/engineering policy 1.6**, profile **protocol-library** (`.otfabric/policy.yaml`, mode `enforce`). Organisation skills: `otfabric` Claude Code plugin. Where this file and the organisation standards disagree, this file wins here — say so in your report.
 
 ## Where the truth lives
 
