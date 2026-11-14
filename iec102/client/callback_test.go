@@ -174,21 +174,53 @@ func TestDoneAndErr(t *testing.T) {
 	}
 }
 
+// flood is a station on the link layer alone: it answers a request with
+// class 2 answers it encoded beforehand, without termination. Nothing it
+// does while the request runs allocates, so what a test measures then is
+// the client's (and the link layer's) work.
+type flood struct {
+	mu      sync.Mutex
+	asked   bool
+	answers [][]byte
+	next    int
+}
+
+func (f *flood) UserData([]byte, bool) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = true
+	return true
+}
+
+func (f *flood) Class2() []byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.asked || f.next == len(f.answers) {
+		return nil
+	}
+	f.next++
+	return f.answers[f.next-1]
+}
+
+func (*flood) Class1() []byte  { return nil }
+func (*flood) HasClass1() bool { return false }
+func (*flood) Reset(bool)      {}
+
 // A station that answers a request with more ASDUs than Config.MaxResult
 // and never terminates it: the request ends at the bound with
 // ErrResultLimit, long before its deadline, and allocates within a budget
-// set by the bound, not by what the station sends. It runs on the fake
-// clock of testing/synctest.
+// set by the bound, not by what the station sends. The station's answers
+// are encoded before the measurement starts, so the budget holds the
+// client's work only. It runs on the fake clock of testing/synctest.
 func TestRequestResultLimit(t *testing.T) {
-	const limit, flood = 16, 1024
+	const limit, flooded = 16, 4096
 	const budget = limit * 16 << 10
 	synctest.Test(t, func(t *testing.T) {
 		check := serialline.Goroutines(t)
-		answers := make([][]byte, flood)
-		for i := range answers {
-			answers[i] = enc(t, iec102.New(iec102.CauseRequest, 1, 50, iec102.SinglePoints{Points: []iec102.SinglePoint{{Addr: uint8(i % 128), On: true}}}))
+		st := &flood{answers: make([][]byte, flooded)}
+		for i := range st.answers {
+			st.answers[i] = enc(t, iec102.New(iec102.CauseRequest, 1, 50, iec102.SinglePoints{Points: []iec102.SinglePoint{{Addr: uint8(i % 128), On: true}}}))
 		}
-		st := &station{answers: answers} // no termination
 		a, b := serialline.Pair()
 		sec, err := link.NewSecondary(b, link.Config{FT12: ft12.Params{AddrSize: 2}}, 1, st)
 		if err != nil {
@@ -214,6 +246,8 @@ func TestRequestResultLimit(t *testing.T) {
 		}
 		if n := after.TotalAlloc - before.TotalAlloc; n > budget {
 			t.Errorf("%d octets allocated during the request, want at most %d", n, budget)
+		} else {
+			t.Logf("%d octets allocated during the request", n)
 		}
 		_ = c.Close()
 		_ = sec.Close()

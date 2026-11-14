@@ -21,6 +21,7 @@ import (
 	"github.com/otfabric/go-iec60870-5/iec101/server"
 	"github.com/otfabric/go-iec60870-5/internal/testutil/leakcheck"
 	"github.com/otfabric/go-iec60870-5/internal/testutil/serialline"
+	"github.com/otfabric/go-iec60870-5/link"
 	"github.com/otfabric/go-iec60870-5/telecontrol"
 )
 
@@ -360,34 +361,79 @@ func TestRequestsFailWithErrClosed(t *testing.T) {
 	}
 }
 
+// flood is a controlled station on the link layer alone: it answers an
+// interrogation with answers it encoded beforehand, the confirmation
+// first and then process data without end. Nothing it does while the
+// request runs allocates, so what a test measures then is the client's
+// (and the link layer's) work. It answers every other class 2 poll and
+// has nothing for the poll in between, after which the client waits
+// PollInterval: on the fake clock of testing/synctest that wait ends only
+// once every goroutine of the test is blocked, so the client takes no
+// further answer between the end of the request and the measurement.
+type flood struct {
+	mu      sync.Mutex
+	asked   bool
+	answers [][]byte
+	next    int
+	pause   bool // the next poll gets nothing
+}
+
+func (f *flood) UserData(data []byte, _ bool) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(data) > 0 && data[0] == byte(asdu.C_IC_NA_1) {
+		f.asked = true
+	}
+	return true
+}
+
+func (f *flood) Class2() []byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.asked || f.next == len(f.answers) {
+		return nil
+	}
+	if f.pause = !f.pause; !f.pause {
+		return nil
+	}
+	f.next++
+	return f.answers[f.next-1]
+}
+
+func (*flood) Class1() []byte  { return nil }
+func (*flood) HasClass1() bool { return false }
+func (*flood) Reset(bool)      {}
+
 // TestInterrogationResultLimit: a station that answers an interrogation
 // with more ASDUs than Config.MaxResult, and no termination, ends the
 // request at the bound with telecontrol.ErrResultLimit, long before its
 // deadline, and what the request allocates stays within a budget set by
-// the bound, not by what the station sends. It runs on the fake clock of
-// testing/synctest.
+// the bound, not by what the station sends. The station's answers are
+// encoded before the measurement starts, so the budget holds the
+// client's work only. It runs on the fake clock of testing/synctest.
 func TestInterrogationResultLimit(t *testing.T) {
-	const limit, flood = 16, 1024
+	const limit, flooded = 16, 4096
 	const budget = limit * 16 << 10 // octets allocated while the request runs
 	synctest.Test(t, func(t *testing.T) {
 		check := serialline.Goroutines(t)
 		a, b := serialline.Pair()
 		p := params(iec101.ModeUnbalanced)
-		s, err := server.New(b, server.Config{Params: p, LinkAddr: 3, CommonAddr: ca, QueueSize: 2 * flood,
-			Handler: server.HandlerFunc(func(s *server.Server, a *asdu.ASDU) {
-				if a.Type != asdu.C_IC_NA_1 {
-					return
-				}
-				_ = s.Confirm(a)
-				for i := range flood {
-					_ = s.Send(asdu.New(asdu.CauseInterrogatedStation, ca, asdu.SinglePoint{IOA: asdu.IOA(i + 1), Value: true}))
-				}
-				// No termination.
-			})})
+		encode := func(a *asdu.ASDU) []byte {
+			raw, err := a.Encode(p.ASDU)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return raw
+		}
+		st := &flood{answers: [][]byte{encode(asdu.New(asdu.CauseActivationCon, ca, asdu.Interrogation{Qualifier: asdu.QOIStation}))}}
+		for i := range flooded {
+			st.answers = append(st.answers, encode(asdu.New(asdu.CauseInterrogatedStation, ca, asdu.SinglePoint{IOA: asdu.IOA(i + 1), Value: true})))
+		}
+		sec, err := link.NewSecondary(b, p.Link, 3, st)
 		if err != nil {
 			t.Fatal(err)
 		}
-		c, err := client.New(a, client.Config{Params: p, LinkAddr: 3, PollInterval: 10 * time.Millisecond, MaxResult: limit})
+		c, err := client.New(a, client.Config{Params: p, LinkAddr: 3, PollInterval: time.Millisecond, MaxResult: limit})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -411,9 +457,11 @@ func TestInterrogationResultLimit(t *testing.T) {
 		}
 		if n := after.TotalAlloc - before.TotalAlloc; n > budget {
 			t.Errorf("%d octets allocated during the request, want at most %d", n, budget)
+		} else {
+			t.Logf("%d octets allocated during the request", n)
 		}
 		_ = c.Close()
-		_ = s.Close()
+		_ = sec.Close()
 		check()
 	})
 }

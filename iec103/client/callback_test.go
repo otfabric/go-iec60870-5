@@ -16,6 +16,7 @@ import (
 
 	iec60870 "github.com/otfabric/go-iec60870-5"
 	"github.com/otfabric/go-iec60870-5/cp"
+	"github.com/otfabric/go-iec60870-5/ft12"
 	"github.com/otfabric/go-iec60870-5/iec103"
 	"github.com/otfabric/go-iec60870-5/iec103/server"
 	"github.com/otfabric/go-iec60870-5/internal/testutil/leakcheck"
@@ -251,33 +252,88 @@ func TestWaitOverflow(t *testing.T) {
 	}
 }
 
+// flood is protection equipment on the link layer alone: it answers a
+// general interrogation with answers it encoded beforehand, without
+// termination. Nothing it does while the request runs allocates, so what
+// a test measures then is the client's (and the link layer's) work. It
+// answers every other class 2 poll and has nothing for the poll in
+// between, after which the client waits PollInterval: on the fake clock
+// of testing/synctest that wait ends only once every goroutine of the
+// test is blocked, so the client takes no further answer between the end
+// of the request and the measurement.
+type flood struct {
+	mu      sync.Mutex
+	asked   bool
+	answers [][]byte
+	next    int
+	pause   bool // the next poll gets nothing
+}
+
+func (f *flood) UserData(data []byte, _ bool) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(data) > 0 && data[0] == byte(iec103.TypeGIInit) {
+		f.asked = true
+	}
+	return true
+}
+
+func (f *flood) Class2() []byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.asked || f.next == len(f.answers) {
+		return nil
+	}
+	if f.pause = !f.pause; !f.pause {
+		return nil
+	}
+	f.next++
+	return f.answers[f.next-1]
+}
+
+func (*flood) Class1() []byte  { return nil }
+func (*flood) HasClass1() bool { return false }
+func (*flood) Reset(bool)      {}
+
 // Equipment that answers a general interrogation with more ASDUs than
 // Config.MaxResult and no termination: the request ends at the bound with
 // ErrResultLimit, long before its deadline, and allocates within a budget
-// set by the bound, not by what the equipment sends. It runs on the fake
-// clock of testing/synctest.
+// set by the bound, not by what the equipment sends. The equipment's
+// answers are encoded before the measurement starts, so the budget holds
+// the client's work only. It runs on the fake clock of testing/synctest.
 func TestInterrogationResultLimit(t *testing.T) {
-	const limit, flood = 16, 1024
+	const limit, flooded = 16, 4096
 	const budget = limit * 16 << 10
 	synctest.Test(t, func(t *testing.T) {
 		check := serialline.Goroutines(t)
+		a, b := serialline.Pair()
+		lc := link.Config{FT12: ft12.Params{AddrSize: 1}, Timeout: 50 * time.Millisecond, Retries: 3}
+		st := &flood{}
+		sec, err := link.NewSecondary(b, lc, 3, st)
+		if err != nil {
+			t.Fatal(err)
+		}
 		const deadline = time.Hour
-		var cfg Config
-		cfg.MaxResult, cfg.RequestTimeout = limit, deadline
-		c, srv := pair(t, cfg, server.Config{QueueSize: 2 * flood, Handler: server.HandlerFunc(func(s *server.Server, a *iec103.ASDU) {
-			gi, ok := a.Body.(iec103.GIInit)
-			if !ok {
-				return
-			}
-			for i := range flood {
-				_ = s.Send(iec103.New(iec103.CauseGI, 3, iec103.FunDistance, iec103.InfoNumber(16+i%64), iec103.TimeTagged{DPI: iec103.DPIOn, SIN: gi.SCN}), server.Class1)
-			}
-			// No termination.
-		})})
+		c, err := New(a, Config{Link: lc, LinkAddr: 3, NoInitGI: true, NoInitTimeSync: true, PollInterval: time.Millisecond, MaxResult: limit, RequestTimeout: deadline})
+		if err != nil {
+			t.Fatal(err)
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), deadline)
 		defer cancel()
 		if err := c.WaitUp(ctx); err != nil {
 			t.Fatal(err)
+		}
+		// The scan number the interrogation will carry, which the answers
+		// repeat: nothing else draws one with NoInitGI.
+		c.mu.Lock()
+		scn := c.counter + 1
+		c.mu.Unlock()
+		for i := range flooded {
+			raw, err := iec103.New(iec103.CauseGI, 3, iec103.FunDistance, iec103.InfoNumber(16+i%64), iec103.TimeTagged{DPI: iec103.DPIOn, SIN: scn}).Encode()
+			if err != nil {
+				t.Fatal(err)
+			}
+			st.answers = append(st.answers, raw)
 		}
 		var before, after runtime.MemStats
 		runtime.ReadMemStats(&before)
@@ -293,9 +349,11 @@ func TestInterrogationResultLimit(t *testing.T) {
 		}
 		if n := after.TotalAlloc - before.TotalAlloc; n > budget {
 			t.Errorf("%d octets allocated during the request, want at most %d", n, budget)
+		} else {
+			t.Logf("%d octets allocated during the request", n)
 		}
 		_ = c.Close()
-		_ = srv.Close()
+		_ = sec.Close()
 		check()
 	})
 }
