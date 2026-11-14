@@ -142,9 +142,13 @@ func (b SinglePoints) Objects() int { return len(b.Points) }
 // Sequence marks a body with a variable number of objects.
 func (SinglePoints) Sequence() {}
 
-// AppendTo appends the points.
+// AppendTo appends the points. A Qualifier above 127, which SPQ cannot
+// hold, is [ErrInvalid].
 func (b SinglePoints) AppendTo(out []byte, _ Params) ([]byte, error) {
 	for _, p := range b.Points {
+		if p.Qualifier > 127 {
+			return nil, fmt.Errorf("%w: single-point qualifier %d of point %d does not fit 7 bits", ErrInvalid, p.Qualifier, p.Addr)
+		}
 		v := p.Qualifier << 1
 		if p.On {
 			v |= 1

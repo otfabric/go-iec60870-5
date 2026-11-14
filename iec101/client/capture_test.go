@@ -34,6 +34,13 @@ import (
 // terminations the client's own requests consume. The link is dynamic: the
 // replayed station sets ACD while recorded data is left, so the class each
 // ASDU is fetched with is the client's choice, not the recording's.
+//
+// The client makes a recorded request when the recorded controlling
+// station did, by events, not by time: once the station played every step
+// before it, the Handler has every ASDU recorded for the application
+// before it, and an identical earlier request (same type, common address
+// and first object address, which the client refuses while pending) has
+// returned.
 func TestCaptureReplay(t *testing.T) {
 	for _, r := range capture.Replays {
 		recs, err := serialcap.ReadFile(filepath.Join("..", "testdata", "captures", filepath.FromSlash(r.Path)), r.Params.FT12(), r.Ports...)
@@ -73,6 +80,23 @@ func consumes(req, a *asdu.ASDU) bool {
 	return false
 }
 
+// identical reports whether the client refuses request b while request a
+// is pending (telecontrol.ErrBusy): the same type, common address and
+// address of the first object.
+func identical(a, b *asdu.ASDU) bool {
+	fa, fb := a.First(), b.First()
+	return a.Type == b.Type && a.CommonAddr == b.CommonAddr && fa != nil && fb != nil && fa.Address() == fb.Address()
+}
+
+func closed(ch <-chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
+}
+
 func replay(t *testing.T, p capture.Params, addr uint16, steps []capture.Step) {
 	ap := p.ASDU()
 	a, b := net.Pipe()
@@ -80,6 +104,20 @@ func replay(t *testing.T, p capture.Params, addr uint16, steps []capture.Step) {
 	go func() { _ = st.Run() }()
 	var mu sync.Mutex
 	var got []*asdu.ASDU
+	// wake is signalled at every delivery to the Handler and every return
+	// of a request; with st.Changed it is what until waits on.
+	wake := make(chan struct{}, 1)
+	signal := func() {
+		select {
+		case wake <- struct{}{}:
+		default:
+		}
+	}
+	delivered := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(got)
+	}
 	c, err := client.New(a, client.Config{
 		Params:       iec101.Params{Mode: iec101.ModeUnbalanced, Link: link.Config{FT12: p.FT12(), Timeout: time.Second}, ASDU: ap},
 		LinkAddr:     addr,
@@ -88,6 +126,7 @@ func replay(t *testing.T, p capture.Params, addr uint16, steps []capture.Step) {
 			mu.Lock()
 			got = append(got, x)
 			mu.Unlock()
+			signal()
 		},
 	})
 	if err != nil {
@@ -99,13 +138,37 @@ func replay(t *testing.T, p capture.Params, addr uint16, steps []capture.Step) {
 	if err := c.WaitUp(ctx); err != nil {
 		t.Fatal(err)
 	}
-	// The expected deliveries, and the requests in order.
+	// until waits for cond, checked again at each step the station plays,
+	// each request it receives, each delivery and each request returned.
+	until := func(ctx context.Context, cond func() bool) bool {
+		for {
+			ch := st.Changed()
+			if cond() {
+				return true
+			}
+			select {
+			case <-ch:
+			case <-wake:
+			case <-ctx.Done():
+				return false
+			}
+		}
+	}
+	// The expected deliveries, and the requests in order: for each, how
+	// many deliveries come before it and the identical request before it.
 	var want []capture.Step
-	var reqs []int
+	var reqs, before, prev []int
 	var last *asdu.ASDU
 	for i, s := range steps {
 		if s.Request {
-			reqs = append(reqs, i)
+			k := -1
+			for j := len(reqs) - 1; j >= 0; j-- {
+				if identical(steps[reqs[j]].ASDU, s.ASDU) {
+					k = j
+					break
+				}
+			}
+			reqs, before, prev = append(reqs, i), append(before, len(want)), append(prev, k)
 			last = s.ASDU
 			continue
 		}
@@ -113,23 +176,40 @@ func replay(t *testing.T, p capture.Params, addr uint16, steps []capture.Step) {
 			want = append(want, s)
 		}
 	}
-	errs := make(chan error, len(reqs))
-	for _, i := range reqs {
-		for st.Next() < i && ctx.Err() == nil {
-			time.Sleep(time.Millisecond)
+	done := make([]chan struct{}, len(reqs))
+	errs := make([]error, len(reqs))
+	for k := range done {
+		done[k] = make(chan struct{})
+	}
+	var started sync.WaitGroup // the requests made
+	anyFailed := func() bool {
+		for k := range done {
+			if closed(done[k]) && errs[k] != nil {
+				return true
+			}
+		}
+		return false
+	}
+	for k, i := range reqs {
+		if !until(ctx, func() bool {
+			return anyFailed() || st.Next() >= i && delivered() >= before[k] && (prev[k] < 0 || closed(done[prev[k]]))
+		}) || anyFailed() {
+			break
 		}
 		x := steps[i].ASDU
-		go func() { errs <- request(ctx, c, x) }()
-		for st.Next() == i && ctx.Err() == nil {
-			time.Sleep(time.Millisecond)
-		}
+		started.Go(func() {
+			errs[k] = request(ctx, c, x)
+			close(done[k])
+			signal()
+		})
+		// The station took the request, or the request failed.
+		until(ctx, func() bool { return st.Next() != i || closed(done[k]) && errs[k] != nil })
 	}
-	for !st.Done() && ctx.Err() == nil {
-		time.Sleep(time.Millisecond)
-	}
-	for range reqs {
-		if err := <-errs; err != nil {
-			t.Errorf("request: %v", err)
+	until(ctx, func() bool { return st.Done() || anyFailed() })
+	started.Wait()
+	for k := range reqs {
+		if closed(done[k]) && errs[k] != nil {
+			t.Errorf("request %d: %v", k, errs[k])
 		}
 	}
 	// Every request as recorded.
@@ -143,16 +223,9 @@ func replay(t *testing.T, p capture.Params, addr uint16, steps []capture.Step) {
 		}
 	}
 	// Every recorded ASDU delivered, unchanged and in order.
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		mu.Lock()
-		n := len(got)
-		mu.Unlock()
-		if n >= len(want) || time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(time.Millisecond)
-	}
+	dctx, dcancel := context.WithTimeout(ctx, 5*time.Second)
+	defer dcancel()
+	until(dctx, func() bool { return delivered() >= len(want) })
 	mu.Lock()
 	defer mu.Unlock()
 	if len(got) != len(want) {

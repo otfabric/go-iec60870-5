@@ -771,8 +771,10 @@ func TestHostileUploadAnnouncementsReserveNothing(t *testing.T) {
 }
 
 // Each announced section costs the station a bounded number of octets
-// before its data arrives: 64 sections announced at the largest length,
-// with no data, grow the live heap by less than 4 KiB each.
+// before its data arrives: sections announced at the largest length, with
+// no data, grow the live heap by less than 4 KiB each. Each round
+// announces half of the transfers a session may have open
+// (server.DefaultMaxTransfers), so that both rounds fit.
 func TestHostileSectionAnnouncementBudget(t *testing.T) {
 	leaks := leakcheck.Check(t)
 	fx := station.Baseline(t)
@@ -787,7 +789,7 @@ func TestHostileSectionAnnouncementBudget(t *testing.T) {
 		runtime.ReadMemStats(&ms)
 		return ms.HeapAlloc
 	}
-	const files, budget = 64, 4 << 10
+	const files, budget = server.DefaultMaxTransfers / 2, 4 << 10
 	announce := func(first asdu.IOA) {
 		for i := range asdu.IOA(files) {
 			ioa := first + i

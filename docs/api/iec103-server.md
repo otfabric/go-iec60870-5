@@ -110,13 +110,15 @@ type Config struct {
 	// synchronization is always answered.
 	AnswerBroadcastSync bool
 	// OnTimeSync is called with each synchronization time the server
-	// applies, from the goroutine that calls the Handler.
+	// applies, from the goroutine that calls the Handler, under the same
+	// rules as the Handler.
 	OnTimeSync func(t time.Time, broadcast bool)
 
 	// OnState is called with each change of the link state: from the
 	// station's link goroutine on a reset, and from Close for
-	// StateClosed. It must return quickly and must not call Close, which
-	// waits for that goroutine; call Close in a new goroutine instead.
+	// StateClosed. It must return quickly. It may call Close, which then
+	// does not wait for the link goroutine. An OnState that does not
+	// return normally is logged and closes the server, as for the Handler.
 	OnState func(s iec103.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger
@@ -141,7 +143,7 @@ type DisturbanceSource interface {
 }
 ```
 
-DisturbanceSource supplies the recorded disturbances for the transfer of clause 7.4.7. Calls come from the server's handler goroutine.
+DisturbanceSource supplies the recorded disturbances for the transfer of clause 7.4.7. Calls come from the server's handler goroutine, under the rules of the [Handler](#type-handler): a method that does not return normally closes the server.
 
 ### type Handler
 
@@ -151,7 +153,7 @@ type Handler interface {
 }
 ```
 
-Handler handles the control-direction ASDUs of the controlling system that the server does not handle itself: general interrogation (ASDU 7), general commands (ASDU 20), generic services (ASDUs 10 and 21), the disturbance orders (ASDUs 24 and 25) when no [DisturbanceSource](#type-disturbancesource) is configured, and any private ASDU. Calls are made one at a time from a goroutine of the server; the handler answers through the Server, whose methods it may call, all but Close. Close waits for the goroutine that calls the handler: a handler that stops the station calls Close in a new goroutine (go s.Close()), which returns once the handler has returned.
+Handler handles the control-direction ASDUs of the controlling system that the server does not handle itself: general interrogation (ASDU 7), general commands (ASDU 20), generic services (ASDUs 10 and 21), the disturbance orders (ASDUs 24 and 25) when no [DisturbanceSource](#type-disturbancesource) is configured, and any private ASDU. Calls are made one at a time from a goroutine of the server; the handler answers through the Server, whose methods it may call. Close from the handler does not wait for the handler's goroutine: it returns at once, and the close completes when the handler has returned. A handler that does not return normally is logged with its stack and closes the server; [Server.Err](#func-server-err) reports it.
 
 The ASDU is the handler's own: a new one is decoded for each call and the server keeps no reference to it, so the handler may keep or modify it.
 
@@ -178,6 +180,11 @@ type Server struct {
 
 	// the start identification was sent
 	// a general command waits for its acknowledgement
+
+	// the goroutine of handle
+	// the link goroutine, while it calls OnState
+
+	// why a callback stopped the server
 
 }
 ```
@@ -222,7 +229,9 @@ AnswerGenericGI answers the general interrogation of generic data req (ASDU 21, 
 func (s *Server) Close() error
 ```
 
-Close stops the station. Close is safe to call more than once and from several goroutines: the first call closes the transport and returns its error; later calls return nil. It must not be called from the Handler, OnState or OnTimeSync (see [Handler](#type-handler)).
+Close stops the station. Close is safe to call more than once and from several goroutines: the first call closes the transport and returns its error; later calls return nil.
+
+Called from the Handler, OnTimeSync, the [DisturbanceSource](#type-disturbancesource) or OnState, Close cannot wait for the goroutine it runs on: it stops the server and returns nil at once, and the close completes, StateClosed reported included, when that callback has returned.
 
 #### func (Server) CommonAddr
 
@@ -231,6 +240,22 @@ func (s *Server) CommonAddr() uint8
 ```
 
 CommonAddr returns the common address of ASDU of the station.
+
+#### func (Server) Done
+
+```go
+func (s *Server) Done() <-chan struct{}
+```
+
+Done is closed when the station stops: after Close, a transport failure, or a callback that did not return normally. Err tells which.
+
+#### func (Server) Err
+
+```go
+func (s *Server) Err() error
+```
+
+Err returns the error that stopped the station: the transport's, or that of a callback that did not return normally (wrapping [iec103.ErrClosed](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec103#ErrClosed)); nil while it runs or after Close.
 
 #### func (Server) Event
 

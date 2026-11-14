@@ -278,6 +278,91 @@ func TestFileTransfersPerSession(t *testing.T) {
 	}
 }
 
+// A session has up to FileServer.MaxTransfers transfers open at once,
+// files fetched and files delivered together. One beyond is refused with
+// cause "unknown information object address" until a transfer of that
+// session ends; another session has its own. Zero means
+// DefaultMaxTransfers, and a negative bound leaves the number open.
+func TestFileServerMaxTransfers(t *testing.T) {
+	const files = server.DefaultMaxTransfers + 2
+	for _, tc := range []struct {
+		name string
+		max  int
+		open int // transfers accepted before the first refusal; files: none refused
+	}{
+		{"bound of 2", 2, 2},
+		{"default", 0, server.DefaultMaxTransfers},
+		{"no bound", -1, files},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := &fileStation{files: map[asdu.IOA]server.File{}}
+			for i := range files {
+				st.files[asdu.IOA(i+1)] = server.NewFile(pattern(10, i), 0)
+			}
+			fs := server.NewFileServer(st)
+			fs.Sink = &sink{files: map[asdu.IOA][]byte{}, shape: map[asdu.IOA][]int{}}
+			fs.MaxTransfers = tc.max
+			mux := server.NewMux()
+			mux.Handle(fs, server.FileTypes...)
+			_, addr := serve(t, mux)
+
+			type station struct {
+				c   *client.Client
+				rec *recorder
+			}
+			dial := func() station {
+				rec := &recorder{}
+				return station{connect(t, addr, client.WithHandler(rec)), rec}
+			}
+			// opened starts transfer i on st: the selection of a file to
+			// fetch when i is odd, the announcement of a file to deliver
+			// when it is even. It reports whether the station took it.
+			opened := func(st station, i int) bool {
+				t.Helper()
+				var obj asdu.InformationObject = asdu.FileCall{IOA: asdu.IOA(i), Name: 1, Qualifier: asdu.FileSelect}
+				if i%2 == 0 {
+					obj = asdu.FileReady{IOA: asdu.IOA(1000 + i), Name: 1, Length: 10}
+				}
+				n := len(st.rec.all())
+				if err := st.c.Send(context.Background(), asdu.New(asdu.CauseFileTransfer, 1, obj)); err != nil {
+					t.Fatal(err)
+				}
+				testutil.Eventually(t, "an answer", func() bool { return len(st.rec.all()) > n })
+				a := st.rec.all()[n]
+				if a.Negative && a.Cause != asdu.CauseUnknownIOA {
+					t.Errorf("transfer %d refused with cause %s, want unknown-ioa", i, a.Cause)
+				}
+				return !a.Negative
+			}
+
+			a := dial()
+			for i := 1; i <= files; i++ {
+				if got, want := opened(a, i), i <= tc.open; got != want {
+					t.Fatalf("transfer %d of the session: accepted %t, want %t", i, got, want)
+				}
+			}
+			if tc.open == files {
+				return
+			}
+			// Another session has its own.
+			if !opened(dial(), 1) {
+				t.Error("another session was refused its first transfer")
+			}
+			// Once a transfer of the session ends, the next one is taken.
+			if err := a.c.Send(context.Background(), asdu.New(asdu.CauseFileTransfer, 1,
+				asdu.FileCall{IOA: 1, Name: 1, Qualifier: asdu.FileDeactivate})); err != nil {
+				t.Fatal(err)
+			}
+			if !opened(a, tc.open+1) {
+				t.Error("refused after a transfer of the session ended")
+			}
+			if opened(a, tc.open+2) {
+				t.Error("accepted beyond the bound again")
+			}
+		})
+	}
+}
+
 // sink keeps the files controlling stations deliver.
 type sink struct {
 	mu     sync.Mutex

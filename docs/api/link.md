@@ -136,9 +136,7 @@ NewBalanced starts a balanced station on rw. Close stops it; rw is closed when i
 func (b *Balanced) Close() error
 ```
 
-Close stops the station and waits for its goroutines. It closes rw when rw is an io.Closer; the reader goroutine returns only when that Close unblocks Read, so a transport whose Close does not leaves Close waiting. Close is safe to call more than once and from several goroutines: the first call closes the transport and returns its error; later calls return nil.
-
-A handler must not call Close: Close waits for the reader goroutine that runs the handler. Call it in a new goroutine (go b.Close()); it returns once the handler has returned.
+Close stops the station and waits for its goroutines, as [Primary.Close](#func-primary-close) does. Called from the handler or another callback, Close does not wait for the goroutine the call runs on: it returns once the station is stopped, and that goroutine ends when the call has returned.
 
 #### func (Balanced) Done
 
@@ -146,7 +144,7 @@ A handler must not call Close: Close waits for the reader goroutine that runs th
 func (b *Balanced) Done() <-chan struct{}
 ```
 
-Done is closed when the station stops.
+Done is closed when the station stops (see [Primary.Done](#func-primary-done)).
 
 #### func (Balanced) Err
 
@@ -154,7 +152,7 @@ Done is closed when the station stops.
 func (b *Balanced) Err() error
 ```
 
-Err returns the transport error that stopped the station, if any.
+Err returns the error that stopped the station, if any (see [Primary.Err](#func-primary-err)).
 
 #### func (Balanced) Init
 
@@ -231,7 +229,7 @@ type BalancedHandler interface {
 }
 ```
 
-BalancedHandler is the user of a balanced station: it receives the peer's user data. Calls come from the station's reader goroutine, one at a time, and must return quickly. They run with the station's secondary state locked, so the handler must not call Close, which waits for that goroutine: call it in a new goroutine (go b.Close()), which returns once the handler has returned. The handler may call Send and the other primary methods only from another goroutine: their answers arrive on the goroutine the handler blocks. The data passed to UserData is a copy the handler may keep; the station also keeps it to recognise a repetition, so it must not be modified.
+BalancedHandler is the user of a balanced station: it receives the peer's user data. Calls come from the station's reader goroutine, one at a time, and must return quickly. They run with the station's secondary state locked. The handler may call Close, which then does not wait for the reader goroutine (see [SecondaryHandler](#type-secondaryhandler)); a handler that does not return normally stops the station. The handler may call Send and the other primary methods only from another goroutine: their answers arrive on the goroutine the handler blocks. The data passed to UserData is a copy the handler may keep; the station also keeps it to recognise a repetition, so it must not be modified.
 
 ### type Class
 
@@ -297,17 +295,25 @@ type Config struct {
 	FrameGap time.Duration
 
 	// OnFrame, when set, is called for every frame sent (tx true) and
-	// received. It runs on the station's goroutines and must not block
-	// or call Close, which waits for those goroutines. f.Data of a sent
-	// frame is the caller's data, of a received one the copy the
-	// station delivers: neither may be modified.
+	// received. It runs on the station's goroutines and must not block.
+	// It may call Close, which then does not wait for the goroutine the
+	// call runs on (see [Primary.Close]). f.Data of a sent frame is the
+	// caller's data, of a received one the copy the station delivers:
+	// neither may be modified.
 	OnFrame func(tx bool, f ft12.Frame)
 
 	// OnDiscard, when set, is called for octets that do not form a
 	// valid frame (line noise, checksum errors). It runs on the
-	// station's reader goroutine and must not call Close. b is the
-	// decoder's buffer, valid only during the call: copy what is kept.
+	// station's reader goroutine and may call Close, as OnFrame may. b
+	// is the decoder's buffer, valid only during the call: copy what is
+	// kept.
 	OnDiscard func(b []byte, err error)
+
+	// Logger receives the log entries of the station. A callback (OnFrame,
+	// OnDiscard, the station's handler) that does not return normally is
+	// logged as an error with its stack, and stops the station: Done is
+	// closed and Err reports it, wrapping [ErrClosed]. Nil is silent.
+	Logger iec60870.Logger
 }
 ```
 
@@ -469,7 +475,9 @@ NewPrimary starts a primary station on rw. Close stops it; rw is closed when it 
 func (pr *Primary) Close() error
 ```
 
-Close stops the station and waits for its goroutines. It closes rw when rw is an io.Closer; the reader goroutine returns only when that Close unblocks Read, so a transport whose Close does not leaves Close waiting. Close is safe to call more than once and from several goroutines: the first call closes the transport and returns its error; later calls return nil.
+Close stops the station and waits for its goroutines. It closes rw when rw is an io.Closer; the reader goroutine returns only when that Close unblocks Read, so a transport whose Close does not leaves Close waiting. For a transport that is not an io.Closer Close does not wait for the reader: it ends when its pending Read returns, and delivers nothing more. Close is safe to call more than once and from several goroutines: the first call closes the transport and returns its error; later calls return nil.
+
+Called from a callback (Config.OnFrame, Config.OnDiscard), Close does not wait for the goroutine the callback runs on: it returns once the station is stopped, and that goroutine ends when the callback has returned.
 
 #### func (Primary) Done
 
@@ -477,7 +485,7 @@ Close stops the station and waits for its goroutines. It closes rw when rw is an
 func (pr *Primary) Done() <-chan struct{}
 ```
 
-Done is closed when the station stops: after Close or a transport failure (see Err).
+Done is closed when the station stops: after Close or a transport failure, or when a callback did not return normally (see Err).
 
 #### func (Primary) Err
 
@@ -485,7 +493,7 @@ Done is closed when the station stops: after Close or a transport failure (see E
 func (pr *Primary) Err() error
 ```
 
-Err returns the transport error that stopped the station, if any.
+Err returns the error that stopped the station, if any: a transport error, or a callback that did not return normally (wrapping ErrClosed).
 
 #### func (Primary) Init
 
@@ -577,9 +585,7 @@ NewSecondary starts a secondary station with link address addr on rw. Close stop
 func (s *Secondary) Close() error
 ```
 
-Close stops the station and waits for its goroutines. It closes rw when rw is an io.Closer; the reader goroutine returns only when that Close unblocks Read, so a transport whose Close does not leaves Close waiting. Close is safe to call more than once and from several goroutines: the first call closes the transport and returns its error; later calls return nil.
-
-A handler must not call Close: Close waits for the reader goroutine that runs the handler. Call it in a new goroutine (go s.Close()); it returns once the handler has returned.
+Close stops the station and waits for its goroutines, as [Primary.Close](#func-primary-close) does. Called from the handler or another callback, Close does not wait for the goroutine the call runs on: it returns once the station is stopped, and that goroutine ends when the call has returned.
 
 #### func (Secondary) Done
 
@@ -587,7 +593,7 @@ A handler must not call Close: Close waits for the reader goroutine that runs th
 func (s *Secondary) Done() <-chan struct{}
 ```
 
-Done is closed when the station stops.
+Done is closed when the station stops (see [Primary.Done](#func-primary-done)).
 
 #### func (Secondary) Err
 
@@ -595,7 +601,7 @@ Done is closed when the station stops.
 func (s *Secondary) Err() error
 ```
 
-Err returns the transport error that stopped the station, if any.
+Err returns the error that stopped the station, if any (see [Primary.Err](#func-primary-err)).
 
 ### type SecondaryHandler
 
@@ -619,7 +625,7 @@ type SecondaryHandler interface {
 }
 ```
 
-SecondaryHandler is the user of a secondary station: it receives the primary's user data and supplies the data the primary polls. Calls come from the station's reader goroutine, one at a time, and must return quickly: the primary is waiting for the response. They run with the station's state locked, so the handler must not call Close, which waits for that goroutine: call it in a new goroutine (go s.Close()), which returns once the handler has returned.
+SecondaryHandler is the user of a secondary station: it receives the primary's user data and supplies the data the primary polls. Calls come from the station's reader goroutine, one at a time, and must return quickly: the primary is waiting for the response. They run with the station's state locked. The handler may call Close, which then does not wait for the reader goroutine: it returns once the station is stopped, and no frame is answered after the call. A handler that does not return normally stops the station (see [Config.Logger](#func-config-logger)).
 
 The station keeps what Class1 and Class2 return, to send it again when the primary repeats its request (FCB not toggled): the handler must not modify it afterwards. The data passed to UserData is a copy the handler may keep; the station also keeps it to recognise a repetition, so it must not be modified.
 

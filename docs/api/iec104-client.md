@@ -59,6 +59,8 @@ type Client struct {
 
 	// on startMu: signalled when live or closing changes
 
+	// why a callback closed the client
+
 }
 ```
 
@@ -464,6 +466,8 @@ Handler receives the ASDUs the controlled station sends.
 HandleASDU is called from a single goroutine per connection, in the order the ASDUs arrived. A handler that blocks delays the delivery of everything that follows, including the answers other goroutines are waiting for.
 
 It may call [Client.Send](#func-client-send), [Client.State](#func-client-state) and [Client.Close](#func-client-close). It must not call the request methods ([Client.Command](#func-client-command), [Client.Interrogate](#func-client-interrogate), [Client.Read](#func-client-read) and the like): their answers are delivered by the very goroutine the handler is running on, so they would only time out. Start a goroutine for work that needs them.
+
+A handler that does not return normally is logged with its stack and closes the client: the state handler is told "disconnected" with an error wrapping [iec104.ErrClosed](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#ErrClosed) that names the handler. The same holds for the state handler, the start handler ([WithStartHandler](#func-withstarthandler)); the switch handler of a [Group](#type-group) ([WithSwitchHandler](#func-withswitchhandler)) closes the group.
 
 The \*asdu.ASDU is shared: an ASDU that a request collects is the same value the request returns to its caller, on another goroutine, and the client reads it while it matches answers. Treat it as read-only; copy what you need to change.
 

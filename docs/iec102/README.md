@@ -105,7 +105,12 @@ answer is complete (its context ended, or the link failed) leaves the rest
 of that answer at the station; the next request first polls until the
 station has no more data and drops that rest
 ([application procedures](INTEROPERABILITY.md#application-procedures)).
-A refusal (cause 13..18 or P/N) returns `*iec102.RefusedError`. The typed
+A refusal (cause 13..18 or P/N) returns `*iec102.RefusedError`. A request
+collects at most `Config.MaxResult` ASDUs (131072 by default), then ends
+with `iec102.ErrResultLimit` and the ASDUs so far. `Done` and `Err` tell
+when and why the client stopped; a `Handler` or `OnState` that does not
+return normally is logged with its stack and closes the client, and both
+may call `Close`, which then returns at once. The typed
 helpers are `ReadProductSpec`, `ReadTime`, `ReadTotals` (any of the 20 read
 commands C_CI_NA_2 .. C_CI_NU_2) and `ReadSinglePoints`.
 
@@ -117,7 +122,9 @@ first), `AddSinglePoints(record, ...)` adds events. It answers C_RD_NA_2
 and C_TI_NA_2 itself and runs C_CI_* and C_SP_* reads with confirmation,
 data and termination, splitting periods over several frames where needed.
 Other requests go to the `Handler`, which answers with `Send` and `Mirror`.
-All answers are class 2 data.
+All answers are class 2 data. The `Handler`, `Clock` and `OnState` may call
+`Close`, which then returns at once; one that does not return normally is
+logged with its stack and stops the server, and `Err` reports it.
 
 ## Not implemented
 

@@ -78,7 +78,9 @@ APIs that follow their own application models.
 ### Transport
 
 Every serial station takes an `io.ReadWriter` and owns it: `Close` closes
-it when it is an `io.Closer`. A station runs two goroutines on it:
+it when it is an `io.Closer`, and waits for the reader only then (without
+one, the reader ends when its pending Read returns and delivers nothing
+more). A station runs two goroutines on it:
 
 - a reader that decodes FT 1.2 frames (`ft12.Decoder`, resynchronizing
   after noise) and hands each frame to the station logic;
@@ -155,8 +157,16 @@ responses with either address.
 Received ASDUs go to `telecontrol.Requester.Dispatch`; what no request
 consumes is delivered to the application's handler on a goroutine of its
 own, in order, through a queue of 256. A request issued from the handler
-waits for answers that cannot pass the handler's queue while it runs, so
-requests are issued from other goroutines.
+would wait for answers that cannot pass the handler's queue while it runs,
+so it returns `iec101.ErrInHandler` at once: requests are issued from
+other goroutines.
+
+The serial stations call application code through `internal/callback`: a
+callback that does not return normally is logged with its stack and stops
+the station that called it, whose `Err` then wraps `ErrClosed` and names
+the callback. Each station records the goroutines it calls callbacks on,
+so that Close called from one of them stops the station and returns at
+once instead of waiting for its own goroutine.
 
 `iec101/server` holds class 1 and class 2 queues (unbalanced) or a send
 queue (balanced). Control-direction ASDUs are queued to a handler goroutine;

@@ -29,6 +29,12 @@ import (
 // goroutine the handler is running on, so they would only time out. Start a
 // goroutine for work that needs them.
 //
+// A handler that does not return normally is logged with its stack and
+// closes the client: the state handler is told "disconnected" with an
+// error wrapping [iec104.ErrClosed] that names the handler. The same holds
+// for the state handler, the start handler ([WithStartHandler]); the
+// switch handler of a [Group] ([WithSwitchHandler]) closes the group.
+//
 // The *asdu.ASDU is shared: an ASDU that a request collects is the same
 // value the request returns to its caller, on another goroutine, and the
 // client reads it while it matches answers. Treat it as read-only; copy

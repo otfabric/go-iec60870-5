@@ -161,7 +161,7 @@ func TestServerWithoutHandlerRejects(t *testing.T) {
 	if logs.Len() == 0 {
 		t.Error("nothing logged")
 	}
-	if err := c.Send(ctx, asdu.New(asdu.CauseActivation, ca, asdu.ResetProcess{})); !errors.Is(err, iec101.ErrLinkDown) {
+	if err := c.Send(ctx, asdu.New(asdu.CauseActivation, ca, asdu.ResetProcess{})); !errors.Is(err, iec101.ErrClosed) {
 		t.Errorf("send after close: %v", err)
 	}
 }

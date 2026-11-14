@@ -18,11 +18,13 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	iec60870 "github.com/otfabric/go-iec60870-5"
 	"github.com/otfabric/go-iec60870-5/asdu"
 	"github.com/otfabric/go-iec60870-5/iec101"
+	"github.com/otfabric/go-iec60870-5/internal/callback"
 	"github.com/otfabric/go-iec60870-5/internal/logx"
 	"github.com/otfabric/go-iec60870-5/link"
 	"github.com/otfabric/go-iec60870-5/telecontrol"
@@ -31,9 +33,10 @@ import (
 // Handler handles the control-direction ASDUs of the controlling station.
 // Calls are made one at a time from a goroutine of the server; a handler
 // answers through the Server (Confirm, Terminate, Send, ...), which only
-// queues. It must not call Close: Close waits for the handler's goroutine.
-// Call it in a new goroutine (go s.Close()); it returns once the handler
-// has returned.
+// queues. It may call Close, which then does not wait for the handler's
+// goroutine: it returns at once and the close completes when the handler
+// has returned. A handler that does not return normally is logged with its
+// stack and closes the server; [Server.Err] reports it.
 type Handler interface {
 	HandleASDU(s *Server, a *asdu.ASDU)
 }
@@ -83,8 +86,9 @@ type Config struct {
 
 	// OnState is called with each change of the link state, from the
 	// goroutine that changed it: the link's reader (unbalanced), the
-	// server's supervisor (balanced), or Close. It must not call Close,
-	// which waits for those goroutines: call it in a new goroutine.
+	// server's supervisor (balanced), or Close. It may call Close, as the
+	// Handler may; one that does not return normally closes the server,
+	// as for the Handler.
 	OnState func(s iec101.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger
@@ -121,6 +125,13 @@ type Server struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	// handlerID and superID are the goroutines of handle and of the
+	// balanced supervisor; onReader is the reader goroutine of the link
+	// while it calls OnState.
+	handlerID, superID, onReader atomic.Uint64
+	failMu                       sync.Mutex
+	failed                       error // why a callback stopped the server
 }
 
 // New starts a controlled station on rw. Close stops it and closes rw when
@@ -144,11 +155,15 @@ func New(rw io.ReadWriter, cfg Config) (*Server, error) {
 		in:  make(chan *asdu.ASDU, 64),
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
+	lc := p.Link
+	if lc.Logger == nil {
+		lc.Logger = cfg.Logger
+	}
 	if p.Mode == iec101.ModeBalanced {
 		s.out = make(chan []byte, cfg.QueueSize)
-		s.bal, err = link.NewBalanced(rw, p.Link, link.BalancedConfig{Addr: cfg.LinkAddr, Remote: cfg.Remote}, balancedUser{s})
+		s.bal, err = link.NewBalanced(rw, lc, link.BalancedConfig{Addr: cfg.LinkAddr, Remote: cfg.Remote}, balancedUser{s})
 	} else {
-		s.sec, err = link.NewSecondary(rw, p.Link, cfg.LinkAddr, secondaryUser{s})
+		s.sec, err = link.NewSecondary(rw, lc, cfg.LinkAddr, secondaryUser{s})
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", iec101.ErrInvalidConfig, err)
@@ -164,9 +179,41 @@ func New(rw io.ReadWriter, cfg Config) (*Server, error) {
 
 // Close stops the station and waits for its goroutines. Close is safe to
 // call more than once and from several goroutines: the first call closes
-// the transport and returns its error; later calls return nil. It must
-// not be called from the Handler or Config.OnState (see there).
+// the transport and returns its error; later calls return nil.
+//
+// Called from the Handler or Config.OnState on one of the server's
+// goroutines, Close cannot wait for that goroutine: it stops the server
+// and returns nil at once, and the close completes, StateClosed reported
+// included, when the callback has returned.
 func (s *Server) Close() error {
+	if s.own() {
+		s.cancel()
+		go func() { _ = s.close() }()
+		return nil
+	}
+	return s.close()
+}
+
+// own reports whether the caller runs on one of the server's goroutines:
+// the Handler's, the supervisor's, or the link's reader inside OnState.
+func (s *Server) own() bool {
+	id := callback.Goroutine()
+	return id == s.handlerID.Load() || id == s.superID.Load() || id == s.onReader.Load()
+}
+
+// stop ends the server after a callback did not return normally: Err
+// reports err from now on, unless the server was closing already.
+func (s *Server) stop(err error) {
+	s.failMu.Lock()
+	if s.failed == nil && s.ctx.Err() == nil {
+		s.failed = fmt.Errorf("%w: %w", iec101.ErrClosed, err)
+	}
+	s.failMu.Unlock()
+	s.cancel()
+	go func() { _ = s.close() }()
+}
+
+func (s *Server) close() error {
 	s.cancel()
 	var err error
 	if s.bal != nil {
@@ -189,9 +236,16 @@ func (s *Server) Done() <-chan struct{} {
 	return s.sec.Done()
 }
 
-// Err returns the transport error that stopped the station, nil while it
-// runs or after Close.
+// Err returns the error that stopped the station: the transport's, or that
+// of a callback that did not return normally (wrapping
+// [iec101.ErrClosed]); nil while it runs or after Close.
 func (s *Server) Err() error {
+	s.failMu.Lock()
+	failed := s.failed
+	s.failMu.Unlock()
+	if failed != nil {
+		return failed
+	}
 	if s.bal != nil {
 		return s.bal.Err()
 	}
@@ -215,8 +269,10 @@ func (s *Server) setState(st iec101.State, err error) {
 	s.state = st
 	s.mu.Unlock()
 	s.log.Info("link state", "state", st.String(), "error", err)
-	if s.cfg.OnState != nil {
-		s.cfg.OnState(st, err)
+	if f := s.cfg.OnState; f != nil {
+		if cerr := callback.Call(s.log, "OnState", func() { f(st, err) }); cerr != nil {
+			s.stop(cerr)
+		}
 	}
 }
 
@@ -324,17 +380,25 @@ func (s *Server) receive(data []byte) bool {
 
 func (s *Server) handle() {
 	defer s.wg.Done()
+	s.handlerID.Store(callback.Goroutine())
 	for {
 		select {
 		case a := <-s.in:
+			if s.ctx.Err() != nil {
+				return // closed from a callback
+			}
 			if s.cfg.Strict && !s.admit(a) {
 				continue
 			}
-			if s.cfg.Handler == nil {
+			h := s.cfg.Handler
+			if h == nil {
 				_ = s.Reject(a, asdu.CauseUnknownType)
 				continue
 			}
-			s.cfg.Handler.HandleASDU(s, a)
+			if err := callback.Call(s.log, "Handler", func() { h.HandleASDU(s, a) }); err != nil {
+				s.stop(err)
+				return
+			}
 		case <-s.ctx.Done():
 			return
 		}
@@ -408,7 +472,11 @@ func (u secondaryUser) Reset(user bool) {
 		s.endOfInit(asdu.InitRemoteReset)
 		return
 	}
+	// OnState runs on the link's reader here: Close from it must not wait
+	// for that goroutine.
+	s.onReader.Store(callback.Goroutine())
 	s.setState(iec101.StateUp, nil)
+	s.onReader.Store(0)
 	s.mu.Lock()
 	first := !s.initSent
 	s.initSent = true
@@ -458,6 +526,7 @@ func (u balancedUser) Reset(user bool) {
 
 func (s *Server) runBalanced() {
 	defer s.wg.Done()
+	s.superID.Store(callback.Goroutine())
 	for s.ctx.Err() == nil {
 		if err := s.bal.Init(s.ctx); err != nil {
 			s.log.Debug("link init failed", "error", err)

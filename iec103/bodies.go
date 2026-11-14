@@ -91,7 +91,10 @@ func (m Measurands) append(b []byte, _ *time.Location) ([]byte, error) {
 	if len(m.Values) == 0 || len(m.Values) > MaxMeasurandsWire {
 		return nil, fmt.Errorf("%w: %d measurands, %s carries 1..%d (the standard: 1..%d)", ErrInvalid, len(m.Values), m.Type(), MaxMeasurandsWire, m.max())
 	}
-	for _, v := range m.Values {
+	for i, v := range m.Values {
+		if v.Raw < -4096 || v.Raw > 4095 {
+			return nil, fmt.Errorf("%w: measurand %d: MVAL %d outside -4096..4095", ErrInvalid, i, v.Raw)
+		}
 		b = appendU16(b, v.word())
 	}
 	return b, nil

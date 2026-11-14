@@ -273,7 +273,7 @@ from `link.Config.FrameGap`). It returns the reader's error, or
 | `link.ErrNotImplemented` | function 15: link service not implemented | stays up |
 | `link.ErrUnexpected` | a response that does not answer the request (its function code cannot answer the function sent). When only such responses came until the last time-out the error also wraps `link.ErrTimeout`: the message went unanswered | stays up; with `link.ErrTimeout` the caller re-initializes it |
 | `link.ErrNoData` | `SendConfirm`, `SendNoReply` or a balanced `Send` with empty user data: without an ASDU a frame is fixed-length (IEC 60870-5-101:2003 6.1) | stays up |
-| `link.ErrClosed` | the station was closed, or the transport failed (wrapped with the transport error) | gone |
+| `link.ErrClosed` | the station was closed, or the transport failed (wrapped with the transport error), or a callback (a handler, `OnFrame`, `OnDiscard`) did not return normally: `Err` then wraps it with the callback's name | gone |
 | `link.ErrInvalidConfig` | a `Config` a station cannot be built with | - |
 
 ### IEC 60870-5-101 stations (`iec101`, `iec101/client`, `iec101/server`)
@@ -281,7 +281,8 @@ from `link.Config.FrameGap`). It returns the reader's error, or
 | Sentinel | Meaning |
 |---|---|
 | `iec101.ErrLinkDown` | a request while the link is not initialized; outstanding requests fail with it (wrapping the link error) when the link is lost |
-| `iec101.ErrClosed` | an operation on a closed client or server |
+| `iec101.ErrClosed` | an operation on a closed client or server: a request in flight at Close and every request after it, in both modes; `Err` wraps it when a Handler or OnState did not return normally |
+| `iec101.ErrInHandler` | a client request that waits for an answer, called from `Config.Handler` or `Config.OnState` on one of the client's goroutines (and `Send` or `SetDelay` from OnState there): it is not sent |
 | `iec101.ErrInvalidConfig` | invalid parameters (wraps the `ft12`, `asdu` or `link` error) |
 | `server.ErrQueueFull` | a class 1 or class 2 queue (or the balanced send queue) is full |
 | `iec101.ErrProfile` | with `Params.Strict`: an ASDU the IEC 60870-5-101 profile does not allow (`*iec101.ProfileError` says why); it was not sent |
@@ -289,7 +290,8 @@ from `link.Config.FrameGap`). It returns the reader's error, or
 Requests of `iec101/client` return `*telecontrol.NegativeError` for a
 negative confirmation or an "unknown ..." cause, `telecontrol.ErrBusy` for a
 request whose answers could not be told apart from a pending identical one,
-and wrap `context.DeadlineExceeded` when no answer arrives within
+an error wrapping `telecontrol.ErrResultLimit` for an interrogation whose
+answer has more ASDUs than `Config.MaxResult` (with the ASDUs so far), and wrap `context.DeadlineExceeded` when no answer arrives within
 `Config.RequestTimeout`. A request ends at its deadline also while the link
 layer is still repeating its user data; the exchange itself runs to its
 end, so the station may still receive it.
@@ -313,7 +315,10 @@ transmission, is not an error: it decodes as `iec103.Raw`.
 | Sentinel | Meaning |
 |---|---|
 | `iec103.ErrLinkDown` | a request while the link is not initialized; a pending request fails with it when the link is lost, and so does a broadcast (`Broadcast`, `BroadcastClockSync`) the link loop had not taken when the link went down |
-| `iec103.ErrClosed` | an operation on a closed client or server, or on a `client.StagedWrite` that was already executed or aborted |
+| `iec103.ErrClosed` | an operation on a closed client or server, a request in flight at Close, or an operation on a `client.StagedWrite` that was already executed or aborted; `Err` wraps it when a callback did not return normally |
+| `iec103.ErrInHandler` | a client request (also `Send`, `Broadcast`, `BroadcastClockSync`) called from `Config.Handler` or `Config.OnState` on one of the client's goroutines: it is not sent |
+| `iec103.ErrResultLimit` | a request that collects more ASDUs than `Config.MaxResult` (`Interrogate`, the generic services, the tags of a disturbance transfer); the answers so far are returned with it |
+| `iec103.ErrOverflow` | a request missed answers: they arrived faster than it took them, beyond the 1024 ASDUs a request buffers |
 | `iec103.ErrInvalidConfig` | invalid configuration: link address 255, a server without function type (`Config.Fun` 0), a negative `Config.BitRate`, a start cause other than 5 or 6, an invalid `link.Config` |
 | `iec103.ErrBusy` | a request while another of the same kind is pending (command, GI, generic read, generic write, generic GI, disturbance transfer) |
 | `iec103.ErrNegative` | negative acknowledgement of a command (cause 21), of a generic write (cause 41; the result is returned too), or a disturbance transfer the client acknowledged negatively: tags or a channel aborted by the equipment (TOO 40, 37), incomplete, initial tag states not at position 0, fewer channels than NOC (the record is returned too) |
@@ -349,7 +354,8 @@ type.
 | Sentinel | Meaning |
 |---|---|
 | `iec102.ErrLinkDown` | the link could not be initialized, or the station stopped answering during a request (wraps `link.ErrTimeout` or `link.ErrClosed`) |
-| `iec102.ErrClosed` | an operation on a closed client or server, or a request in progress when the client was closed |
+| `iec102.ErrClosed` | an operation on a closed client or server, or a request in progress when the client was closed; `Err` wraps it when a callback did not return normally |
+| `iec102.ErrResultLimit` | a request whose answer has more ASDUs than the client's `Config.MaxResult`; the ASDUs so far are returned with it |
 | `iec102.ErrInvalidConfig` | invalid configuration: a link address size other than 1, 2 or `iec102.NoLinkAddr`, a link address that does not fit it, invalid codec parameters or `link.Config` |
 | `iec102.ErrNegative` | the station refused the request: it mirrored it with the P/N bit or a cause 13..18; the error is an `*iec102.RefusedError` with the refusal ASDU and its cause |
 | `server.ErrQueueFull` (`iec102/server`) | the class 2 queue is full |

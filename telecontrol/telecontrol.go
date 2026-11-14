@@ -38,6 +38,11 @@ import (
 // is still awaiting its answer: the answers could not be told apart.
 var ErrBusy = errors.New("telecontrol: identical request pending")
 
+// ErrResultLimit reports a collecting request ([Requester.Collect]) whose
+// station sent more ASDUs than [Requester.MaxResult] allows: the request
+// ends there, with the ASDUs collected so far.
+var ErrResultLimit = errors.New("telecontrol: result limit reached")
+
 // NegativeError reports that the controlled station answered a request
 // with a negative confirmation or with one of the "unknown ..." causes of
 // transmission.
@@ -207,6 +212,10 @@ type Requester struct {
 	// Timeout bounds every request whose context has no earlier deadline.
 	// Zero means no bound beyond the context.
 	Timeout time.Duration
+	// MaxResult bounds the ASDUs one collecting request returns: the one
+	// that would exceed it ends the request with [ErrResultLimit]. Zero
+	// means no bound beyond the context.
+	MaxResult int
 
 	mu        sync.Mutex
 	exchanges []*exchange
@@ -317,7 +326,8 @@ func (r *Requester) Confirmed(ctx context.Context, req *asdu.ASDU) error {
 
 // Collect sends req and collects the process data the station sends with
 // cause until the activation termination of req arrives. On error the
-// data collected so far is returned with it.
+// data collected so far is returned with it. An ASDU beyond MaxResult ends
+// the request with [ErrResultLimit].
 func (r *Requester) Collect(ctx context.Context, req *asdu.ASDU, cause asdu.Cause) ([]*asdu.ASDU, error) {
 	ctx, cancel := r.bound(ctx)
 	defer cancel()
@@ -348,6 +358,9 @@ func (r *Requester) Collect(ctx context.Context, req *asdu.ASDU, cause asdu.Caus
 			return data, err
 		}
 		if a.Type != req.Type {
+			if r.MaxResult > 0 && len(data) >= r.MaxResult {
+				return data, fmt.Errorf("%w: more than %d ASDUs answer %s", ErrResultLimit, r.MaxResult, req.Type)
+			}
 			data = append(data, a)
 			continue
 		}

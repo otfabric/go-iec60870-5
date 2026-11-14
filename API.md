@@ -53,7 +53,10 @@ discarded).
 `SingleCharAck`, `SenderAddr` (balanced responses with the own address
 instead of the receiver's, IEC 60870-5-101:2003 6.2.1.2), `FrameGap` (an
 unfinished frame followed by a longer pause is discarded; default
-`Timeout`, negative disables) and the `OnFrame`/`OnDiscard` hooks.
+`Timeout`, negative disables), the `OnFrame`/`OnDiscard` hooks and a
+`Logger`. A hook or handler may call `Close`, which then does not wait for
+the goroutine the call runs on; one that does not return normally is
+logged with its stack and stops the station (`Err`).
 
 | Type | Role | Methods |
 |---|---|---|
@@ -87,6 +90,7 @@ companion standard supplies, and its `Dispatch` routes received ASDUs to
 them: `Interrogate`, `CounterInterrogate`, `Read`, `Command`, `ClockSync`,
 `TestCommand`, `ResetProcess`, `MeasureDelay`, `SetDelay`, and the
 building blocks `Confirmed` and `Collect`. `FailAll` ends outstanding requests.
+`MaxResult` bounds what one `Collect` returns (`ErrResultLimit`).
 `NegativeError` reports a refusal; `Mirrored`, `FromStation`, `Rejected`
 and `Confirmation` are the matching rules.
 
@@ -110,7 +114,12 @@ Client methods: `WaitUp`, `State`, `Close`, `Done`, `Err`, `Send`,
 `ClockSync`, `TestCommand` (C_TS_NA_1), `ResetProcess`, `MeasureDelay`,
 `SetDelay` (C_CD_NA_1). `WaitUp` returns after `Config.OnState` for the
 change to `StateUp` has returned; a request returns at its context
-deadline even while the link layer is still repeating it.
+deadline even while the link layer is still repeating it. A request from
+`Config.Handler` or `OnState` returns `iec101.ErrInHandler` at once; an
+interrogation collects at most `Config.MaxResult` ASDUs
+(`DefaultMaxResult`, 65536) and then ends with an error wrapping
+`telecontrol.ErrResultLimit`. Requests in flight at Close and after it
+return `iec101.ErrClosed`.
 
 ```go
 s, err := server.New(port, server.Config{Params: p, LinkAddr: 3, CommonAddr: 1,

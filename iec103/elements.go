@@ -84,7 +84,9 @@ func (d DPI) String() string {
 // ER, RES, MVAL}. MVAL is a 13-bit two's complement fraction F13 in
 // -1..+1-2^-12, held here as the integer Raw in -4096..4095 (the value is
 // Raw/4096). Full scale (the largest MVAL) stands for 1.2 or 2.4 times the
-// rated value, so the rated value is Raw 3413 or 1707.
+// rated value, so the rated value is Raw 3413 or 1707. A Raw outside
+// -4096..4095 does not fit MVAL: an ASDU that carries it does not encode
+// ([ErrInvalid]).
 type MEA struct {
 	Raw      int16 // MVAL, -4096..4095
 	Overflow bool  // OV

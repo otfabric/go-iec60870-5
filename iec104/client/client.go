@@ -18,6 +18,7 @@ import (
 	iec104 "github.com/otfabric/go-iec60870-5/iec104"
 	"github.com/otfabric/go-iec60870-5/iec104/apci"
 	"github.com/otfabric/go-iec60870-5/iec104/internal/link"
+	"github.com/otfabric/go-iec60870-5/internal/callback"
 	"github.com/otfabric/go-iec60870-5/internal/logx"
 	"github.com/otfabric/go-iec60870-5/sec"
 )
@@ -70,6 +71,9 @@ type Client struct {
 	closing   int
 	starters  map[uint64]bool
 	watchers  sync.WaitGroup
+
+	failMu sync.Mutex
+	failed error // why a callback closed the client
 }
 
 type notice struct {
@@ -317,7 +321,9 @@ func (c *Client) runStart(f func(ctx context.Context, c *Client), l *link.Link) 
 			c.startIdle.Broadcast()
 			c.startMu.Unlock()
 		}()
-		f(ctx, c)
+		if err := callback.Call(c.log, "start handler", func() { f(ctx, c) }); err != nil {
+			c.stop(err)
+		}
 	}()
 	go func() {
 		defer c.watchers.Done()
@@ -547,9 +553,32 @@ func (c *Client) finishClose(l *link.Link) {
 		}
 	}
 	c.wg.Wait()
-	c.setState(iec104.StateDisconnected, nil)
+	c.setState(iec104.StateDisconnected, c.failure())
 	c.flushNotices()
 	close(c.closeDone)
+}
+
+// stop closes the client after one of its callbacks did not return
+// normally; the state handler is told with "disconnected" and err, wrapped
+// in [iec104.ErrClosed]. It is called on the goroutine of that callback,
+// from which Close does not wait for the callback.
+func (c *Client) stop(err error) {
+	c.mu.Lock()
+	closed := c.closed
+	c.mu.Unlock()
+	c.failMu.Lock()
+	if c.failed == nil && !closed {
+		c.failed = fmt.Errorf("%w: %w", iec104.ErrClosed, err)
+	}
+	c.failMu.Unlock()
+	_ = c.Close()
+}
+
+// failure returns why a callback closed the client, nil if none did.
+func (c *Client) failure() error {
+	c.failMu.Lock()
+	defer c.failMu.Unlock()
+	return c.failed
 }
 
 // inCallback reports whether the caller is inside a callback of this
@@ -842,7 +871,9 @@ func (c *Client) emit(s iec104.State, err error) {
 		c.log.Info("connection state", "state", s.String())
 	}
 	if f := c.opts.onState; f != nil {
-		f(s, err)
+		if cerr := callback.Call(c.log, "state handler", func() { f(s, err) }); cerr != nil {
+			c.stop(cerr)
+		}
 	}
 	if f := c.opts.stateTap; f != nil {
 		f()
@@ -904,7 +935,7 @@ func (c *Client) onLinkClose(l *link.Link, remote net.Addr, err error) {
 		c.setState(iec104.StateConnecting, err)
 		go c.reconnectLoop()
 	case local:
-		c.setState(iec104.StateDisconnected, nil)
+		c.setState(iec104.StateDisconnected, c.failure())
 	default:
 		c.setState(iec104.StateDisconnected, err)
 	}
@@ -927,6 +958,8 @@ func (c *Client) onASDU(remote net.Addr, raw []byte) {
 	}
 	c.mu.Unlock()
 	if h := c.opts.handler; h != nil && !c.quiet.Load() {
-		h.HandleASDU(a)
+		if err := callback.Call(c.log, "Handler", func() { h.HandleASDU(a) }); err != nil {
+			c.stop(err)
+		}
 	}
 }

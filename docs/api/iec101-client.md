@@ -18,6 +18,10 @@ const (
 	DefaultRequestTimeout = 10 * time.Second
 	DefaultRetryInterval  = 2 * time.Second
 	DefaultTestInterval   = 10 * time.Second
+	// DefaultMaxResult is the default of Config.MaxResult: an
+	// interrogation of 65536 ASDUs, each of one or more objects, is far
+	// beyond what a controlled station holds.
+	DefaultMaxResult = 65536
 )
 ```
 
@@ -38,6 +42,11 @@ type Client struct {
 	// closed while the link is up and OnState was told
 	// OnState(StateUp) returned for the current up period
 	// the link went down: re-initialize now
+
+	// handlerID and superID are the goroutines of deliver and of the
+	// supervisor (poller), on which the callbacks run.
+
+	// why a callback stopped the client
 
 }
 ```
@@ -66,7 +75,9 @@ ClockSync synchronizes the station's clock (C\_CS\_NA\_1).
 func (c *Client) Close() error
 ```
 
-Close stops the station and waits for its goroutines. Outstanding requests fail with [iec101.ErrClosed](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec101#ErrClosed). Close is safe to call more than once and from several goroutines: the first call closes the transport and returns its error; later calls return nil. It must not be called from Config.Handler or Config.OnState (see there).
+Close stops the station and waits for its goroutines. Outstanding requests, and requests made afterwards, fail with [iec101.ErrClosed](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec101#ErrClosed). Close is safe to call more than once and from several goroutines: the first call closes the transport and returns its error; later calls return nil.
+
+Called from Config.Handler or Config.OnState on one of the client's goroutines, Close cannot wait for that goroutine: it stops the client and returns nil at once, and the close completes, StateClosed reported included, when the callback has returned.
 
 #### func (Client) Command
 
@@ -82,7 +93,7 @@ Command sends a process command and waits for its activation confirmation. For s
 func (c *Client) CounterInterrogate(ctx context.Context, ca asdu.CommonAddr, request, freeze uint8) ([]*asdu.ASDU, error)
 ```
 
-CounterInterrogate runs a counter interrogation (C\_CI\_NA\_1).
+CounterInterrogate runs a counter interrogation (C\_CI\_NA\_1), bounded by Config.MaxResult as Interrogate is.
 
 #### func (Client) Deactivate
 
@@ -106,7 +117,7 @@ Done is closed when the link station stops: after Close, or when the transport f
 func (c *Client) Err() error
 ```
 
-Err returns the transport error that stopped the station, nil while it runs or after Close.
+Err returns the error that stopped the station: the transport's, or that of a callback that did not return normally (wrapping [iec101.ErrClosed](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec101#ErrClosed)); nil while it runs or after Close.
 
 #### func (Client) Interrogate
 
@@ -115,6 +126,8 @@ func (c *Client) Interrogate(ctx context.Context, ca asdu.CommonAddr, qoi asdu.Q
 ```
 
 Interrogate runs an interrogation (C\_IC\_NA\_1) with qualifier qoi ([asdu.QOIStation](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#QOIStation) or [asdu.QOIGroup](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#QOIGroup)) and returns the data the station sent with the matching cause until the activation termination.
+
+More ASDUs than Config.MaxResult end it with an error wrapping [telecontrol.ErrResultLimit](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/telecontrol#ErrResultLimit). Called from the Handler or OnState it returns [iec101.ErrInHandler](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec101#ErrInHandler).
 
 #### func (Client) MeasureDelay
 
@@ -206,6 +219,12 @@ type Config struct {
 	// test function for link. Zero means [DefaultTestInterval]; negative
 	// disables the test.
 	TestInterval time.Duration
+	// MaxResult bounds the ASDUs one interrogation or counter
+	// interrogation collects: the request that would collect more ends
+	// with an error wrapping [telecontrol.ErrResultLimit], with the ASDUs
+	// so far, instead of growing until its deadline. Zero means
+	// [DefaultMaxResult]; negative means no bound, as before v0.6.0.
+	MaxResult int
 
 	// Handler receives every monitor-direction ASDU that is not a mirror of
 	// a request: spontaneous and cyclic data, and the data that answers an
@@ -214,24 +233,30 @@ type Config struct {
 	// of 256 (in balanced transmission the link refuses user data, DFC
 	// set, while more than half of them wait).
 	//
-	// The Handler must not wait for the station. While it runs nothing
-	// empties the queue, so a request made from it waits for answers that
-	// cannot get in once the queue is full (unbalanced: the poller waits
-	// for room; balanced: the link refuses them), and fails at its
-	// deadline when the station sends more ASDUs than that first (an
-	// interrogation of more than 256 objects, say). In unbalanced
-	// transmission Send waits for the poller in the same way. Make such
-	// calls from another goroutine. The Handler must not call Close
-	// either: Close waits for its goroutine. Call it in a new goroutine
-	// (go c.Close()); it returns once the Handler has returned.
+	// The Handler must not wait for the station: while it runs nothing
+	// empties the queue, and the answers a request waits for go through
+	// it. A request method that waits for an answer (Interrogate,
+	// CounterInterrogate, Read, Command, Deactivate, ClockSync,
+	// TestCommand, ResetProcess, MeasureDelay) called from the Handler
+	// returns [iec101.ErrInHandler] at once. Send and SetDelay wait only
+	// for the link layer; in unbalanced transmission that is the poller,
+	// which waits for room in the queue, so they too are best made from
+	// another goroutine. The Handler may call Close, which then does not
+	// wait for the Handler's goroutine: it returns at once, the Handler is
+	// not called again, and the client completes the close when the
+	// Handler has returned. A Handler that does not return normally is
+	// logged with its stack and closes the client; Err reports it.
 	Handler func(a *asdu.ASDU)
 	// OnState is called with each change of the link state, from the
 	// goroutine that changed it: one of the client's own goroutines, or
 	// Close. WaitUp returns only after OnState for the change to StateUp
 	// has returned, so what the callback sets up is in place when WaitUp
 	// returns. State reports a change before OnState for it is called.
-	// OnState must not call Close, which waits for those goroutines: call
-	// it in a new goroutine.
+	// Called on one of the client's goroutines, OnState cannot have a
+	// request answered: the request methods, Send and SetDelay return
+	// [iec101.ErrInHandler]; start them in a new goroutine. It may call
+	// Close, as the Handler may. An OnState that does not return normally
+	// is logged and closes the client, as for the Handler.
 	OnState func(s iec101.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger

@@ -79,9 +79,12 @@ own list: [docs/iec104/LIMITATIONS.md](docs/iec104/LIMITATIONS.md).
   Identical requests at the same time are refused with
   `telecontrol.ErrBusy`.
 - **Requests from the Handler.** `client.Config.Handler` runs behind a
-  queue of 256 ASDUs that nothing empties while it runs: a request made
-  from it fails at its deadline when the station sends more ASDUs than
-  that first. Issue requests from another goroutine.
+  queue of 256 ASDUs that nothing empties while it runs, so a request
+  made from it (or from `OnState` on a client goroutine) returns
+  `iec101.ErrInHandler` at once and is not sent. Issue requests from
+  another goroutine. `Send` and `SetDelay` from the Handler are still
+  sent; in unbalanced transmission they wait for the poller, which waits
+  for room in that queue.
 - **Open deviations from IEC 60870-5-101:2003:**
   - While busy, reset of remote link (0) is still acknowledged, where
     figures 6 and 9 show NACK with DFC = 1.
@@ -150,8 +153,10 @@ own list: [docs/iec104/LIMITATIONS.md](docs/iec104/LIMITATIONS.md).
 - A time synchronization that cannot be applied is answered with ASDU 6
   with IV set; clause 7.4.2 defines no negative answer (interpretation 13
   of [docs/iec103/INTEROPERABILITY.md](docs/iec103/INTEROPERABILITY.md)).
-- A request issued from `client.Config.Handler` stalls once the Handler's
-  queue (256) fills behind it; issue requests from another goroutine.
+- A request issued from `client.Config.Handler` or `OnState` returns
+  `iec103.ErrInHandler` at once and is not sent: the link loop that would
+  carry its answers waits for the Handler. Issue requests from another
+  goroutine.
 - A generic data element is never split over several ASDUs (the GDD CONT
   bit); long answers are split by element.
 - The 15 s limit on DFC (cl. 6.3) is not enforced.

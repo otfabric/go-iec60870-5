@@ -1,5 +1,200 @@
 # Release notes
 
+## v0.6.0
+
+**Date:** 2026-11-14
+**Previous release:** v0.5.3
+
+Bounds on what a peer can make a station hold, callbacks that stop only
+their own station when they do not return normally, Close from inside a
+callback in every serial station, and `Done`/`Err` where they were
+missing. Three changes of behaviour are breaking; each says how to get
+the previous behaviour back. No exported identifier is removed or
+changed.
+
+### Breaking
+
+- `iec104/server`: a `FileServer` session has at most
+  `FileServer.MaxTransfers` transfers open at once, files fetched and
+  files delivered together; the default is `DefaultMaxTransfers` (16). A
+  selection (F_SC_NA_1) or a file ready (F_FR_NA_1) beyond it is refused
+  like a file the station does not have, with "unknown information object
+  address", and logged at Warn, until a transfer of that session ends.
+  Why: an open delivery keeps what arrived of up to `asdu.MaxFileLength`
+  octets, and IEC 60870-5-101 7.4.11 has the files of a station
+  transferred one after the other, so a controlling station has one or
+  two open. Previous behaviour: set `MaxTransfers` to a negative value.
+- `iec101/client`, `iec102/client`, `iec103/client`: `Config.MaxResult`
+  bounds the ASDUs one request collects; the request that would collect
+  more ends with the ASDUs so far and an error wrapping
+  `telecontrol.ErrResultLimit` (IEC 101: `Interrogate`,
+  `CounterInterrogate`), `iec102.ErrResultLimit` (every request) or
+  `iec103.ErrResultLimit` (`Interrogate`, the generic services, the tags
+  of a disturbance transfer), instead of growing until its deadline. The
+  defaults are `DefaultMaxResult`: 65536 (IEC 101, IEC 103) and 131072
+  (IEC 102, more than three years of quarter-hour periods). The bound
+  comes from `telecontrol.Requester.MaxResult` in IEC 101, whose zero
+  value still means no bound. Previous behaviour: set `MaxResult` to a
+  negative value.
+- A callback that does not return normally is recovered where the
+  library calls it, logged at Error as `callback did not return normally`
+  with its stack (fields `callback`, `value`, `stack`), and stops only the
+  station that called it; the process goes on. The call sites:
+  - `link`: the `SecondaryHandler` and `BalancedHandler` methods,
+    `Config.OnFrame` (frames sent and received) and `Config.OnDiscard`.
+    The station stops; `Done` closes and `Err` wraps `link.ErrClosed`
+    and names the callback. The new `link.Config.Logger` receives the
+    entry; the clients and servers pass theirs when it is nil.
+  - `iec101/client` and `iec101/server`: `Config.Handler`,
+    `Config.OnState`.
+  - `iec102/client`: `Config.Handler`, `Config.OnState`;
+    `iec102/server`: `Config.Handler`, `Config.Clock`, `Config.OnState`.
+  - `iec103/client`: `Config.Handler`, `Config.OnState`;
+    `iec103/server`: `Config.Handler`, `Config.OnTimeSync`, the methods of
+    `Config.Disturbances` (`DisturbanceSource`), `Config.OnState`.
+  - In those serial stations `Done` closes, `Err` wraps the standard's
+    `ErrClosed` and names the callback, and requests in progress fail
+    with `ErrClosed`.
+  - `iec104/client`: the `Handler` (`WithHandler`), the state handler
+    (`WithStateHandler`) and the start handler (`WithStartHandler`) close
+    their client, which does not reconnect: the state handler is told
+    "disconnected" with an error that wraps `iec104.ErrClosed` and names
+    the callback. The switch handler (`WithSwitchHandler`) closes its
+    group.
+
+  Previous behaviour: the process ended. An application that wants that
+  ends it itself when `Err` names a callback (serial), or when the state
+  handler reports such an error (IEC 104).
+
+### Added
+
+- `iec101.ErrInHandler`, `iec103.ErrInHandler`: a request called where its
+  answer cannot arrive (below).
+- `telecontrol.ErrResultLimit`, `telecontrol.Requester.MaxResult`,
+  `iec102.ErrResultLimit`, `iec103.ErrResultLimit`, `Config.MaxResult`
+  and `DefaultMaxResult` of the three serial clients,
+  `server.FileServer.MaxTransfers` and `server.DefaultMaxTransfers` of
+  `iec104/server`, `link.Config.Logger`.
+- `iec103.ErrOverflow`: a request that missed answers, which arrived
+  faster than it took them beyond the 1024 ASDUs it buffers. It is the
+  error such a request returned before, now exported, with the same text.
+- `Done` and `Err` on `iec102/client.Client` and `iec103/server.Server`,
+  `Err` on `iec102/server.Server`: when and why the station stopped (the
+  transport, or a callback that did not return normally); `Err` is nil
+  while it runs and after Close.
+
+### Changed
+
+- `iec101/client`: a request that waits for an answer (`Interrogate`,
+  `CounterInterrogate`, `Read`, `Command`, `Deactivate`, `ClockSync`,
+  `TestCommand`, `ResetProcess`, `MeasureDelay`), called from
+  `Config.Handler` or `Config.OnState` on one of the client's goroutines,
+  returns `iec101.ErrInHandler` at once and is not sent; from `OnState`
+  on a client goroutine so do `Send` and `SetDelay`. Before, such a
+  request waited behind the Handler's queue and failed at its deadline
+  once the station sent more than 256 ASDUs (LIMITATIONS.md; the
+  Handler documentation of v0.5.3 says it must not wait for the
+  station). Issue it from another goroutine.
+- `iec103/client`: the requests, `Send`, `Broadcast` and
+  `BroadcastClockSync`, called from `Config.Handler` or `Config.OnState`
+  on one of the client's goroutines, return `iec103.ErrInHandler` at once
+  and are not sent, where they waited for the link loop that waits for
+  the Handler. Issue them from another goroutine.
+- `iec104/server`: `Server.Close` waits for the goroutine of each event
+  queue to end, and an event queued after Close starts none.
+
+### Fixed
+
+- Serial stations (`link.Primary`, `link.Secondary`, `link.Balanced`, the
+  clients and servers of `iec101`, `iec102` and `iec103`): Close called
+  from one of the station's own callbacks (a handler, OnState, the iec102
+  server's `Clock`, the iec103 server's `OnTimeSync` and
+  `DisturbanceSource`, `link.Config.OnFrame` and `OnDiscard`) stops the
+  station and returns at once, instead of waiting for the goroutine it
+  runs on. The callback is not called again, the close completes when it
+  has returned, and `Err` stays nil. The `iec102/client` reports
+  `StateClosed` after its Close has completed, so OnState may call Close
+  then too.
+- `link`: on a transport that is not an `io.Closer`, Close no longer
+  waits for the reader's pending Read; the reader ends when that Read
+  returns. A frame read after Close or after a callback stopped the
+  station reaches no handler.
+- `iec101/client`: a request in flight at Close and every request after
+  it return `iec101.ErrClosed`, in both modes, as Close documents; a
+  request after Close returned `iec101.ErrLinkDown` before.
+- `iec102`: `SinglePoints` with a `Qualifier` above 127, which SPQ cannot
+  hold, does not encode (`ErrInvalid`) where bit 7 was dropped.
+- `iec103`: `Measurands` with an `MEA.Raw` outside -4096..4095 does not
+  encode (`ErrInvalid`) where the 13-bit MVAL kept the low bits.
+- `iec103/server`: a disturbance record is ended with TOO 34 when any of
+  its channels has more values than NOE holds, not only the first, so the
+  NFE of every ASDU 31 fits its two octets.
+
+### Deferred
+
+- Pacing a server answer longer than the send queue, or ending it with a
+  negative termination (`iec103/server` disturbance data,
+  `iec102/server`): it changes what a valid controlling station receives.
+- `iec103.MEAOf(NaN)` and the truncation of `Uints`/`Ints` in generic
+  data: their documentation does not call those values invalid, so a
+  change is a change of behaviour for valid input.
+- `iec102/client`: a request from OnState still waits for the request
+  slot that the request calling OnState holds; OnState documents that it
+  must not issue one.
+- Callbacks of `iec104/server` other than the handlers it already
+  recovers (the state handler, `WithAccept`, the logger, metrics) and the
+  `Dialer`, logger and metrics of `iec104/client`.
+
+### Documentation
+
+- Every handler, OnState and hook of the serial stations says it may call
+  Close, what happens when it does not return normally, and which
+  requests return `ErrInHandler`. LIMITATIONS.md, ERRORS.md, SECURITY.md,
+  ARCHITECTURE.md, OBSERVABILITY.md, API.md, docs/iec102,
+  docs/iec103, docs/iec104/API.md and docs/iec104/ARCHITECTURE.md follow
+  the changes above; TESTING.md lists the new tests against the contract
+  rows L3, L9, L10 and L12.
+
+### Tests
+
+- Callbacks that do not return normally, per call site:
+  `TestCallbackThatDoesNotReturnNormally` in `link`, `iec101/e2e` (both
+  modes), `iec102/client`, `iec102/server`, `iec103/client`,
+  `iec103/server` and `iec104/client`;
+  `iec104/client.TestSwitchHandlerThatDoesNotReturnNormally`;
+  `internal/callback`.
+- Close from a callback: `TestL10CallbackClosesSynchronously` in `link`
+  and `iec101/e2e`, `TestCloseFromCallbacksSynchronously` in
+  `iec102/server`, `iec103/client` and `iec103/server`,
+  `iec102/client.TestCloseFromHandlerSynchronously`,
+  `iec102/client.TestCloseFromOnState`; `link.TestCloseWithoutCloser`.
+- Requests from a callback and after Close:
+  `TestRequestFromHandlerFailsAtOnce` and `TestRequestsFailWithErrClosed`
+  in `iec101/e2e` and `iec103/client`; `TestServerWithoutHandlerRejects`
+  now expects `iec101.ErrClosed` after Close.
+- Bounds, on the fake clock of `testing/synctest` with an allocation
+  budget: `telecontrol.TestCollectResultLimit`,
+  `iec101/e2e.TestInterrogationResultLimit`,
+  `iec102/client.TestRequestResultLimit`,
+  `iec103/client.TestInterrogationResultLimit`;
+  `iec103/client.TestWaitOverflow`;
+  `iec104/server.TestFileServerMaxTransfers`. `iec104/e2e`
+  `TestHostileSectionAnnouncementBudget` announces
+  `DefaultMaxTransfers / 2` files per round, so both rounds fit the
+  bound.
+- `Done`/`Err`: `TestDoneAndErr` in `iec102/client` and `iec103/server`,
+  `iec102/server.TestErr`.
+- `iec104/server`: `TestCloseWaitsForEventQueues`,
+  `TestNoEventQueueAfterClose`.
+- Value bounds: `iec102.TestSinglePointQualifierBounds`,
+  `iec103.TestMeasurandRawBounds`, the case "NOE of a later channel" of
+  `iec103/e2e.TestDisturbanceTooLarge`.
+- `iec101/client.TestCaptureReplay` waits for each recorded request and
+  delivery as an event (`capture.Station.Changed`) instead of a fixed
+  pause, which made it fail on slow runners (linux/386).
+
+---
+
 ## v0.5.3
 
 **Date:** 2026-11-14

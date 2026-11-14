@@ -24,6 +24,10 @@ The link is initialized (request status of link, reset of remote link) by [Clien
 const (
 	DefaultPollInterval   = 50 * time.Millisecond
 	DefaultRequestTimeout = 30 * time.Second
+	// DefaultMaxResult is the default of Config.MaxResult: 131072 ASDUs
+	// hold more than three years of quarter-hour integration periods, one
+	// period to an ASDU.
+	DefaultMaxResult = 1 << 17
 )
 ```
 
@@ -40,6 +44,10 @@ type Client struct {
 
 	// dirty is set when a request to common address dirtyCA ended before
 	// its answer was complete: the next request drains the station first.
+
+	// the goroutine of deliver
+
+	// why a callback stopped the client
 
 }
 ```
@@ -60,7 +68,9 @@ New starts a controlling station on rw. Close stops it and closes rw when it is 
 func (c *Client) Close() error
 ```
 
-Close stops the station. Outstanding requests fail with [iec102.ErrClosed](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec102#ErrClosed). Close is safe to call more than once and from several goroutines: the first call closes the transport and returns its error; later calls return nil. It must not be called from the Handler or OnState (see [Config](#type-config)).
+Close stops the station. Outstanding requests, and requests made afterwards, fail with [iec102.ErrClosed](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec102#ErrClosed). Close is safe to call more than once and from several goroutines: the first call closes the transport and returns its error; later calls return nil.
+
+Called from the Handler, Close cannot wait for the Handler's goroutine: it stops the client and returns nil at once, and the close completes, StateClosed reported included, when the Handler has returned.
 
 #### func (Client) CommonAddr
 
@@ -69,6 +79,22 @@ func (c *Client) CommonAddr() uint16
 ```
 
 CommonAddr returns the common address of ASDU the requests carry.
+
+#### func (Client) Done
+
+```go
+func (c *Client) Done() <-chan struct{}
+```
+
+Done is closed when the station stops: after Close, when the transport fails, or when a callback did not return normally. Err tells which.
+
+#### func (Client) Err
+
+```go
+func (c *Client) Err() error
+```
+
+Err returns the error that stopped the station: the transport's, or that of a callback that did not return normally (wrapping [iec102.ErrClosed](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec102#ErrClosed)); nil while it runs or after Close.
 
 #### func (Client) Init
 
@@ -116,7 +142,7 @@ ReadTotals reads integrated totals with one of the read commands C\_CI\_NA\_2 ..
 func (c *Client) Request(ctx context.Context, a *iec102.ASDU, until Until) (_ []*iec102.ASDU, err error)
 ```
 
-Request sends a and collects the station's answers until the request is complete by rule until. It returns every ASDU of the station's common address received meanwhile, the mirrors included. A refusal returns the answers so far and an [\*iec102.RefusedError](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec102#RefusedError).
+Request sends a and collects the station's answers until the request is complete by rule until. It returns every ASDU of the station's common address received meanwhile, the mirrors included. A refusal returns the answers so far and an [\*iec102.RefusedError](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec102#RefusedError). An answer of more ASDUs than Config.MaxResult ends the request with the ASDUs so far and an error wrapping [iec102.ErrResultLimit](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec102#ErrResultLimit).
 
 When an earlier request ended before its answer was complete, Request first polls the station until it reports no more data, dropping what of that answer arrives (ASDUs of other common addresses still reach the Handler); the rest of an abandoned answer is never returned as the answer of this request.
 
@@ -154,22 +180,32 @@ type Config struct {
 	// RequestTimeout bounds every request whose context has no deadline.
 	// Zero means [DefaultRequestTimeout]; long load profiles need more.
 	RequestTimeout time.Duration
+	// MaxResult bounds the ASDUs one request collects: the request that
+	// would collect more ends with an error wrapping
+	// [iec102.ErrResultLimit], with the ASDUs so far, instead of growing
+	// until its deadline. Zero means [DefaultMaxResult]; negative means no
+	// bound, as before v0.6.0.
+	MaxResult int
 
 	// Handler receives the ASDUs that answer no request: those of another
 	// common address. It runs on a goroutine of its own, in order, through
 	// a queue of 64 ASDUs; one that does not fit is dropped and logged. It
 	// may call the client's methods: a request from it waits for the
-	// request in progress like any other. It must not call Close, which
-	// waits for the Handler's goroutine: call it in a new goroutine
-	// (go c.Close()), which returns once the Handler has returned. The ASDU
-	// is the Handler's own: the client keeps no reference to it.
+	// request in progress like any other. It may call Close, which then
+	// does not wait for the Handler's goroutine: it returns at once, the
+	// Handler is not called again, and the close completes when the
+	// Handler has returned. A Handler that does not return normally is
+	// logged with its stack and closes the client; Err reports it. The
+	// ASDU is the Handler's own: the client keeps no reference to it.
 	Handler func(a *iec102.ASDU)
 	// OnState is called with each change of the link state, from the
 	// goroutine of the request that changed it (while that request holds
 	// the request slot), or from Close for StateClosed. It must return
 	// quickly. It must not issue a request, which waits for the request
-	// slot the calling request holds, nor call Close; start them in a new
-	// goroutine.
+	// slot the calling request holds; start one in a new goroutine. It may
+	// call Close; the request then fails with [iec102.ErrClosed]. An
+	// OnState that does not return normally is logged and closes the
+	// client, as for the Handler; the request fails with ErrClosed.
 	OnState func(s iec102.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger
