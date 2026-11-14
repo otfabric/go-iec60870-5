@@ -173,7 +173,13 @@ func (c *Client) Connect(ctx context.Context) error {
 		c.mu.Lock()
 		c.dialing = false
 		c.mu.Unlock()
-		c.setState(iec104.StateDisconnected, err)
+		// A callback that stopped the client during the connect names
+		// itself in the notice, as it does after the connect.
+		why := err
+		if f := c.failure(); f != nil {
+			why = f
+		}
+		c.setState(iec104.StateDisconnected, why)
 	}
 	return err
 }

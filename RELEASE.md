@@ -110,6 +110,8 @@ changed.
 
 ### Fixed
 
+- `iec104/client`: a callback that stops the client while it is still
+  connecting is named in the "disconnected" notice, as after the connect.
 - `link`: an exchange (`Primary`, `Balanced`) ends with its context also
   while its frame waits for room in a full send queue, which a peer that
   stops reading leaves full.
