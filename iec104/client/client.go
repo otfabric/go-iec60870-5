@@ -155,6 +155,12 @@ func (c *Client) State() iec104.State {
 // Connect fails with [iec104.ErrBusy] when the client is already connected
 // or connecting. With [WithReconnect] it only needs to succeed once: the
 // client re-establishes a lost connection by itself.
+//
+// A client that is closed while Connect runs, by Close or by a callback
+// that does not return normally, makes Connect fail with
+// [iec104.ErrClosed], also when the station has confirmed STARTDT by then;
+// after a callback, the error is the failure that names it, which wraps
+// ErrClosed.
 func (c *Client) Connect(ctx context.Context) error {
 	c.mu.Lock()
 	switch {
@@ -258,7 +264,7 @@ func (c *Client) connect(ctx context.Context) error {
 		c.notifyMu.Unlock()
 		close(ready)
 		_ = l.Close()
-		return iec104.ErrClosed
+		return c.closedErr()
 	}
 	c.link = l
 	c.last = l
@@ -288,12 +294,22 @@ func (c *Client) connect(ctx context.Context) error {
 		}
 	}
 
+	// Closed meanwhile, by Close or by a callback that did not return
+	// normally: the link may have confirmed STARTDT, or the secure session
+	// come up, before the cancellation of ctx reached StartDT or waitSecure.
+	// The connection is not handed to the application.
 	c.mu.Lock()
-	alive := c.link == l
+	closed := c.closed
+	alive := c.link == l && !closed
 	if alive {
 		c.dialing = false
 	}
 	c.mu.Unlock()
+	if closed {
+		c.detach(l)
+		_ = l.Close()
+		return c.closedErr()
+	}
 	if !alive {
 		return fmt.Errorf("%w: %s: %w", iec104.ErrConnectFailed, c.addr, l.Err())
 	}
@@ -393,9 +409,19 @@ func (c *Client) security() link.Security {
 // it, whichever of the canceled context and the closed link came first.
 func (c *Client) connectFailed(what string, err error) error {
 	if c.isClosed() {
-		return iec104.ErrClosed
+		return c.closedErr()
 	}
 	return fmt.Errorf("%w: %s: %w", iec104.ErrConnectFailed, what, err)
+}
+
+// closedErr is what a connect that the client's close ended reports: the
+// failure of the callback that closed the client, which wraps
+// [iec104.ErrClosed], or ErrClosed itself.
+func (c *Client) closedErr() error {
+	if f := c.failure(); f != nil {
+		return f
+	}
+	return iec104.ErrClosed
 }
 
 // waitSecure waits until ep has a secure session on l, or fails with why it
@@ -851,9 +877,11 @@ func (c *Client) sync(l *link.Link, deliver bool) {
 	// not when it is sent, in step with the link's own notifications.
 	//
 	// A link that has ended is neither started nor stopped: its close
-	// notification says what became of the connection.
+	// notification says what became of the connection. Nor is the link of
+	// a client that is closed, which reports "disconnected" next: its link
+	// may still confirm a STARTDT or STOPDT it had under way.
 	started := l.Settled()
-	if c.link != l || l.Err() != nil {
+	if c.link != l || l.Err() != nil || c.closed {
 		c.mu.Unlock()
 		c.notifyMu.Unlock()
 		return

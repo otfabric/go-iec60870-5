@@ -68,6 +68,13 @@ removed or changed.
   closed the client during a reconnect attempt, or while the loss of the
   connection was being reported (the metrics' `OnDisconnect`), as it
   does after a local close.
+- `iec104/client`: `Connect` on a client that is closed while it
+  connects, by `Close` or by a callback that does not return normally,
+  fails with `iec104.ErrClosed`, wrapped in the failure that names the
+  callback where there is one; it returned nil when the link confirmed
+  STARTDT, or the secure session came up, before the close reached it.
+  The state handler is then told "disconnected" once, and no "started"
+  or "stopped" that the link confirms after the close.
 
 ### Documentation
 
@@ -93,6 +100,8 @@ removed or changed.
   `internal/logx.TestLoggerThatDoesNotReturnNormally`;
   `iec101/e2e.TestLoggerThatDoesNotReturnNormally`.
 - `iec104/server.TestTakeoverStopsThePreviousSessionAtOnce`.
+- `iec104/client.TestConnectClosedWhileSTARTDTIsConfirmed`: the client
+  is closed while the link confirms STARTDT, held there by a failpoint.
 - `iec104/server.TestTakeoverEndsThePreviousConnection`,
   `iec104/e2e.TestStopDuringEventStream` and
   `iec104/e2e.TestSecurityStations` wait for the events they check:

@@ -141,6 +141,8 @@ Connect establishes the transport connection and, unless disabled with [WithAuto
 
 Connect fails with [iec104.ErrBusy](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#ErrBusy) when the client is already connected or connecting. With [WithReconnect](#func-withreconnect) it only needs to succeed once: the client re-establishes a lost connection by itself.
 
+A client that is closed while Connect runs, by Close or by a callback that does not return normally, makes Connect fail with [iec104.ErrClosed](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#ErrClosed), also when the station has confirmed STARTDT by then; after a callback, the error is the failure that names it, which wraps ErrClosed.
+
 #### func (Client) CounterInterrogate
 
 ```go

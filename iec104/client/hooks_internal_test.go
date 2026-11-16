@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"strings"
@@ -17,6 +18,8 @@ import (
 	"github.com/otfabric/go-iec60870-5/asdu"
 	iec104 "github.com/otfabric/go-iec60870-5/iec104"
 	"github.com/otfabric/go-iec60870-5/iec104/apci"
+	"github.com/otfabric/go-iec60870-5/iec104/internal/testutil"
+	"github.com/otfabric/go-iec60870-5/internal/testutil/leakcheck"
 )
 
 // hookStop is what a test hook ends with when it does not return normally.
@@ -114,6 +117,97 @@ func TestMetricsThatDoNotReturnNormally(t *testing.T) {
 				t.Errorf("no log entry with the stack:\n%s", text)
 			}
 		})
+	}
+}
+
+// A callback stops the client while Connect runs, and the link confirms
+// STARTDT before the cancellation of Connect's context reaches StartDT: a
+// metrics hook that stops on the STARTDT con runs on the link's goroutine,
+// which then handles that frame, and StartDT can return before the
+// goroutine that cancels its context has run. Connect must fail with the
+// failure, which wraps ErrClosed, and the application must be told
+// "disconnected" once and nothing about the transfer that was confirmed.
+//
+// The failpoint makes that order certain: it does what abort does first
+// (the client is closed, the failure recorded, the Handler muted) and
+// leaves the rest (closing closeCh, which cancels Connect's context, and
+// the link) to after Connect has returned.
+func TestConnectClosedWhileSTARTDTIsConfirmed(t *testing.T) {
+	leaks := leakcheck.Check(t)
+	srv, addr := station(t)
+	type note struct {
+		s   iec104.State
+		err error
+	}
+	var mu sync.Mutex
+	var notes []note
+	var c *Client
+	c, err := New(addr, WithParams(testutil.Params()),
+		WithStateHandler(func(s iec104.State, err error) {
+			mu.Lock()
+			notes = append(notes, note{s, err})
+			mu.Unlock()
+		}),
+		withFailpoint(func(name string) {
+			if name != "link-published" {
+				return
+			}
+			c.mu.Lock()
+			c.closed = true
+			c.mu.Unlock()
+			c.failMu.Lock()
+			c.failed = fmt.Errorf("%w: %w", iec104.ErrClosed, errors.New(hookStop))
+			c.failMu.Unlock()
+			c.quiet.Store(true)
+		}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	connected := make(chan error, 1)
+	go func() { connected <- c.Connect(context.Background()) }()
+	select {
+	case err = <-connected:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Connect did not return")
+	}
+	if !errors.Is(err, iec104.ErrClosed) || !strings.Contains(err.Error(), hookStop) {
+		t.Errorf("Connect: %v, want the failure, which wraps ErrClosed", err)
+	}
+
+	// The rest of abort.
+	c.mu.Lock()
+	close(c.closeCh)
+	l := c.last
+	c.mu.Unlock()
+	if l != nil {
+		l.Shutdown()
+	}
+	go c.finishClose(l)
+	closed := make(chan struct{})
+	go func() { _ = c.Close(); close(closed) }()
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close did not return")
+	}
+	// With the station closed too, once every goroutine the test started
+	// has ended nothing is left that could tell the application more.
+	_ = srv.Close()
+	leaks()
+
+	mu.Lock()
+	defer mu.Unlock()
+	var got []string
+	for _, n := range notes {
+		got = append(got, n.s.String())
+	}
+	if want := "connecting stopped disconnected"; strings.Join(got, " ") != want {
+		t.Errorf("the state handler was told %q, want %q", strings.Join(got, " "), want)
+	}
+	if len(notes) > 0 {
+		if n := notes[len(notes)-1]; !errors.Is(n.err, iec104.ErrClosed) || !strings.Contains(fmt.Sprint(n.err), hookStop) {
+			t.Errorf("%s with %v, want the failure", n.s, n.err)
+		}
 	}
 }
 
