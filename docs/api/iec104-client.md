@@ -622,6 +622,8 @@ WithSecurity applies the application-layer security of IEC 62351-5 (IEC TS 60870
 
 The clients of a [Group](#type-group) serve one controlled station and share one Endpoint: the station keeps one association per controlling station, and the connection with data transfer started carries it. Security can be combined with [WithTLS](#func-withtls).
 
+The endpoint tells its sec.Config.OnEvent of security events on the goroutine that drives it, the connection's. An OnEvent that does not return normally there is logged with its stack and closes the client, as for the [Handler](#type-handler): Connect, or the request in progress, fails with [iec104.ErrClosed](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#ErrClosed), and the state handler is told "disconnected" with an error that names it.
+
 #### func WithStartHandler
 
 ```go
@@ -657,6 +659,8 @@ func WithTLS(cfg *tls.Config) Option
 ```
 
 WithTLS secures the connection with TLS as profiled by IEC 62351-3. The conventional port is [apci.DefaultTLSPort](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104/apci#DefaultTLSPort). If cfg.ServerName is empty it is taken from the address.
+
+The callbacks of cfg (GetClientCertificate, VerifyPeerCertificate, VerifyConnection and the others) run during the handshake, on the goroutine that connects: Connect's or the reconnect loop's. One that does not return normally is logged with its stack and closes the client, as for the [Handler](#type-handler): the connect fails with [iec104.ErrClosed](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec104#ErrClosed), and the state handler is told "disconnected" with an error that names it. A renegotiation that cfg.Renegotiation allows (TLS 1.2; off by default) runs them again later, on the connection's reader, outside this.
 
 ### type Reconnect
 

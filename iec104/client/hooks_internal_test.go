@@ -214,3 +214,45 @@ func TestConnectClosedWhileSTARTDTIsConfirmed(t *testing.T) {
 type writerFunc func(p []byte) (int, error)
 
 func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
+
+// A Dialer that does not return normally after Close has closed the
+// client: the close came first, so no failure of the Dialer is recorded,
+// and Connect must still fail with ErrClosed, without going on to use a
+// connection it does not have. The Dialer waits for closeCh, which Close
+// closes with the client closed, so the order is the same every time.
+func TestConnectWhenTheDialerStopsDuringClose(t *testing.T) {
+	leaks := leakcheck.Check(t)
+	var c *Client
+	entered := make(chan struct{})
+	c, err := New("127.0.0.1:1", WithParams(testutil.Params()),
+		WithDialer(dialerFunc(func(context.Context, string, string) (net.Conn, error) {
+			close(entered)
+			<-c.closeCh
+			panic(hookStop)
+		})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	connected := make(chan error, 1)
+	go func() { connected <- c.Connect(context.Background()) }()
+	<-entered
+	closed := make(chan error, 1)
+	go func() { closed <- c.Close() }()
+	select {
+	case err = <-connected:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Connect did not return")
+	}
+	if !errors.Is(err, iec104.ErrClosed) {
+		t.Errorf("Connect: %v, want ErrClosed", err)
+	}
+	select {
+	case err = <-closed:
+		if err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close did not return")
+	}
+	leaks()
+}

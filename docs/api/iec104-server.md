@@ -402,6 +402,8 @@ A connection is bound to the association its first security message names once a
 
 With security, an ASDU that is not protected is discarded, the [Handler](#type-handler) sees only the verified application data, and what the station sends waits until the controlling station has established a session. A request that the roles of the association do not permit is answered with a negative confirmation with cause [asdu.CauseNotAuthorized](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/asdu#CauseNotAuthorized) before it reaches the Handler. Security can be combined with [WithTLS](#func-withtls).
 
+An association tells its sec.Config.OnEvent of security events on the goroutine of the session that drives it. An OnEvent that does not return normally there is logged with its stack and ends that session, as for the state handler; the server goes on serving the others.
+
 #### func WithStateHandler
 
 ```go
@@ -419,6 +421,8 @@ func WithTLS(cfg *tls.Config) Option
 ```
 
 WithTLS makes [Server.ListenAndServe](#func-server-listenandserve) accept TLS connections, as profiled by IEC 62351-3. Set cfg.ClientAuth to tls.RequireAndVerifyClientCert to authenticate controlling stations. It has no effect on [Server.Serve](#func-server-serve), which uses the listener it is given.
+
+The server completes the handshake of each connection, within t0, on the goroutine that accepted it, and the callbacks of the tls.Config (GetCertificate, GetConfigForClient, VerifyPeerCertificate, VerifyConnection and the others) run there: of cfg, or of the TLS listener given to Serve. One that does not return normally is logged with its stack and rejects only that connection, logged as "connection rejected" with the reason "tls.Config callback did not return normally", as for [WithAccept](#func-withaccept); the server goes on serving the others.
 
 ### type RedundancyGroup
 

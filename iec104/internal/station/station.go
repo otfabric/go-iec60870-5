@@ -32,8 +32,17 @@ type Station struct {
 	started  map[uint64]bool           // sessions with data transfer started
 
 	Server *server.Server
-	Addr   string // host:port; the station listens on all interfaces
+	Addr   string // host:port the station listens on (see ListenAddr)
 }
+
+// ListenAddr is the address the stations of Start, StartTLS and
+// StartGroup listen on: the loopback interface, which the e2e suites dial
+// ([Station.Loopback]), and no other, so that no process listening on a
+// specific address of the same port takes their connections. The interop
+// suites set it to "0.0.0.0:0" before their first test: a client container
+// reaches the station through the Docker host gateway, which on Linux is
+// the bridge address, not loopback.
+var ListenAddr = "127.0.0.1:0"
 
 // FirstUploadIOA is the first address the station takes files at when the
 // fixture has no uploads. Files delivered can be fetched again and appear in
@@ -136,8 +145,7 @@ type stationCommand struct {
 	selected bool
 }
 
-// Start serves the fixture with go-iec60870-5 on all interfaces, so that
-// a client container can reach it through the Docker host gateway.
+// Start serves the fixture with go-iec60870-5 on [ListenAddr].
 func Start(t testing.TB, fx *Fixture, opts ...server.Option) *Station {
 	t.Helper()
 	return start(t, fx, nil, opts...)
@@ -250,7 +258,7 @@ func start(t testing.TB, fx *Fixture, tlsConfig *tls.Config, opts ...server.Opti
 	}
 	st.Server = srv
 	t.Cleanup(func() { _ = srv.Close() })
-	go func() { _ = srv.ListenAndServe("0.0.0.0:0") }()
+	go func() { _ = srv.ListenAndServe(ListenAddr) }()
 	deadline := time.Now().Add(5 * time.Second)
 	for srv.Addr() == nil {
 		if time.Now().After(deadline) {

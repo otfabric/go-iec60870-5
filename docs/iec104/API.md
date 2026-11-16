@@ -934,7 +934,10 @@ Errors: `ErrInvalidStart`, `ErrInvalidLength`, `ErrInvalidControl`,
 - Every method of `Client`, `Server`, `Session`, `Mux` and `sec.Endpoint`
   is safe for concurrent use. `sec.Config.OnEvent` runs on the goroutine
   that drove the endpoint (a connection's protocol loop), without locks
-  held, and must not block.
+  held, and must not block. The callbacks of a `tls.Config` given to
+  `WithTLS` run during the handshake: on the goroutine of `Connect` or of
+  the reconnect loop (client), and on the goroutine that accepted the
+  connection (server, within t0).
 - A client `Handler` runs on one goroutine per connection; a server
   `Handler` on one goroutine per session. ASDUs arrive in wire order.
 - A server handler may call any method of the library, `Session.Close` and
@@ -961,19 +964,27 @@ Errors: `ErrInvalidStart`, `ErrInvalidLength`, `ErrInvalidControl`,
   any method. A switch handler (`WithSwitchHandler`) is called one call at a
   time, in order, and may call the group, `Switchover` and `Close` included.
 - A client `Handler`, state handler, start handler, switch handler,
-  `Dialer` or `Metrics` hook (`RequestMetrics` included) that does not
-  return normally is logged with its stack and closes its client (the
-  switch handler: its group): the state handler is told "disconnected"
+  `Dialer`, `Metrics` hook (`RequestMetrics` included), callback of the
+  `tls.Config` of `WithTLS` (`GetClientCertificate`,
+  `VerifyPeerCertificate`, `VerifyConnection`) or `sec.Config.OnEvent` of
+  the `WithSecurity` endpoint that does not return normally is logged
+  with its stack and closes its client (the switch handler: its group):
+  the state handler is told "disconnected"
   with an error that wraps `iec104.ErrClosed` and names the callback, and
   the process goes on. `Connect`, the reconnect loop or the request that
   called it fails with `iec104.ErrClosed`.
 - A logger call that does not return normally, of a client or a server,
   loses its entry and is written once more through `Errorf` as `logger
   did not return normally`; the client, the server and the session go on.
-- A server `Handler`, state handler, `Metrics` hook, `WithAccept` filter or
-  `WithSecurity` endpoint factory that does not return normally is logged
-  with its stack and closes its session (the filter: rejects the
-  connection); the other sessions go on. After a `Handler` panic no
-  further ASDUs of that session reach the `Handler`.
+- A server `Handler`, state handler, `Metrics` hook, `WithAccept` filter,
+  `WithSecurity` endpoint factory, `sec.Config.OnEvent` of a session's
+  endpoint, or callback of the `tls.Config` of `WithTLS` or of a TLS
+  listener given to `Serve` (`GetCertificate`, `GetConfigForClient`,
+  `VerifyPeerCertificate`, `VerifyConnection`) that does not return
+  normally is logged with its stack and closes its session (the filter
+  and the `tls.Config` callbacks: reject the connection, logged as
+  `connection rejected`); the other sessions go on. After a `Handler` that
+  did not return normally no further ASDUs of that session reach the
+  `Handler`.
 - `asdu.ASDU` values passed to handlers are owned by the receiver; values
   passed to `Send` are not retained.

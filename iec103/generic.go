@@ -112,7 +112,9 @@ func ASCII(s string) Value {
 
 // Uints returns values of type t (DataUint, DataIndex, DataTextNumber or
 // any other unsigned type) of size octets each, least significant octet
-// first.
+// first. Each value keeps its low size octets: a value that needs more is
+// written without the octets above them (300 in one octet is 44), and
+// nothing reports it; check the range before when that matters.
 func Uints(t DataType, size int, vs ...uint64) Value {
 	v := Value{GDD: GDD{Type: t, Size: octet(size), Number: octet(len(vs))}}
 	for _, x := range vs {
@@ -124,6 +126,9 @@ func Uints(t DataType, size int, vs ...uint64) Value {
 }
 
 // Ints returns two's complement integers (DataInt) of size octets each.
+// Each value keeps the low size octets of its two's complement, as
+// [Uints] does: a value outside the range of size octets is written as
+// another (-129 in one octet is 127), and nothing reports it.
 func Ints(size int, vs ...int64) Value {
 	u := make([]uint64, len(vs))
 	for i, x := range vs {

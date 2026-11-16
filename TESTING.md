@@ -40,6 +40,7 @@ The `Extended` workflow runs nightly: every fuzz target for 5 minutes and each c
   - `matrix_test.go` sends every type identification through both codecs and both protocol machines, repeats this with other field sizes, and wraps the sequence numbers.
   - `features_test.go` covers states, logs, metrics, retries, admission, the event queue and failing requests.
   - `statemachine_test.go` covers start, stop, close and switchover races.
+  - The test station (`internal/station`) listens on `127.0.0.1:0`, which the suites dial (`fixture_test.go`, `TestStationListensOnLoopback`); the interop suites, which a container dials, set it to the wildcard.
   - `chaos_test.go` runs seeded random operations while connections are cut.
   - `hostile_test.go` sends broken framing, control fields, sequence numbers, idle and flooding peers, malformed ASDUs and out-of-turn file transfer to the server, and plays a hostile station against the client; each case checks the time bound, that a legitimate client is then served, and goroutines. `FuzzServerStream` (in `hostile_fuzz_test.go`) feeds arbitrary octets to a running server over an in-memory connection.
 - **Serial standards against hostile peers and faulty lines** (`iec101/e2e`, `iec102/e2e`, `iec103/e2e`), on the in-memory line of `internal/testutil/serialline`, whose directions drop, duplicate, corrupt, delay, split, truncate and reorder writes and add noise, and whose raw peer writes FT 1.2 octets straight onto it:
@@ -92,7 +93,7 @@ Every package whose tests start goroutines checks for leaks with
 | L9 Callback calls a public method | `TestRequestFromHandlerFailsAtOnce` (`ErrInHandler`), `TestReentrantStateHandlerDrivesTheClient` (client); server handlers call Session methods throughout | the serial server handlers answer through their station in every e2e suite; `TestRequestFromHandlerFailsAtOnce` in `iec101/e2e` (both modes) and `iec103/client`: a request from the Handler or OnState returns `ErrInHandler` at once; `iec102/client.TestRequestFromOnState`: OnState runs outside the request slot, and a request it makes is answered | - |
 | L10 Callback calls Close | `TestOrderingHandlerCalledAfterCloseFromHandler` (client and server), `TestOrderingCloseFromServerCallbacks`, `TestReentrantCloseFromHandlerStopsReconnecting`, `TestReview2GroupCloseFromStateHandler`, `TestCloseFromTheStartHandler`, `TestCloseWaitsForTheStartHandler` (client), `TestCloseWaitsForCallbacks` (link) | Close from the callback itself: `link.TestL10CallbackClosesSynchronously` (the handlers, OnFrame), `iec101/e2e.TestL10CallbackClosesSynchronously` (Handler and OnState of client and server, both modes), `TestCloseFromCallbacksSynchronously` in `iec102/server` (Handler, Clock, OnState), `iec103/client` and `iec103/server` (Handler, OnTimeSync, DisturbanceSource, OnState), `iec102/client.TestCloseFromHandlerSynchronously`, `iec102/client.TestCloseFromOnState`; Close in a new goroutine: `link.TestL10CallbackClosesAsynchronously`, `iec101/e2e.TestL10CallbackClosesAsynchronously`, `TestCloseFromHandler` in the iec102 and iec103 clients and servers | - |
 | L11 Slow callback | `TestBurstWithSlowHandler` (server), `TestGroupFailsOverBehindABusyHandler` (client) | `iec101/e2e.TestServerBusySetsDFC` | no slow-handler test for the serial clients |
-| L12 Queue at capacity | `TestEventQueueOverflow` (with its dropped counter), `TestCloseWaitsForEventQueues`, `TestFileServerMaxTransfers` (server), `TestReceiveBackpressure`, `TestThrottledLinkStillProcessesAcks`, `TestSecurityOutputSlowAcknowledgementStaysBounded`, `TestSecurityOutputPeerPastWindowIsClosed` (link); the result bounds of the client: `TestInterrogateResultLimit`, `TestListFilesResultLimit`, `TestGetFileSectionLimit`, `TestExchangeQueueBound` | `iec101/e2e.TestServerUnbalancedEdges` (`ErrQueueFull`), `iec102/client.TestHandlerQueueFull`, `iec102/server.TestJunkAndBusy`, `iec103/server.TestClass1QueueFull`, `link` `FuzzSecondary` (response queue bound); the result bounds of the clients, with an allocation budget on the fake clock: `telecontrol.TestCollectResultLimit`, `iec101/e2e.TestInterrogationResultLimit`, `iec102/client.TestRequestResultLimit`, `iec103/client.TestInterrogationResultLimit`, `telecontrol.TestCollectQueueBound`; `iec103/client.TestWaitOverflow` (`ErrOverflow`); `link.TestExchangeEndsWithContextOnFullQueue` (a peer that stops reading), `iec103/server.TestDisturbanceChannelQueuedWhole` (a channel queued all or none) | no drop counters in the serial stations; server answers cut at the queue bound |
+| L12 Queue at capacity | `TestEventQueueOverflow` (with its dropped counter), `TestCloseWaitsForEventQueues`, `TestFileServerMaxTransfers` (server), `TestReceiveBackpressure`, `TestThrottledLinkStillProcessesAcks`, `TestSecurityOutputSlowAcknowledgementStaysBounded`, `TestSecurityOutputPeerPastWindowIsClosed` (link); the result bounds of the client: `TestInterrogateResultLimit`, `TestListFilesResultLimit`, `TestGetFileSectionLimit`, `TestExchangeQueueBound` | `iec101/e2e.TestServerUnbalancedEdges` (`ErrQueueFull`), `iec102/client.TestHandlerQueueFull`, `iec102/server.TestJunkAndBusy`, `iec103/server.TestClass1QueueFull`, `link` `FuzzSecondary` (response queue bound); the result bounds of the clients, with an allocation budget on the fake clock: `telecontrol.TestCollectResultLimit`, `iec101/e2e.TestInterrogationResultLimit`, `iec102/client.TestRequestResultLimit`, `iec103/client.TestInterrogationResultLimit`, `telecontrol.TestCollectQueueBound`; `iec103/client.TestWaitOverflow` (`ErrOverflow`); `link.TestExchangeEndsWithContextOnFullQueue` (a peer that stops reading), `iec103/server.TestDisturbanceChannelQueuedWhole` (a channel queued all or none), `iec102/server.TestAnswerLongerThanTheQueue` (an answer cut at the queue bound, the default); paced by the polls: `iec102/server.TestPacedAnswer`, `TestPacedAnswerEnds`, `iec102/e2e.TestPacedAnswers` (`PaceAnswers`), `iec103/server.TestPacedChannel`, `TestPacedChannelEnds`, `iec103/e2e.TestPacedChannels` (`PaceChannels`, on and off), on the fake clock where unit | no drop counters in the serial stations; by default server answers are cut at the queue bound (`PaceAnswers`, `PaceChannels` pace them); iec103 tags are not paced |
 | L13 Concurrent sessions | `TestOrderingSessionCallbacksOnOneGoroutine`, `TestDefaultGroupKeepsIndependentSessions`, `TestTakeoverStopsThePreviousSessionAtOnce` (a takeover ends the previous session before the STARTDT con of the new one), `TestFileTransfersPerSession`, `TestUnauthenticatedMessageLeavesTheAssociation`, `TestAuthenticatedSessionTakesTheAssociationOver`, `TestPendingAssociationIsShared` (server) | n/a: one line and one peer per station | - |
 | L14 Failure during construction | the connect-failure tests of the client, `TestDialerWithoutConnection`; `TestServeRetriesAcceptErrors` (server); validation in `New` before any goroutine | `link.TestConfigErrors`, `iec101/e2e.TestConfigErrors`, the config tests of iec102 and iec103 | - |
 | L15 `Shutdown(ctx)` | n/a: no type has a graceful shutdown; `TestCloseDeliversWhatWasAcknowledged` (client) | n/a | - |
@@ -121,12 +122,27 @@ client: `TestHookThatDoesNotReturnNormally` (the Dialer at Connect and
 at a reconnect, OnConnect, OnFrameSent, OnFrameReceived, OnDisconnect,
 OnRequest, each on the goroutine that calls it) and
 `TestMetricsThatDoNotReturnNormally` (every metrics callback, of
-`RequestMetrics` included). A logger call that does not return normally
+`RequestMetrics` included); `TestConnectWhenTheDialerStopsDuringClose`
+(a Dialer that stops after Close has closed the client: Connect fails
+with ErrClosed). A logger call that does not return normally
 loses its entry and nothing else: `internal/logx.TestLoggerThatDoesNotReturnNormally`
 (every method, With and DebugEnabled included),
 `iec104/client.TestLoggerThatDoesNotReturnNormally` (client and
 station) and `iec101/e2e.TestLoggerThatDoesNotReturnNormally` (both
 modes, link layers included).
+
+The callbacks of a `tls.Config` and `sec.Config.OnEvent` end only what
+they belong to: `iec104/client.TestTLSCallbackThatDoesNotReturnNormally`
+(GetClientCertificate, VerifyPeerCertificate, VerifyConnection, at
+Connect and at a reconnect: the client is closed),
+`iec104/server.TestTLSCallbackRejectsOnlyThatConnection`
+(GetCertificate, GetConfigForClient, VerifyPeerCertificate,
+VerifyConnection, with `WithTLS` and with a TLS listener given to
+`Serve`: that connection is rejected and the next is served),
+`iec104/e2e.TestSecurityEventHandlerOfTheClient` (the client is closed)
+and `TestSecurityEventHandlerOfTheStation` (at the association and for a
+request the roles refuse: the session ends, the station serves the
+next).
 
 OnState of the serial stations is called one change at a time and in the
 order of the changes, StateClosed last, also when Close runs while a call

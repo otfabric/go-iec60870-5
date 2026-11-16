@@ -67,14 +67,32 @@ type Config struct {
 	Handler Handler
 	// QueueSize bounds the class 2 queue. Zero means [DefaultQueueSize].
 	QueueSize int
+	// PaceAnswers makes the server queue the answers it builds itself (to
+	// C_RD_NA_2, C_TI_NA_2 and the reads of integrated totals and single
+	// points, refusals included) as the controlling station polls class 2:
+	// while the queue is full, the server waits for a poll to take an ASDU
+	// before it queues the next, so an answer longer than QueueSize goes
+	// out whole, its termination included. Meanwhile it serves no other
+	// request: up to 16 wait, and more are refused with NACK and DFC set.
+	// A reset of remote link, which empties the queue, ends the wait and
+	// drops the rest of the answer; Close ends it too. Other ASDUs sent
+	// meanwhile ([Server.Send], [Server.Mirror], the Handler's) are not
+	// paced and can find the queue full ([ErrQueueFull]).
+	//
+	// Off by default: an answer is queued until the queue is full, and the
+	// rest of it, the termination included, is dropped and logged as
+	// "answer not queued".
+	PaceAnswers bool
 	// OnState is called with each change of the link state: from the
 	// station's link goroutine on a reset of remote link, and from Close
 	// for StateClosed. The calls come one at a time and in the order of
 	// the changes, StateClosed last: Close waits for a call in progress
-	// before it reports StateClosed. It must return quickly. It may call
-	// Close, which then does not wait for the link goroutine. An OnState
-	// that does not return normally is logged and closes the server, as
-	// for the Handler.
+	// before it reports StateClosed. It must return quickly: OnState for
+	// StateUp runs on the link's reader under the lock of the secondary
+	// station (link.Secondary), before the reset is acknowledged, so a
+	// slow OnState delays the link's answers. It may call Close, which then
+	// does not wait for the link goroutine. An OnState that does not return
+	// normally is logged and closes the server, as for the Handler.
 	OnState func(s iec102.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger
@@ -117,6 +135,10 @@ HandleASDU calls f.
 type Server struct {
 
 	// largest ASDU one frame carries
+
+	// With Config.PaceAnswers: room is signalled when a poll takes an ASDU
+	// of the queue or a reset of remote link empties it; resets counts the
+	// resets, under mu.
 
 	// the goroutine of work
 	// the link goroutine, while it calls OnState

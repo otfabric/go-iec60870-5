@@ -1,5 +1,125 @@
 # Release notes
 
+## v0.9.0
+
+**Date:** 2026-11-16
+**Previous release:** v0.8.0
+
+Opt-in pacing of the iec102 server's answers and of the iec103 server's
+disturbance channels by the controlling station's polls, an
+`iec103.MEAOf` that sets ER for NaN, `tls.Config` callbacks and
+`sec.Config.OnEvent` of the IEC 104 client and server that end only what
+they belong to, an IEC 104 `Connect` that fails with `ErrClosed` when
+its `Dialer` stops during `Close`, and an IEC 104 test station that
+listens on loopback. Three changes of behaviour are breaking; each says
+who notices and how to get the previous behaviour back. Two fields are
+added; no identifier is removed or changed, and no default changes.
+
+### Breaking
+
+- `iec103`: `MEAOf(NaN)` returns `MEA{Error: true}`: ER set ("MVAL is
+  not a valid value", clause 7.2.6.8) and MVAL 0. Before, it converted
+  NaN to `int16`, a result that Go leaves to the platform, without ER.
+  Who notices: an application that passes NaN for a measurand it has no
+  value for, and a controlling system that then sees ER set where it saw
+  a plain value. Previous behaviour: pass `iec103.MEA{}` instead of
+  `MEAOf(v)` when `math.IsNaN(v)`.
+- `iec104/client`: a callback of the `tls.Config` given to `WithTLS`
+  (`GetClientCertificate`, `VerifyPeerCertificate`, `VerifyConnection`
+  and the others the handshake calls) or the `sec.Config.OnEvent` of the
+  `WithSecurity` endpoint that does not return normally is logged at
+  Error as `callback did not return normally` with its stack and closes
+  the client: `Connect`, the reconnect loop or the request in progress
+  fails with `iec104.ErrClosed`, and the state handler is told
+  "disconnected" with an error that names `tls.Config callback` or
+  `sec.Config.OnEvent`. Who notices: an application whose callback ended
+  the process. Previous behaviour: the process ended; an application
+  that wants that ends it itself in the callback.
+- `iec104/server`: a callback of the `tls.Config` of `WithTLS`, or of a
+  TLS listener given to `Serve` (`GetCertificate`, `GetConfigForClient`,
+  `VerifyPeerCertificate`, `VerifyConnection` and the others), that does
+  not return normally is logged with its stack and rejects only that
+  connection, as for `WithAccept`: Warn `connection rejected` with the
+  reason `tls.Config callback did not return normally`. A session's
+  `sec.Config.OnEvent` that does not return normally is logged with its
+  stack and ends that session. The server serves the others. Who
+  notices: an application whose callback ended the process. Previous
+  behaviour: the process ended; an application that wants that ends it
+  itself in the callback.
+
+### Added
+
+- `iec102/server`: `Config.PaceAnswers`. The answers the server builds
+  itself (C_RD_NA_2, C_TI_NA_2, the reads of integrated totals and single
+  points, refusals included) are queued as the controlling station's
+  class 2 polls take the queue, so an answer longer than `QueueSize`
+  goes out whole, its termination included. Meanwhile the server serves
+  no other request: up to 16 wait, and more are refused with NACK and
+  DFC. A reset of remote link drops the rest of the answer; `Close` ends
+  the wait. `Send`, `Mirror` and the `Handler` are not paced. Off by
+  default: an answer is cut where the queue is full, as before.
+- `iec103/server`: `Config.PaceChannels`. The ASDUs 30 and the ASDU 31
+  of a disturbance channel are queued as the controlling system's class
+  1 polls take the queue, so a channel longer than `QueueSize` goes out
+  whole, and a record whose longest channel does not fit the queue is
+  announced at its selection. Meanwhile other requests wait in the
+  server's input, with DFC set while it is more than half full. A reset
+  of the communication unit or of the FCB drops the rest of the channel,
+  logged at Info as `disturbance channel ended by a reset`; `Close` ends
+  the wait. Tags are not paced. Off by default: a channel is queued all
+  or none (TOO 37 when it does not fit now, TOO 34 at the selection when
+  it can never fit), as before.
+
+### Fixed
+
+- `iec104/client`: `Connect` returns `iec104.ErrClosed` when a `Dialer`
+  that does not return normally races with `Close`; it no longer
+  continues without a connection.
+
+### Documentation
+
+- The OnState docs of the iec101 server (unbalanced mode), the iec102
+  server and the iec103 server say that OnState for `StateUp` runs on
+  the link's reader under the lock of the secondary station, before the
+  reset is acknowledged, so a slow OnState delays the link's answers.
+- `iec103.Uints` and `iec103.Ints` say that each value keeps its low
+  `size` octets and that nothing reports a value that needs more.
+- `WithTLS` and `WithSecurity` of `iec104/client` and `iec104/server`,
+  and `sec.Config.OnEvent`, say on which goroutine the callbacks run and
+  what happens to one that does not return normally; the client's
+  `WithTLS` says that a renegotiation, which `tls.Config.Renegotiation`
+  allows, runs them later on the connection's reader.
+  docs/iec102/README.md, docs/iec103/README.md,
+  docs/iec103/INTEROPERABILITY.md (interpretation 15), docs/iec104/API.md,
+  ERRORS.md, OBSERVABILITY.md, SECURITY.md and TESTING.md follow the
+  changes above; docs/api is regenerated.
+
+### Tests
+
+- Pacing, on the fake clock of `testing/synctest` where unit:
+  `iec102/server` `TestAnswerLongerThanTheQueue` (the default),
+  `TestPacedAnswer`, `TestPacedAnswerEnds` (reset and Close);
+  `iec102/e2e.TestPacedAnswers`; `iec103/server` `TestPacedChannel`,
+  `TestPacedChannelEnds` (reset of the communication unit, of the FCB,
+  Close); `iec103/e2e.TestPacedChannels` (on and off).
+- `iec103.TestMEA` covers 0, the largest value below full scale, full
+  scale, beyond it in both directions, the infinities and NaN;
+  `TestGenericValues` pins the octets `Uints` and `Ints` keep.
+- `iec104/client.TestConnectWhenTheDialerStopsDuringClose`: the Dialer
+  stops once `Close` has closed the client, every time.
+- `iec104/client.TestTLSCallbackThatDoesNotReturnNormally`,
+  `iec104/server.TestTLSCallbackRejectsOnlyThatConnection`,
+  `iec104/e2e.TestSecurityEventHandlerOfTheClient` and
+  `TestSecurityEventHandlerOfTheStation`.
+- The IEC 104 test station (`iec104/internal/station`) listens on
+  `127.0.0.1:0`, the address the e2e suites dial, and on the wildcard
+  only for the interop suites, which a container dials
+  (`iec104/e2e.TestStationListensOnLoopback`). Another process that
+  listens on the loopback address with the same port no longer takes the
+  suites' connections.
+
+---
+
 ## v0.8.0
 
 **Date:** 2026-11-16

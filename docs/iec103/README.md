@@ -64,7 +64,9 @@ case iec103.Raw: // private type or private cause: every octet kept
   ignored on receive, except the INF position, which `ASDU.Inf` keeps.
 - `MEA` holds MVAL as the integer in -4096..4095 with `OV` and `ER`;
   `MEAOf` and `Value` convert from and to the fraction of full scale (full
-  scale is 1.2 or 2.4 times the rated value, clause 7.2.6.8).
+  scale is 1.2 or 2.4 times the rated value, clause 7.2.6.8). `MEAOf`
+  sets OV beyond full scale and, for NaN, which is no value, ER ("MVAL is
+  not a valid value") with MVAL 0.
 - Time tags: the bit after the minutes is RES1 in IEC 103 (clauses
   7.2.6.28, 7.2.6.29), not the GEN flag of 101/104: ignored on decode
   (`cp.Timestamp.Substituted` stays false) and written as 0.
@@ -72,6 +74,9 @@ case iec103.Raw: // private type or private cause: every octet kept
   `Float32s`, `Float64s`, `Reply` and `Structure` build values; `Text`,
   `Uint`, `Int`, `Float` and `Fields` read them. `PackGenericData` and
   `PackGenericIdent` split long answers over ASDUs with COUNT and CONT.
+  `Uints` and `Ints` keep the low DATASIZE octets of each value (300 in
+  one octet is 44, -129 is 127) and report nothing; a caller checks the
+  range first where that matters.
   A GDD needs DATASIZE 1..255 and NUMBER 1..127 (clause 7.2.6.32) and an
   ASDU 11 at least one description element (NDE 1..63, clause 7.2.6.35);
   encode and decode refuse others with `ErrInvalid`.
@@ -218,13 +223,20 @@ s.Send(measurands, server.Class2)
   aborted transfer. An implausible order ends the transfer in progress
   with TOO 34, then the list follows. The selection of a record with more
   than 255 channels or more than 65535 values per channel, which NOC and
-  NOE cannot announce, or with a channel too long to fit the class 1
-  queue (`QueueSize`) at once, is answered with TOO 34 and no transfer
-  starts (`TestDisturbanceTooLarge`, `TestDisturbanceSelectNOE`). NOE
-  announces the longest channel. A channel's ASDUs 30 and the ASDU 31
-  that ends it are queued all or none: when the queue has no room for
-  them now, the channel ends with TOO 37 and the controlling station may
-  request it again (`TestDisturbanceChannelQueuedWhole`).
+  NOE cannot announce, or, by default, with a channel too long to fit the
+  class 1 queue (`QueueSize`) at once, is answered with TOO 34 and no
+  transfer starts (`TestDisturbanceTooLarge`, `TestDisturbanceSelectNOE`).
+  NOE announces the longest channel. By default a channel's ASDUs 30 and
+  the ASDU 31 that ends it are queued all or none: when the queue has no
+  room for them now, the channel ends with TOO 37 and the controlling
+  station may request it again (`TestDisturbanceChannelQueuedWhole`).
+  With `Config.PaceChannels` the server queues a channel as the
+  controlling system's class 1 polls take the queue, so a channel longer
+  than `QueueSize` goes out whole; meanwhile other requests wait in the
+  server's input (DFC is set while it is more than half full), and a
+  reset drops the rest of the channel (`TestPacedChannel`,
+  `TestPacedChannelEnds`, `iec103/e2e.TestPacedChannels`). Tags are not
+  paced.
 
 ## Changes between releases
 

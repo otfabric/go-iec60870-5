@@ -88,7 +88,11 @@ type Config struct {
 
 	// OnEvent is called for every security event (a statistic with an
 	// event mnemonic was incremented). It is called without locks held,
-	// on the goroutine that drove the Endpoint, and must not block.
+	// on the goroutine that drove the Endpoint, and must not block. On the
+	// goroutines of an iec104 client or server, one that does not return
+	// normally is logged and closes that client or ends that session (see
+	// their WithSecurity); called from the application's own call of an
+	// Endpoint method, it is the application's.
 	OnEvent func(Event)
 
 	// Rand is the source of random data and keys; nil uses crypto/rand.

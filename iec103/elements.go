@@ -2,7 +2,10 @@
 
 package iec103
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 // FunctionType is the function type (FUN), the first octet of the
 // information object identifier (clause 7.2.5.1).
@@ -94,8 +97,13 @@ type MEA struct {
 }
 
 // MEAOf returns the measurand for v (clamped to the range of MVAL; a value
-// outside it sets OV, as clause 7.2.6.8 requires on overflow).
+// outside it sets OV, as clause 7.2.6.8 requires on overflow). NaN, which
+// is no value, returns MEA{Error: true}: ER set, "MVAL is not a valid
+// value" (clause 7.2.6.8), with Raw 0.
 func MEAOf(v float64) MEA {
+	if math.IsNaN(v) {
+		return MEA{Error: true}
+	}
 	r := v * 4096
 	switch {
 	case r > 4095:

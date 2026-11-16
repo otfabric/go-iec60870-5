@@ -223,7 +223,11 @@ func (s *Server) accept(conn net.Conn) {
 		return
 	}
 	if err := s.handshake(conn); err != nil {
-		s.log.Warn("connection rejected", "remote", remote.String(), "error", err)
+		if errors.Is(err, errTLSCallback) {
+			s.log.Warn("connection rejected", "remote", remote.String(), "reason", "tls.Config callback did not return normally")
+		} else {
+			s.log.Warn("connection rejected", "remote", remote.String(), "error", err)
+		}
 		_ = conn.Close()
 		return
 	}
@@ -256,6 +260,10 @@ func (s *Server) accept(conn net.Conn) {
 // errSessionLimit is why a connection beyond [WithMaxSessions] is closed.
 var errSessionLimit = errors.New("session limit reached")
 
+// errTLSCallback is why a connection is closed whose TLS handshake ended in
+// a callback of the tls.Config that did not return normally.
+var errTLSCallback = errors.New("tls.Config callback did not return normally")
+
 // handshake completes the TLS handshake of an accepted connection, bounded
 // by t0, so that a peer that never speaks cannot hold a session. With
 // [WithMaxSessions], a handshake in progress counts as a session: a
@@ -285,7 +293,15 @@ func (s *Server) handshake(conn net.Conn) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), s.opts.params.T0)
 	defer cancel()
-	if err := tc.HandshakeContext(ctx); err != nil {
+	// The handshake calls the callbacks of the tls.Config (GetCertificate,
+	// GetConfigForClient, VerifyPeerCertificate, VerifyConnection, ...) on
+	// this goroutine: one that does not return normally is logged with its
+	// stack and rejects only this connection, as the accept filter does.
+	var err error
+	if callback.Call(s.log, "tls.Config callback", func() { err = tc.HandshakeContext(ctx) }) != nil {
+		return errTLSCallback
+	}
+	if err != nil {
 		return fmt.Errorf("TLS handshake: %w", err)
 	}
 	return nil

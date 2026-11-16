@@ -14,6 +14,11 @@ import (
 	"github.com/otfabric/go-iec60870-5/iec104/internal/station"
 )
 
+// The stations of these tests serve the reference clients, which run in
+// containers and reach them through the Docker host gateway (see
+// runClientWith): they listen on all interfaces, not on loopback only.
+func init() { station.ListenAddr = "0.0.0.0:0" }
+
 // fixture is the simulated station the reference images are built with. The
 // tests read it from the image under test, so expectations follow the image
 // rather than a copy that could drift.

@@ -248,6 +248,20 @@ func TestGenericValues(t *testing.T) {
 	if v, _ := Ints(8, math.MinInt64).Int(0); v != math.MinInt64 {
 		t.Fatal(v)
 	}
+	// A value that needs more than size octets keeps its low size octets,
+	// as Uints and Ints document.
+	for _, c := range []struct {
+		v    Value
+		want []byte
+	}{
+		{Uints(DataUint, 1, 255, 256, 300), []byte{255, 0, 44}},
+		{Uints(DataUint, 2, 0x1FFFF), []byte{0xFF, 0xFF}},
+		{Ints(1, 127, -128, 128, -129), []byte{127, 0x80, 0x80, 127}},
+	} {
+		if !bytes.Equal(c.v.Data, c.want) {
+			t.Errorf("%v: data % X, want % X", c.v.GDD, c.v.Data, c.want)
+		}
+	}
 	if v, err := Float64s(0.25).Float(0); err != nil || v != 0.25 {
 		t.Fatal(v, err)
 	}
@@ -376,13 +390,25 @@ func TestMEA(t *testing.T) {
 		want MEA
 	}{
 		{0.5, MEA{Raw: 2048}},
+		{0, MEA{}},
 		{-1, MEA{Raw: -4096}},
+		{4095.0 / 4096, MEA{Raw: 4095}},
+		{1, MEA{Raw: 4095, Overflow: true}},
+		{-4097.0 / 4096, MEA{Raw: -4096, Overflow: true}},
 		{1.5, MEA{Raw: 4095, Overflow: true}},
 		{-1.5, MEA{Raw: -4096, Overflow: true}},
+		{math.Inf(1), MEA{Raw: 4095, Overflow: true}},
+		{math.Inf(-1), MEA{Raw: -4096, Overflow: true}},
+		// NaN is no value: ER, "MVAL is not a valid value" (clause 7.2.6.8).
+		{math.NaN(), MEA{Error: true}},
 	} {
 		if got := MEAOf(c.v); got != c.want {
-			t.Errorf("MEAOf(%v) = %+v", c.v, got)
+			t.Errorf("MEAOf(%v) = %+v, want %+v", c.v, got, c.want)
 		}
+	}
+	// The ER flag of MEAOf(NaN) reaches the wire.
+	if w := MEAOf(math.NaN()).word(); w != 2 || meaOf(w) != (MEA{Error: true}) {
+		t.Errorf("MEAOf(NaN) as a word: %04X", w)
 	}
 	if MEAOf(0.25).Value() != 0.25 {
 		t.Fatal(MEAOf(0.25).Value())

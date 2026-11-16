@@ -47,10 +47,15 @@ another FAN is skipped, a channel (ASDU 27) offered for another FAN ends
 the transfer with `iec103.ErrInvalid`, and a channel whose disturbance
 values (ASDU 30) carry another FAN is acknowledged negatively. ASDUs 30
 that add nothing to the record (no values, or another FAN) count against
-`Config.MaxResult` per channel. The IEC 103 server queues the ASDUs of a
-channel all or none, and ends a channel that does not fit its class 1
-queue with TOO 37; a record whose longest channel cannot fit the queue
-at all is refused at its selection with TOO 34. The IEC 102 client's
+`Config.MaxResult` per channel. By default the IEC 103 server queues the
+ASDUs of a channel all or none, and ends a channel that does not fit its
+class 1 queue with TOO 37; a record whose longest channel cannot fit the
+queue at all is refused at its selection with TOO 34. With
+`Config.PaceChannels` (IEC 103) or `Config.PaceAnswers` (IEC 102) the
+server queues a long channel or answer as the polls take the queue,
+within `QueueSize`, and takes no other request meanwhile: requests wait
+in its bounded input and are refused with NACK and DFC when it is full.
+The IEC 102 client's
 `ReadTotals` and `ReadSinglePoints` keep only the data of the requested
 record address. The
 IEC 103 server does not apply a time synchronization flagged invalid or

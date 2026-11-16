@@ -104,7 +104,7 @@ func newSession(srv *Server, conn net.Conn, grp *group) *Session {
 		},
 	}
 	if grp.assoc != nil {
-		s.sec = &route{set: grp.assoc, log: s.log, abort: s.abort}
+		s.sec = &route{set: grp.assoc, log: s.log, abort: s.abort, call: s.call}
 		cfg.Security, cfg.NotReady = s.sec, sec.ErrNotReady
 	}
 	s.link = link.New(conn, cfg)
@@ -210,7 +210,9 @@ func (s *Session) onASDU(raw []byte) {
 		return
 	}
 	if ep := s.Security(); ep != nil && !ep.PermitsASDU(a) {
-		ep.Refused(a.Type)
+		if !s.call(onEvent, func() { ep.Refused(a.Type) }) {
+			return // the security event handler ended the session
+		}
 		s.log.Warn("request not permitted by the roles of the controlling station", "asdu", a.String())
 		_ = s.Reply(a, asdu.CauseNotAuthorized, true)
 		return

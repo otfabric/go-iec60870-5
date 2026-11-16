@@ -58,6 +58,15 @@ func WithASDUParams(p asdu.Params) Option {
 // by IEC 62351-3. Set cfg.ClientAuth to tls.RequireAndVerifyClientCert to
 // authenticate controlling stations. It has no effect on [Server.Serve],
 // which uses the listener it is given.
+//
+// The server completes the handshake of each connection, within t0, on the
+// goroutine that accepted it, and the callbacks of the tls.Config
+// (GetCertificate, GetConfigForClient, VerifyPeerCertificate,
+// VerifyConnection and the others) run there: of cfg, or of the TLS
+// listener given to Serve. One that does not return normally is logged
+// with its stack and rejects only that connection, logged as "connection
+// rejected" with the reason "tls.Config callback did not return
+// normally", as for [WithAccept]; the server goes on serving the others.
 func WithTLS(cfg *tls.Config) Option {
 	return func(o *options) { o.tls = cfg }
 }
@@ -146,6 +155,11 @@ func WithStateHandler(f func(s *Session, state iec104.State, err error)) Option 
 // request that the roles of the association do not permit is answered with
 // a negative confirmation with cause [asdu.CauseNotAuthorized] before it
 // reaches the Handler. Security can be combined with [WithTLS].
+//
+// An association tells its sec.Config.OnEvent of security events on the
+// goroutine of the session that drives it. An OnEvent that does not return
+// normally there is logged with its stack and ends that session, as for
+// the state handler; the server goes on serving the others.
 func WithSecurity(newEndpoint func(group string, aim uint16) (*sec.Endpoint, error)) Option {
 	return func(o *options) { o.security = newEndpoint }
 }

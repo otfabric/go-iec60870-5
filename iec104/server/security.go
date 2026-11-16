@@ -132,6 +132,11 @@ type route struct {
 	log *logx.Logger
 	// abort ends the session; nil in tests that have none.
 	abort func()
+	// call is the session's Session.call, through which the calls of an
+	// association run that may tell the application's sec.Config.OnEvent
+	// of a security event; nil in tests that call the association
+	// directly.
+	call func(name string, f func()) bool
 
 	ep      atomic.Pointer[sec.Endpoint]
 	owner   any // the link, while data transfer is started and ep is nil
@@ -146,9 +151,31 @@ type route struct {
 // endpoint returns the association of the session, nil until it is bound.
 func (r *route) endpoint() *sec.Endpoint { return r.ep.Load() }
 
-func (r *route) Attach(owner any, now time.Time) [][]byte {
+// onEvent names the application's sec.Config.OnEvent in the log entry of
+// one that does not return normally.
+const onEvent = "sec.Config.OnEvent"
+
+// errOnEvent is what a call of the association reports whose
+// sec.Config.OnEvent did not return normally, which ends the session.
+var errOnEvent = fmt.Errorf("%w: %s did not return normally", iec104.ErrClosed, onEvent)
+
+// event runs f, a call of an association that may tell the application's
+// sec.Config.OnEvent of a security event, on the goroutine that drives the
+// association, through the session's call: an OnEvent that does not return
+// normally is logged with its stack and ends the session, and the server
+// goes on serving the others. It reports whether f returned normally.
+func (r *route) event(f func()) bool {
+	if r.call == nil {
+		f()
+		return true
+	}
+	return r.call(onEvent, f)
+}
+
+func (r *route) Attach(owner any, now time.Time) (out [][]byte) {
 	if ep := r.endpoint(); ep != nil {
-		return ep.Attach(owner, now)
+		r.event(func() { out = ep.Attach(owner, now) })
+		return out
 	}
 	r.owner, r.started = owner, true
 	return nil
@@ -156,7 +183,7 @@ func (r *route) Attach(owner any, now time.Time) [][]byte {
 
 func (r *route) Detach(owner any) {
 	if ep := r.endpoint(); ep != nil {
-		ep.Detach(owner)
+		r.event(func() { ep.Detach(owner) })
 		return
 	}
 	r.drop(owner)
@@ -165,12 +192,13 @@ func (r *route) Detach(owner any) {
 
 // drop gives up the association the session waits for.
 func (r *route) drop(owner any) {
-	if r.cand == nil {
+	cand := r.cand
+	if cand == nil {
 		return
 	}
-	r.cand.Detach(owner) // drops what the session's key management began
+	r.event(func() { cand.Detach(owner) }) // drops what the session's key management began
 	if r.candPending {
-		r.set.release(r.candAIM, r.cand)
+		r.set.release(r.candAIM, cand)
 	}
 	r.cand, r.candPending = nil, false
 }
@@ -184,9 +212,12 @@ func (r *route) Owns(owner any) bool {
 	return r.started && r.owner == owner
 }
 
-func (r *route) Receive(now time.Time, raw []byte) ([]byte, [][]byte, error) {
+func (r *route) Receive(now time.Time, raw []byte) (data []byte, out [][]byte, err error) {
 	if ep := r.endpoint(); ep != nil {
-		return ep.Receive(now, raw)
+		if !r.event(func() { data, out, err = ep.Receive(now, raw) }) {
+			return nil, nil, errOnEvent
+		}
+		return data, out, err
 	}
 	if aim, ok := sec.AssociationOf(raw, r.set.params); ok && (r.cand == nil || aim != r.candAIM) {
 		// The first message, or one that names another controlling station.
@@ -207,7 +238,11 @@ func (r *route) Receive(now time.Time, raw []byte) ([]byte, [][]byte, error) {
 		}
 		return nil, nil, errUnbound
 	}
-	data, out, bound, err := secbind.ReceiveAs(r.cand, r.owner, now, raw)
+	var bound bool
+	cand := r.cand
+	if !r.event(func() { data, out, bound, err = secbind.ReceiveAs(cand, r.owner, now, raw) }) {
+		return nil, nil, errOnEvent
+	}
 	if bound {
 		ep := r.cand
 		if r.candPending {
@@ -221,18 +256,21 @@ func (r *route) Receive(now time.Time, raw []byte) ([]byte, [][]byte, error) {
 	return data, out, err
 }
 
-func (r *route) Protect(now time.Time, data []byte) ([][]byte, error) {
+func (r *route) Protect(now time.Time, data []byte) (out [][]byte, err error) {
 	if ep := r.endpoint(); ep != nil {
-		return ep.Protect(now, data)
+		if !r.event(func() { out, err = ep.Protect(now, data) }) {
+			return nil, errOnEvent
+		}
+		return out, err
 	}
 	return nil, sec.ErrNotReady
 }
 
-func (r *route) Tick(now time.Time) [][]byte {
+func (r *route) Tick(now time.Time) (out [][]byte) {
 	if ep := r.endpoint(); ep != nil {
-		return ep.Tick(now)
+		r.event(func() { out = ep.Tick(now) })
 	}
-	return nil
+	return out
 }
 
 func (r *route) Deadline() time.Time {

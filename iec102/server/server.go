@@ -101,14 +101,32 @@ type Config struct {
 	Handler Handler
 	// QueueSize bounds the class 2 queue. Zero means [DefaultQueueSize].
 	QueueSize int
+	// PaceAnswers makes the server queue the answers it builds itself (to
+	// C_RD_NA_2, C_TI_NA_2 and the reads of integrated totals and single
+	// points, refusals included) as the controlling station polls class 2:
+	// while the queue is full, the server waits for a poll to take an ASDU
+	// before it queues the next, so an answer longer than QueueSize goes
+	// out whole, its termination included. Meanwhile it serves no other
+	// request: up to 16 wait, and more are refused with NACK and DFC set.
+	// A reset of remote link, which empties the queue, ends the wait and
+	// drops the rest of the answer; Close ends it too. Other ASDUs sent
+	// meanwhile ([Server.Send], [Server.Mirror], the Handler's) are not
+	// paced and can find the queue full ([ErrQueueFull]).
+	//
+	// Off by default: an answer is queued until the queue is full, and the
+	// rest of it, the termination included, is dropped and logged as
+	// "answer not queued".
+	PaceAnswers bool
 	// OnState is called with each change of the link state: from the
 	// station's link goroutine on a reset of remote link, and from Close
 	// for StateClosed. The calls come one at a time and in the order of
 	// the changes, StateClosed last: Close waits for a call in progress
-	// before it reports StateClosed. It must return quickly. It may call
-	// Close, which then does not wait for the link goroutine. An OnState
-	// that does not return normally is logged and closes the server, as
-	// for the Handler.
+	// before it reports StateClosed. It must return quickly: OnState for
+	// StateUp runs on the link's reader under the lock of the secondary
+	// station (link.Secondary), before the reset is acknowledged, so a
+	// slow OnState delays the link's answers. It may call Close, which then
+	// does not wait for the link goroutine. An OnState that does not return
+	// normally is logged and closes the server, as for the Handler.
 	OnState func(s iec102.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger
@@ -129,6 +147,12 @@ type Server struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	// With Config.PaceAnswers: room is signalled when a poll takes an ASDU
+	// of the queue or a reset of remote link empties it; resets counts the
+	// resets, under mu.
+	room   chan struct{}
+	resets uint64
 
 	closeOnce sync.Once
 	closeErr  error
@@ -169,6 +193,7 @@ func New(rw io.ReadWriter, cfg Config) (*Server, error) {
 		budget:    min(fp.MaxData(), iec102.MaxSize),
 		in:        make(chan []byte, 16),
 		notifying: make(chan struct{}, 1),
+		room:      make(chan struct{}, 1),
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	lc := cfg.Link
@@ -293,12 +318,9 @@ func (s *Server) setState(st iec102.State, err error) {
 
 // Send queues a monitor-direction ASDU as class 2 data.
 func (s *Server) Send(a *iec102.ASDU) error {
-	raw, err := a.Encode(s.cfg.Params)
+	raw, err := s.encode(a)
 	if err != nil {
 		return err
-	}
-	if len(raw) > s.budget {
-		return fmt.Errorf("%w: %d octets, the link carries %d", iec102.ErrTooLong, len(raw), s.budget)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -312,12 +334,91 @@ func (s *Server) Send(a *iec102.ASDU) error {
 	return nil
 }
 
+// encode encodes a monitor-direction ASDU that one frame carries.
+func (s *Server) encode(a *iec102.ASDU) ([]byte, error) {
+	raw, err := a.Encode(s.cfg.Params)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > s.budget {
+		return nil, fmt.Errorf("%w: %d octets, the link carries %d", iec102.ErrTooLong, len(raw), s.budget)
+	}
+	return raw, nil
+}
+
 // Mirror queues the request req with cause c: a confirmation (7), a
 // termination (10) or a refusal (13..18, or with the P/N bit).
 func (s *Server) Mirror(req *iec102.ASDU, c iec102.Cause) error {
 	m := *req
 	m.Cause = c
 	return s.Send(&m)
+}
+
+// errAbandoned is why the rest of a paced answer is not queued: a reset of
+// remote link emptied the queue while the answer waited for room.
+var errAbandoned = errors.New("iec102: the link was reset, the rest of the answer is dropped")
+
+// answer is the server's own answer to one request.
+type answer struct {
+	s      *Server
+	resets uint64 // the resets of remote link when the request was taken
+}
+
+func (s *Server) newAnswer() answer {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return answer{s: s, resets: s.resets}
+}
+
+// send queues a as Send does, or, with Config.PaceAnswers, waits for room
+// in the queue while it is full.
+func (w answer) send(a *iec102.ASDU) error {
+	s := w.s
+	if !s.cfg.PaceAnswers {
+		return s.Send(a)
+	}
+	raw, err := s.encode(a)
+	if err != nil {
+		return err
+	}
+	for {
+		s.mu.Lock()
+		switch {
+		case s.state == iec102.StateClosed:
+			s.mu.Unlock()
+			return iec102.ErrClosed
+		case s.resets != w.resets:
+			s.mu.Unlock()
+			return errAbandoned
+		case len(s.queue) < s.cfg.QueueSize:
+			s.queue = append(s.queue, raw)
+			s.mu.Unlock()
+			return nil
+		}
+		s.mu.Unlock()
+		select {
+		case <-s.room:
+		case <-s.ctx.Done():
+			return iec102.ErrClosed
+		}
+	}
+}
+
+// mirror is Mirror for the server's own answer.
+func (w answer) mirror(req *iec102.ASDU, c iec102.Cause) error {
+	m := *req
+	m.Cause = c
+	return w.send(&m)
+}
+
+// roomMade tells a paced answer that waits that the queue has room.
+func (s *Server) roomMade() {
+	if s.cfg.PaceAnswers {
+		select {
+		case s.room <- struct{}{}:
+		default:
+		}
+	}
 }
 
 // linkUser is the server as the link's SecondaryHandler.
@@ -343,6 +444,7 @@ func (u *linkUser) Class2() []byte {
 	}
 	b := u.queue[0]
 	u.queue = u.queue[1:]
+	(*Server)(u).roomMade()
 	return b
 }
 
@@ -351,7 +453,9 @@ func (u *linkUser) Reset(user bool) {
 	if !user {
 		s.mu.Lock()
 		s.queue = nil
+		s.resets++
 		s.mu.Unlock()
+		s.roomMade()
 		s.onReader.Store(callback.Goroutine())
 		s.setState(iec102.StateUp, nil)
 		s.onReader.Store(0)
@@ -392,46 +496,47 @@ func (s *Server) work() {
 }
 
 func (s *Server) serve(a *iec102.ASDU) error {
+	w := s.newAnswer()
 	if a.CommonAddr != s.cfg.CommonAddr {
-		return s.Mirror(a, iec102.CauseUnknownRecordAddr)
+		return w.mirror(a, iec102.CauseUnknownRecordAddr)
 	}
 	switch b := a.Body.(type) {
 	case iec102.Read:
 		switch b.T {
 		case iec102.C_RD_NA_2:
-			return s.Send(iec102.New(iec102.CauseRequest, a.CommonAddr, a.Record, s.cfg.ProductSpec))
+			return w.send(iec102.New(iec102.CauseRequest, a.CommonAddr, a.Record, s.cfg.ProductSpec))
 		case iec102.C_TI_NA_2:
 			t := iec102.TimeBOf(s.cfg.Clock(), s.cfg.Params.Location)
-			return s.Send(iec102.New(iec102.CauseRequest, a.CommonAddr, a.Record, iec102.SystemTime{Time: t}))
+			return w.send(iec102.New(iec102.CauseRequest, a.CommonAddr, a.Record, iec102.SystemTime{Time: t}))
 		case iec102.C_SP_NA_2, iec102.C_SP_NB_2:
-			return s.serveSinglePoints(a, b)
+			return s.serveSinglePoints(w, a, b)
 		default:
-			return s.serveTotals(a, b)
+			return s.serveTotals(w, a, b)
 		}
 	}
 	if s.cfg.Handler == nil {
-		return s.Mirror(a, iec102.CauseUnknownType)
+		return w.mirror(a, iec102.CauseUnknownType)
 	}
 	s.cfg.Handler.HandleASDU(s, a)
 	return nil
 }
 
-func (s *Server) serveTotals(a *iec102.ASDU, q iec102.Read) error {
+func (s *Server) serveTotals(w answer, a *iec102.ASDU, q iec102.Read) error {
 	periods, cause := s.cfg.Store.selectTotals(a.Record, q)
 	if cause != 0 {
-		return s.Mirror(a, cause)
+		return w.mirror(a, cause)
 	}
-	if err := s.Mirror(a, iec102.CauseActivationCon); err != nil {
+	if err := w.mirror(a, iec102.CauseActivationCon); err != nil {
 		return err
 	}
 	for _, p := range periods {
 		for _, part := range s.split(p) {
-			if err := s.Send(iec102.New(iec102.CauseRequest, a.CommonAddr, a.Record, part)); err != nil {
+			if err := w.send(iec102.New(iec102.CauseRequest, a.CommonAddr, a.Record, part)); err != nil {
 				return err
 			}
 		}
 	}
-	return s.Mirror(a, iec102.CauseActivationTerm)
+	return w.mirror(a, iec102.CauseActivationTerm)
 }
 
 // split cuts a period into bodies that fit one frame.
@@ -454,20 +559,20 @@ func (s *Server) split(p iec102.IntegratedTotals) []iec102.IntegratedTotals {
 	return out
 }
 
-func (s *Server) serveSinglePoints(a *iec102.ASDU, q iec102.Read) error {
+func (s *Server) serveSinglePoints(w answer, a *iec102.ASDU, q iec102.Read) error {
 	pts, ok := s.cfg.Store.selectPoints(a.Record, q)
 	if !ok {
-		return s.Mirror(a, iec102.CauseUnknownRecordAddr)
+		return w.mirror(a, iec102.CauseUnknownRecordAddr)
 	}
-	if err := s.Mirror(a, iec102.CauseActivationCon); err != nil {
+	if err := w.mirror(a, iec102.CauseActivationCon); err != nil {
 		return err
 	}
 	n := min((s.budget-s.cfg.Params.HeaderSize())/(2+iec102.SizeTimeB), 127)
 	for i := 0; i < len(pts); i += n {
 		body := iec102.SinglePoints{Points: pts[i:min(i+n, len(pts))]}
-		if err := s.Send(iec102.New(iec102.CauseRequest, a.CommonAddr, a.Record, body)); err != nil {
+		if err := w.send(iec102.New(iec102.CauseRequest, a.CommonAddr, a.Record, body)); err != nil {
 			return err
 		}
 	}
-	return s.Mirror(a, iec102.CauseActivationTerm)
+	return w.mirror(a, iec102.CauseActivationTerm)
 }

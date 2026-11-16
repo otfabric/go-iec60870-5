@@ -3,6 +3,7 @@
 package server
 
 import (
+	"errors"
 	"math"
 
 	"github.com/otfabric/go-iec60870-5/iec103"
@@ -110,10 +111,12 @@ func (s *Server) disturbance(a *iec103.ASDU, o iec103.DisturbanceOrder) {
 			// record that does not fit them cannot be announced. NOE is
 			// one number for every channel: the longest channel's, so that
 			// no channel carries values beyond the announced count (a
-			// shorter channel is acknowledged negatively). A channel that
-			// does not fit the class 1 queue at once (its ASDUs 30 and the
-			// ASDU 31 that ends it) cannot be sent either.
-			if !ok || noc > math.MaxUint8 || noe > math.MaxUint16 || channelASDUs(noe) > s.cfg.QueueSize {
+			// shorter channel is acknowledged negatively). Unless paced
+			// (Config.PaceChannels), a channel that does not fit the class 1
+			// queue at once (its ASDUs 30 and the ASDU 31 that ends it)
+			// cannot be sent either.
+			tooLong := !s.cfg.PaceChannels && channelASDUs(noe) > s.cfg.QueueSize
+			if !ok || noc > math.MaxUint8 || noe > math.MaxUint16 || tooLong {
 				if ok {
 					s.log.Warn("disturbance record not announced: NOC or NOE does not fit",
 						"fan", o.FAN, "channels", noc, "values", noe, "queue", s.cfg.QueueSize)
@@ -154,7 +157,7 @@ func (s *Server) disturbance(a *iec103.ASDU, o iec103.DisturbanceOrder) {
 		s.sendTags(fun, rec)
 		s.end(fun, iec103.TOOEndTags, rec.TOV, rec.FAN, iec103.ACCGlobal)
 	case iec103.TOORequestChannel:
-		s.sendChannel(fun, rec, o.ACC)
+		s.sendChannel(fun, d, o.ACC)
 	case iec103.TOOAbortData:
 		s.setDist(nil)
 		s.end(fun, iec103.TOOEndDataAbortCtrl, rec.TOV, rec.FAN, iec103.ACCGlobal)
@@ -210,13 +213,15 @@ func (s *Server) sendTags(fun iec103.FunctionType, rec *iec103.Disturbance) {
 // 30 of at most [iec103.MaxValues] and the ASDU 31 that ends it.
 func channelASDUs(n int) int { return (n+iec103.MaxValues-1)/iec103.MaxValues + 1 }
 
-// sendChannel sends the values of channel acc in ASDUs 30 of at most
-// [iec103.MaxValues], then the end of the channel (clause 7.4.7). The
-// ASDUs are queued together: when the class 1 queue has no room for all of
-// them, none is queued and the channel ends aborted by the equipment (TOO
-// 37), which the controlling station acknowledges negatively and may
-// request again.
-func (s *Server) sendChannel(fun iec103.FunctionType, rec *iec103.Disturbance, acc uint8) {
+// sendChannel sends the values of channel acc of the transfer d in ASDUs
+// 30 of at most [iec103.MaxValues], then the end of the channel (clause
+// 7.4.7). The ASDUs are queued together: when the class 1 queue has no
+// room for all of them, none is queued and the channel ends aborted by the
+// equipment (TOO 37), which the controlling station acknowledges
+// negatively and may request again. With Config.PaceChannels they are
+// queued one after the other as the polls make room (paceChannel).
+func (s *Server) sendChannel(fun iec103.FunctionType, d *distState, acc uint8) {
+	rec := d.rec
 	for _, ch := range rec.Channels {
 		if ch.ACC != acc {
 			continue
@@ -227,6 +232,10 @@ func (s *Server) sendChannel(fun iec103.FunctionType, rec *iec103.Disturbance, a
 			bodies = append(bodies, iec103.DisturbanceValues{TOV: rec.TOV, FAN: rec.FAN, ACC: acc, NFE: uint16(i), Values: ch.Values[i:j]})
 		}
 		bodies = append(bodies, iec103.EndOfTransmission{TOO: iec103.TOOEndChannel, TOV: rec.TOV, FAN: rec.FAN, ACC: acc})
+		if s.cfg.PaceChannels {
+			s.paceChannel(fun, d, acc, bodies)
+			return
+		}
 		if err := s.queueAll(fun, bodies); err != nil {
 			s.log.Warn("disturbance channel not queued", "fan", rec.FAN, "acc", acc, "asdus", len(bodies), "error", err)
 			s.end(fun, iec103.TOOEndChannelAbortPrt, rec.TOV, rec.FAN, acc)
@@ -236,15 +245,24 @@ func (s *Server) sendChannel(fun iec103.FunctionType, rec *iec103.Disturbance, a
 	s.end(fun, iec103.TOOEndChannelAbortPrt, rec.TOV, rec.FAN, acc)
 }
 
-// queueAll queues the disturbance data ASDUs as class 1 data, all or none.
-func (s *Server) queueAll(fun iec103.FunctionType, bodies []iec103.Body) error {
+// encodeAll encodes the disturbance data ASDUs.
+func (s *Server) encodeAll(fun iec103.FunctionType, bodies []iec103.Body) ([]queued, error) {
 	raws := make([]queued, 0, len(bodies))
 	for _, b := range bodies {
 		raw, err := iec103.New(iec103.CauseDisturbanceData, s.ca, fun, 0, b).AppendIn(nil, s.cfg.Location)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		raws = append(raws, queued{raw: raw, cycle: noCycle})
+	}
+	return raws, nil
+}
+
+// queueAll queues the disturbance data ASDUs as class 1 data, all or none.
+func (s *Server) queueAll(fun iec103.FunctionType, bodies []iec103.Body) error {
+	raws, err := s.encodeAll(fun, bodies)
+	if err != nil {
+		return err
 	}
 	if s.ctx.Err() != nil {
 		return iec103.ErrClosed
@@ -256,4 +274,68 @@ func (s *Server) queueAll(fun iec103.FunctionType, bodies []iec103.Body) error {
 	}
 	s.class[0] = append(s.class[0], raws...)
 	return nil
+}
+
+// errAbandoned is why the rest of a paced channel is not queued: a reset
+// ended the transfer while the channel waited for room.
+var errAbandoned = errors.New("iec103: the transfer was ended by a reset, the rest of the channel is dropped")
+
+// paceChannel queues the ASDUs of channel acc of the transfer d as the
+// polls make room (Config.PaceChannels), and logs why it stopped short.
+func (s *Server) paceChannel(fun iec103.FunctionType, d *distState, acc uint8, bodies []iec103.Body) {
+	raws, err := s.encodeAll(fun, bodies)
+	n := 0
+	if err == nil {
+		n, err = s.queuePaced(d, raws)
+	}
+	switch {
+	case err == nil, errors.Is(err, iec103.ErrClosed):
+	case errors.Is(err, errAbandoned):
+		s.log.Info("disturbance channel ended by a reset", "fan", d.rec.FAN, "acc", acc, "queued", n, "asdus", len(bodies))
+	default:
+		s.log.Warn("disturbance channel not queued", "fan", d.rec.FAN, "acc", acc, "asdus", len(bodies), "error", err)
+		s.end(fun, iec103.TOOEndChannelAbortPrt, d.rec.TOV, d.rec.FAN, acc)
+	}
+}
+
+// queuePaced queues raws as class 1 data in order, waiting for room while
+// the class 1 queue is full, and returns how many it queued. It stops when
+// d is no longer the transfer in progress (a reset ended it), with
+// errAbandoned, and when the server closes, with [iec103.ErrClosed].
+func (s *Server) queuePaced(d *distState, raws []queued) (int, error) {
+	for i, q := range raws {
+		for {
+			if s.ctx.Err() != nil {
+				return i, iec103.ErrClosed
+			}
+			s.mu.Lock()
+			if s.dist != d {
+				s.mu.Unlock()
+				return i, errAbandoned
+			}
+			if len(s.class[0]) < s.cfg.QueueSize {
+				s.class[0] = append(s.class[0], q)
+				s.mu.Unlock()
+				break
+			}
+			s.mu.Unlock()
+			select {
+			case <-s.room:
+			case <-s.ctx.Done():
+				return i, iec103.ErrClosed
+			}
+		}
+	}
+	return len(raws), nil
+}
+
+// roomMade tells a paced channel that waits that the class 1 queue has
+// room, or that a reset ended its transfer.
+func (s *Server) roomMade() {
+	if s.cfg.PaceChannels {
+		select {
+		case s.room <- struct{}{}:
+		default:
+		}
+	}
 }

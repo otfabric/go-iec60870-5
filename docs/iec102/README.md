@@ -127,7 +127,16 @@ first), `AddSinglePoints(record, ...)` adds events. It answers C_RD_NA_2
 and C_TI_NA_2 itself and runs C_CI_* and C_SP_* reads with confirmation,
 data and termination, splitting periods over several frames where needed.
 Other requests go to the `Handler`, which answers with `Send` and `Mirror`.
-All answers are class 2 data. The `Handler`, `Clock` and `OnState` may call
+All answers are class 2 data. By default an answer the server builds
+itself is queued until the class 2 queue (`QueueSize`) is full, and the
+rest of it, the termination included, is dropped (logged "answer not
+queued"). With `Config.PaceAnswers` the server queues such an answer as
+the controlling station's class 2 polls take the queue, so it goes out
+whole however long it is; meanwhile it serves no other request (up to
+16 wait, more are refused with NACK and DFC), a reset of remote link
+drops the rest of the answer, and `Send`, `Mirror` and the `Handler` are
+not paced (`TestPacedAnswer`, `TestPacedAnswerEnds`,
+`iec102/e2e.TestPacedAnswers`). The `Handler`, `Clock` and `OnState` may call
 `Close`, which then returns at once; one that does not return normally is
 logged with its stack and stops the server, and `Err` reports it.
 `OnState` is called one change at a time and in order, `StateClosed`

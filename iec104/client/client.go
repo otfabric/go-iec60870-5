@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/otfabric/go-iec60870-5/asdu"
 	iec104 "github.com/otfabric/go-iec60870-5/iec104"
@@ -402,7 +403,7 @@ func (c *Client) security() link.Security {
 	if c.opts.security == nil {
 		return nil
 	}
-	return c.opts.security
+	return clientSecurity{c: c, ep: c.opts.security}
 }
 
 // connectFailed is what Connect reports for err: ErrClosed when Close stopped
@@ -492,6 +493,7 @@ func (c *Client) isClosed() bool {
 // connection nor an error.
 var errNoConnection = errors.New("the dialer returned no connection")
 
+// dial returns a connection, or nil and an error that is never nil.
 func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 	d := c.opts.dialer
 	if d == nil {
@@ -500,7 +502,9 @@ func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 	var conn net.Conn
 	var err error
 	if !c.call("Dialer", func() { conn, err = d.DialContext(ctx, "tcp", c.addr) }) {
-		return nil, c.failure()
+		// The failure of the Dialer, or ErrClosed when Close came first
+		// and no failure was recorded.
+		return nil, c.closedErr()
 	}
 	if err != nil {
 		return nil, err
@@ -516,13 +520,25 @@ func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 		cfg = cfg.Clone()
 		cfg.ServerName, _, _ = net.SplitHostPort(c.addr)
 	}
+	// The handshake calls the callbacks of the application's tls.Config
+	// (GetClientCertificate, VerifyPeerCertificate, VerifyConnection, ...)
+	// on this goroutine.
 	tc := tls.Client(conn, cfg)
-	if err := tc.HandshakeContext(ctx); err != nil {
+	var herr error
+	if !c.call(tlsCallbacks, func() { herr = tc.HandshakeContext(ctx) }) {
 		_ = conn.Close()
-		return nil, err
+		return nil, c.closedErr()
+	}
+	if herr != nil {
+		_ = conn.Close()
+		return nil, herr
 	}
 	return tc, nil
 }
+
+// tlsCallbacks names the callbacks of a tls.Config given to [WithTLS] in
+// the log entry and the error of one that does not return normally.
+const tlsCallbacks = "tls.Config callback"
 
 // Close closes the connection and stops reconnecting. Pending requests fail
 // with [iec104.ErrClosed]. When Close returns the [Handler] and the state
@@ -681,6 +697,53 @@ func (cm clientMetrics) OnFrameReceived(remote net.Addr, f apci.Frame, size int)
 func (cm clientMetrics) OnDecodeError(remote net.Addr, err error) {
 	cm.c.call("Metrics.OnDecodeError", func() { cm.m.OnDecodeError(remote, err) })
 }
+
+// onEvent names the application's sec.Config.OnEvent in the log entry and
+// the error of one that does not return normally.
+const onEvent = "sec.Config.OnEvent"
+
+// clientSecurity is the security endpoint of the client ([WithSecurity]) as
+// the client's links use it. The endpoint tells the application's
+// sec.Config.OnEvent of security events on the goroutine that drives it,
+// the link's: the calls that may do so run through Client.call.
+type clientSecurity struct {
+	c  *Client
+	ep *sec.Endpoint
+}
+
+func (cs clientSecurity) Attach(owner any, now time.Time) (out [][]byte) {
+	cs.c.call(onEvent, func() { out = cs.ep.Attach(owner, now) })
+	return out
+}
+
+func (cs clientSecurity) Detach(owner any) {
+	cs.c.call(onEvent, func() { cs.ep.Detach(owner) })
+}
+
+func (cs clientSecurity) Owns(owner any) bool { return cs.ep.Owns(owner) }
+
+func (cs clientSecurity) Receive(now time.Time, raw []byte) (data []byte, out [][]byte, err error) {
+	if !cs.c.call(onEvent, func() { data, out, err = cs.ep.Receive(now, raw) }) {
+		return nil, nil, cs.c.closedErr()
+	}
+	return data, out, err
+}
+
+func (cs clientSecurity) Protect(now time.Time, data []byte) (out [][]byte, err error) {
+	if !cs.c.call(onEvent, func() { out, err = cs.ep.Protect(now, data) }) {
+		return nil, cs.c.closedErr()
+	}
+	return out, err
+}
+
+func (cs clientSecurity) Tick(now time.Time) (out [][]byte) {
+	cs.c.call(onEvent, func() { out = cs.ep.Tick(now) })
+	return out
+}
+
+func (cs clientSecurity) Deadline() time.Time { return cs.ep.Deadline() }
+
+func (cs clientSecurity) Changed() <-chan struct{} { return cs.ep.Changed() }
 
 // failure returns why a callback closed the client, nil if none did.
 func (c *Client) failure() error {

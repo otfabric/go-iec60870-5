@@ -114,6 +114,25 @@ type Config struct {
 	// QueueSize bounds each of the class 1 and class 2 queues. Zero means
 	// [DefaultQueueSize]. Sending to a full queue returns [ErrQueueFull].
 	QueueSize int
+	// PaceChannels makes the server queue the ASDUs of a disturbance
+	// channel (its ASDUs 30 and the ASDU 31 that ends it, clause 7.4.7) as
+	// the controlling system polls class 1: while the class 1 queue is
+	// full, the server waits for a poll to take an ASDU before it queues
+	// the next, so a channel longer than QueueSize goes out whole, and a
+	// record whose longest channel does not fit the queue is announced at
+	// its selection. Meanwhile it takes no other control-direction ASDU:
+	// they wait in its input, and DFC is set while that is more than half
+	// full (clause 6.3). A reset of the communication unit or of the FCB
+	// ends the transfer (clause 7.4.1) and the wait: the rest of the channel
+	// is dropped, logged at Info "disturbance channel ended by a reset".
+	// Close ends the wait too. Tags (ASDU 29) and other class 1 data sent
+	// meanwhile are not paced and can find the queue full ([ErrQueueFull]).
+	//
+	// Off by default: a channel is queued all or none, and one that does
+	// not fit the class 1 queue now ends with TOO 37; the selection of a
+	// record whose longest channel cannot fit the queue at all is answered
+	// with TOO 34.
+	PaceChannels bool
 	// Location is the time zone of the time tags; nil means UTC.
 	Location *time.Location
 	// SyncTimeout is how long time tags stay valid after the last time
@@ -143,10 +162,12 @@ type Config struct {
 	// station's link goroutine on a reset, and from Close for
 	// StateClosed. The calls come one at a time and in the order of the
 	// changes, StateClosed last: Close waits for a call in progress before
-	// it reports StateClosed. It must return quickly. It may call Close,
-	// which then does not wait for the link goroutine. An OnState that
-	// does not return normally is logged and closes the server, as for the
-	// Handler.
+	// it reports StateClosed. It must return quickly: OnState for StateUp
+	// runs on the link's reader under the lock of the secondary station
+	// (link.Secondary), before the reset is acknowledged, so a slow OnState
+	// delays the link's answers. It may call Close, which then does not
+	// wait for the link goroutine. An OnState that does not return normally
+	// is logged and closes the server, as for the Handler.
 	OnState func(s iec103.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger
@@ -193,6 +214,10 @@ type Server struct {
 	onReader atomic.Uint64 // the link goroutine, while it calls OnState
 	failMu   sync.Mutex
 	failed   error // why a callback stopped the server
+
+	// room is signalled, with Config.PaceChannels, when a poll takes an
+	// ASDU of class 1 or a reset ends the disturbance data transfer.
+	room chan struct{}
 
 	// notifying is held while a change of the link state is made and told,
 	// so that OnState is called one change at a time and in their order.
@@ -261,6 +286,7 @@ func New(rw io.ReadWriter, cfg Config) (*Server, error) {
 		log:       logx.New(cfg.Logger, "iec103.server", "link", cfg.LinkAddr),
 		in:        make(chan inbound, 64),
 		notifying: make(chan struct{}, 1),
+		room:      make(chan struct{}, 1),
 	}
 	if s.ca == 0 {
 		s.ca = cfg.LinkAddr
@@ -794,6 +820,7 @@ func (s *Server) reset(clear bool) {
 	s.dist = nil
 	s.cmdPending = false
 	s.mu.Unlock()
+	s.roomMade()
 	s.onReader.Store(callback.Goroutine())
 	s.setState(iec103.StateUp, nil)
 	s.onReader.Store(0)
@@ -825,6 +852,9 @@ func (u secondaryUser) pop(i int) []byte {
 	}
 	d := q[0]
 	u.s.class[i] = q[1:]
+	if i == 0 {
+		u.s.roomMade()
+	}
 	return d.raw
 }
 

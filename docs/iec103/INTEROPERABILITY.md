@@ -163,7 +163,7 @@ sends it (vitusdong does not).
 | 7.4.7 | disturbance data: list, select, data, tags, channels, acknowledgements, end, updated list | `DisturbanceList`, `Disturbance` (NFE/NOE check, initial tags at position 0, NOC check, negative ack; the record holds at most the NOC channels of NOE values the ASDU 26 announced (7.2.6.10, 7.2.6.11): a value or channel beyond them ends the transfer at once with `ErrInvalid`, no further order sent; one fault at a time: an ASDU 31 of another FAN is skipped, a channel (ASDU 27) of another FAN ends the transfer with `ErrInvalid`, a channel whose ASDUs 30 carry another FAN is acknowledged negatively; ASDUs 30 that add nothing count against `MaxResult` per channel) | built in from a `DisturbanceSource` (NOE is the longest channel's; a channel's ASDUs 30 and 31 are queued all or none) | e2e (`TestDisturbanceTransfer`, `TestDisturbanceOtherFAN`, `TestDisturbanceEmptyValues`, `TestDisturbanceChannelQueuedWhole`, `TestDisturbanceIncomplete`, `TestDisturbanceOrders`, `TestDisturbanceClientAcks`, `TestDisturbanceWithinAnnounced`, lossy line), independent (server: the whole procedure with Open103, description, tags and ratings as the fixture; the values not, Open103 known bug; client: none) |
 | 7.4.7 | ASDU 23 after the start of a GI (cause 31) and after a completed or aborted transfer | - | list with the function type of the equipment after the GI termination, after the final acknowledgement and after TOO 33/34 | e2e (`TestListAfterGIHasEquipmentFun`, `TestDisturbanceAbortByEquipment`), independent (after the GI: Open103 starts its transfer from it) |
 | 7.4.7 | abortion by the control system (TOO 3, 9, 17) | not sent | answered with TOO 33, 36, 39 | e2e (`TestDisturbanceOrders`) |
-| 7.4.7 | abortion by the equipment (TOO 34, 37, 40); every ASDU 31 acknowledged | ASDU 25 TOO 65, 67, 69; after 37 and 40 the transfer goes on, 34 ends it (`ErrAborted`) | TOO 34 for implausible orders ends the transfer and the list follows; the selection of a record whose NOC (> 255) or NOE (> 65535) does not fit its field, or whose longest channel cannot fit the class 1 queue (`QueueSize`), is answered with TOO 34; TOO 37 for an unknown channel and for a channel that does not fit the class 1 queue now | e2e (`TestDisturbanceClientAcks`, `TestDisturbanceAbortByEquipment`, `TestDisturbanceTooLarge`) |
+| 7.4.7 | abortion by the equipment (TOO 34, 37, 40); every ASDU 31 acknowledged | ASDU 25 TOO 65, 67, 69; after 37 and 40 the transfer goes on, 34 ends it (`ErrAborted`) | TOO 34 for implausible orders ends the transfer and the list follows; the selection of a record whose NOC (> 255) or NOE (> 65535) does not fit its field, or, by default, whose longest channel cannot fit the class 1 queue (`QueueSize`), is answered with TOO 34; TOO 37 for an unknown channel and, by default, for a channel that does not fit the class 1 queue now; with `Config.PaceChannels` a channel is queued as the class 1 polls take the queue | e2e (`TestDisturbanceClientAcks`, `TestDisturbanceAbortByEquipment`, `TestDisturbanceTooLarge`, `TestPacedChannels`) |
 | 7.4.8.5 | read headings (240), read group (241) | `ReadHeadings`, `ReadGroup` | `GenericAnswer` | annex, e2e |
 | 7.4.8.6 | read directory (243, ASDU 11), read entry (244), write entry 248/249/250/251 | `ReadDirectory`, `ReadEntry`, `GenericWrite` | `GenericIdentAnswer`, `GenericAnswer` | annex, e2e (`TestGenericServices`) |
 | 7.4.8.6.3 | write over several ASDUs: INF 248 with CONT = 1, the last INF 250 with CONT = 0, one RII, COUNT toggling (figure 17) | `GenericWrite` (250, 251), `BeginWrite` / `StagedWrite` | application (`GenericAnswer`) | e2e (`TestGenericWriteExecuteSplit`) |
@@ -227,11 +227,14 @@ the code.
     number for every channel of a record. The server announces the
     longest channel's, so that no channel carries values beyond it; this
     module's client acknowledges a shorter channel negatively (TOO 67).
-15. **A channel that does not fit the send queue** (7.4.7): the server
-    queues a channel's ASDUs 30 and its ASDU 31 all or none. When the
-    class 1 queue has no room for all of them it ends the channel with
-    TOO 37 (aborted by the protection equipment), which the controlling
-    station acknowledges negatively and may request again.
+15. **A channel that does not fit the send queue** (7.4.7): by default
+    the server queues a channel's ASDUs 30 and its ASDU 31 all or none.
+    When the class 1 queue has no room for all of them it ends the channel
+    with TOO 37 (aborted by the protection equipment), which the
+    controlling station acknowledges negatively and may request again.
+    With `server.Config.PaceChannels` it queues the channel as the class 1
+    polls take the queue instead, so the channel goes out whole however
+    long it is.
 
 ## Not implemented
 
