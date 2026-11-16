@@ -352,7 +352,7 @@ WithEventQueue sets how many events each redundancy group buffers for [Server.En
 func WithLogger(l iec60870.Logger) Option
 ```
 
-WithLogger sets the logger. Nil, the default, disables logging.
+WithLogger sets the logger. Nil, the default, disables logging. A call of the logger that does not return normally loses its entry, which is written once more, with the value and the stack, through the logger's Errorf; the server and the session that logged go on.
 
 #### func WithMaxSessions
 
@@ -564,6 +564,9 @@ type Session struct {
 	// transfer by the link's protocol goroutine, possibly before newSession
 	// has returned and set link.
 
+	// takenOver is set when a takeover in a declared redundancy group ends
+	// the session, before its connection is closed.
+
 	// sec is the security of the session, nil without security.
 
 	// metrics are the metrics of the server as the session calls them,
@@ -692,7 +695,7 @@ Send transmits one ASDU to the controlling station. It fails with [iec104.ErrNot
 func (s *Session) Started() bool
 ```
 
-Started reports whether the controlling station has started data transfer on this session.
+Started reports whether the controlling station has started data transfer on this session. It is false from the moment another connection of a declared redundancy group takes over ([WithRedundancyGroups](#func-withredundancygroups)), which ends this one: before the STARTDT con of the other is sent.
 
 #### func (Session) Terminate
 

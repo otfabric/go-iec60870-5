@@ -62,7 +62,10 @@ func WithTLS(cfg *tls.Config) Option {
 	return func(o *options) { o.tls = cfg }
 }
 
-// WithLogger sets the logger. Nil, the default, disables logging.
+// WithLogger sets the logger. Nil, the default, disables logging. A call of
+// the logger that does not return normally loses its entry, which is
+// written once more, with the value and the stack, through the logger's
+// Errorf; the server and the session that logged go on.
 func WithLogger(l iec60870.Logger) Option {
 	return func(o *options) { o.logger = l }
 }

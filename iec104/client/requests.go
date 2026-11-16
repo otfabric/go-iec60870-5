@@ -254,7 +254,7 @@ func (c *Client) run(ctx context.Context, req *asdu.ASDU, idempotent bool, attem
 	remote := c.remoteAddr()
 	begin := time.Now()
 	if rm != nil {
-		rm.OnRequest(remote, req.Type, req.CommonAddr)
+		c.call("RequestMetrics.OnRequest", func() { rm.OnRequest(remote, req.Type, req.CommonAddr) })
 	}
 
 	attempts := 1
@@ -274,7 +274,7 @@ func (c *Client) run(ctx context.Context, req *asdu.ASDU, idempotent bool, attem
 		c.log.WarnContext(ctx, "request failed, retrying", "type", req.Type.String(),
 			"ca", req.CommonAddr, "attempt", i, "retry_in", pause.String(), "error", err)
 		if rm != nil {
-			rm.OnRetry(remote, req.Type, req.CommonAddr, i, err)
+			c.call("RequestMetrics.OnRetry", func() { rm.OnRetry(remote, req.Type, req.CommonAddr, i, err) })
 		}
 		timer := time.NewTimer(pause)
 		select {
@@ -291,7 +291,7 @@ func (c *Client) run(ctx context.Context, req *asdu.ASDU, idempotent bool, attem
 
 	elapsed := time.Since(begin)
 	if rm != nil {
-		rm.OnRequestDone(remote, req.Type, req.CommonAddr, elapsed, err)
+		c.call("RequestMetrics.OnRequestDone", func() { rm.OnRequestDone(remote, req.Type, req.CommonAddr, elapsed, err) })
 	}
 	if c.log.DebugEnabled() {
 		kv := []any{"type", req.Type.String(), "ca", req.CommonAddr, "duration", elapsed.String()}

@@ -32,8 +32,9 @@ import (
 // A handler that does not return normally is logged with its stack and
 // closes the client: the state handler is told "disconnected" with an
 // error wrapping [iec104.ErrClosed] that names the handler. The same holds
-// for the state handler, the start handler ([WithStartHandler]); the
-// switch handler of a [Group] ([WithSwitchHandler]) closes the group.
+// for the state handler, the start handler ([WithStartHandler]), the
+// [Dialer] ([WithDialer]) and the metrics ([WithMetrics]); the switch
+// handler of a [Group] ([WithSwitchHandler]) closes the group.
 //
 // The *asdu.ASDU is shared: an ASDU that a request collects is the same
 // value the request returns to its caller, on another goroutine, and the
@@ -188,12 +189,19 @@ func WithStateHandler(f func(state iec104.State, err error)) Option {
 	return func(o *options) { o.onState = f }
 }
 
-// WithLogger sets the logger. Nil, the default, disables logging.
+// WithLogger sets the logger. Nil, the default, disables logging. A call of
+// the logger that does not return normally loses its entry, which is
+// written once more, with the value and the stack, through the logger's
+// Errorf; the client goes on.
 func WithLogger(l iec60870.Logger) Option {
 	return func(o *options) { o.logger = l }
 }
 
 // WithMetrics sets the metrics callbacks. Nil, the default, disables them.
+// A callback that does not return normally, of [iec104.RequestMetrics]
+// included, is logged with its stack and closes the client, as for the
+// [Handler]; Connect, the reconnect loop or the request that called it
+// goes on to fail with [iec104.ErrClosed].
 func WithMetrics(m iec104.Metrics) Option {
 	return func(o *options) { o.metrics = m }
 }
@@ -202,7 +210,9 @@ func WithMetrics(m iec104.Metrics) Option {
 // address, go through a proxy or connect over an in-memory pipe in tests.
 // When combined with [WithTLS] the TLS handshake runs on top of the
 // connection the dialer returns. A dialer that returns neither a connection
-// nor an error fails the connect with [iec104.ErrConnectFailed].
+// nor an error fails the connect with [iec104.ErrConnectFailed]. One that
+// does not return normally is logged with its stack and closes the client,
+// as for the [Handler]: the connect fails with [iec104.ErrClosed].
 func WithDialer(d Dialer) Option {
 	return func(o *options) { o.dialer = d }
 }

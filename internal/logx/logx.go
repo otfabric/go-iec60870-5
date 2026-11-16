@@ -4,11 +4,17 @@
 // plus key-value fields. They go to the application's logger as structured
 // fields when it implements iec60870.FieldLogger, and as one formatted line
 // otherwise.
+//
+// The application's logger is application code, and every call of it is
+// guarded: a call that does not return normally loses its entry, and the
+// failure is written once more, with the value and the stack, through the
+// logger's Errorf (see rescue). The station that logged goes on.
 package logx
 
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"strings"
 
 	iec60870 "github.com/otfabric/go-iec60870-5"
@@ -35,7 +41,7 @@ func New(base iec60870.Logger, component string, kv ...any) *Logger {
 	l := &Logger{base: base, prefix: strings.ReplaceAll(component, ".", " ")}
 	l.static = append([]any{"component", component}, kv...)
 	if fl, ok := base.(iec60870.FieldLogger); ok {
-		l.fields = fl.With(l.static...)
+		l.fields = l.with(fl, l.static)
 	}
 	l.ctx, _ = base.(iec60870.ContextLogger)
 	if d, ok := base.(interface{ DebugEnabled() bool }); ok {
@@ -55,16 +61,47 @@ func (l *Logger) With(kv ...any) *Logger {
 	c := *l
 	c.static = append(append([]any(nil), l.static...), kv...)
 	if l.fields != nil {
-		c.fields = l.fields.With(kv...)
+		c.fields = l.with(l.fields, kv)
 	}
 	c.prefix += format(kv)
 	return &c
 }
 
 // DebugEnabled reports whether a debug entry would be written. It is true
-// unless the application's logger says otherwise.
+// unless the application's logger says otherwise; false when its
+// DebugEnabled does not return normally.
 func (l *Logger) DebugEnabled() bool {
-	return l != nil && (l.debug == nil || l.debug())
+	return l != nil && (l.debug == nil || l.debugEnabled())
+}
+
+func (l *Logger) debugEnabled() (on bool) {
+	defer l.rescue("DebugEnabled")
+	return l.debug()
+}
+
+// with returns fl.With(kv...), or nil when that does not return normally
+// (or returns nil): the logger then writes formatted lines.
+func (l *Logger) with(fl iec60870.FieldLogger, kv []any) (fields iec60870.FieldLogger) {
+	defer l.rescue("With")
+	return fl.With(kv...)
+}
+
+// rescue, deferred by every method that calls the application's logger,
+// ends a call that did not return normally: the entry is lost, and the
+// failure is written as a formatted line at error level, with the value
+// and the stack, through the plain Errorf of the logger, which a logger
+// that fails on one entry may still take. When that does not return
+// normally either, the failure is dropped.
+func (l *Logger) rescue(method string) {
+	if r := recover(); r != nil {
+		l.failed(method, r)
+	}
+}
+
+func (l *Logger) failed(method string, r any) {
+	defer func() { _ = recover() }()
+	l.base.Errorf("%s", l.line("logger did not return normally",
+		[]any{"method", method, "value", fmt.Sprint(r), "stack", string(debug.Stack())}))
 }
 
 // format renders fields as " key=value ...".
@@ -85,8 +122,10 @@ func (l *Logger) Debug(msg string, kv ...any) {
 	switch {
 	case l == nil:
 	case l.fields != nil:
+		defer l.rescue("DebugKV")
 		l.fields.DebugKV(msg, kv...)
 	default:
+		defer l.rescue("Debugf")
 		l.base.Debugf("%s", l.line(msg, kv))
 	}
 }
@@ -96,8 +135,10 @@ func (l *Logger) Info(msg string, kv ...any) {
 	switch {
 	case l == nil:
 	case l.fields != nil:
+		defer l.rescue("InfoKV")
 		l.fields.InfoKV(msg, kv...)
 	default:
+		defer l.rescue("Infof")
 		l.base.Infof("%s", l.line(msg, kv))
 	}
 }
@@ -107,8 +148,10 @@ func (l *Logger) Warn(msg string, kv ...any) {
 	switch {
 	case l == nil:
 	case l.fields != nil:
+		defer l.rescue("WarnKV")
 		l.fields.WarnKV(msg, kv...)
 	default:
+		defer l.rescue("Warnf")
 		l.base.Warnf("%s", l.line(msg, kv))
 	}
 }
@@ -118,8 +161,10 @@ func (l *Logger) Error(msg string, kv ...any) {
 	switch {
 	case l == nil:
 	case l.fields != nil:
+		defer l.rescue("ErrorKV")
 		l.fields.ErrorKV(msg, kv...)
 	default:
+		defer l.rescue("Errorf")
 		l.base.Errorf("%s", l.line(msg, kv))
 	}
 }
@@ -131,6 +176,7 @@ func (l *Logger) DebugContext(ctx context.Context, msg string, kv ...any) {
 		return
 	}
 	if l.ctx != nil {
+		defer l.rescue("DebugContext")
 		l.ctx.DebugContext(ctx, msg, append(append([]any(nil), l.static...), kv...)...)
 		return
 	}
@@ -143,6 +189,7 @@ func (l *Logger) WarnContext(ctx context.Context, msg string, kv ...any) {
 		return
 	}
 	if l.ctx != nil {
+		defer l.rescue("WarnContext")
 		l.ctx.WarnContext(ctx, msg, append(append([]any(nil), l.static...), kv...)...)
 		return
 	}

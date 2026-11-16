@@ -15,6 +15,13 @@ import (
 //
 // Logging is silent by default. Methods are invoked synchronously on the
 // protocol path and must not block.
+//
+// A call that does not return normally, of this interface or of
+// [FieldLogger], [ContextLogger] or DebugEnabled, loses its entry; the
+// failure is written once more, with the value and the stack, through
+// Errorf (and dropped when that does not return normally either), and the
+// station that logged goes on. A FieldLogger whose With does not return
+// normally is used through its formatted methods.
 type Logger interface {
 	Debugf(format string, args ...any)
 	Infof(format string, args ...any)

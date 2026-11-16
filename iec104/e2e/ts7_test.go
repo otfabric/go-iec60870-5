@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/otfabric/go-iec60870-5/asdu"
 	"github.com/otfabric/go-iec60870-5/iec104/client"
@@ -63,7 +62,10 @@ func TestSecurityTS7(t *testing.T) {
 		t.Fatal(err)
 	}
 	testutil.Eventually(t, "the event dropped", func() bool { return l.st.Server.Pending(ses[0].Group()) == 0 })
-	time.Sleep(50 * time.Millisecond)
+	// The station answers a refused command after everything it sent
+	// before on the connection, and the client hands what came first to
+	// the Handler before the answer completes the command.
+	negative(t, c.Command(ctx, l.ca, asdu.SingleCommand{IOA: 500, Value: true}), asdu.CauseNotAuthorized)
 	for _, a := range rec.all() {
 		if a.Type == asdu.M_SP_NA_1 {
 			t.Errorf("monitor data reached a SECADM: %v", a)

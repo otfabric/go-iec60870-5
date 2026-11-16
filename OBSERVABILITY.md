@@ -26,6 +26,16 @@ type Logger interface {
 }
 ```
 
+The logger is application code and every call of it is guarded, in every
+package of the module: a call that does not return normally (of `Logger`,
+`FieldLogger`, `ContextLogger` or `DebugEnabled`) loses its entry, and the
+failure is written once more through `Errorf` at error level as `logger
+did not return normally`, with the fields `method`, `value` and `stack`.
+When `Errorf` does not return normally either, the failure is dropped. The
+station that logged goes on. A `FieldLogger` whose `With` does not return
+normally is used through its formatted methods; a `DebugEnabled` that does
+not return normally counts as false.
+
 ### Structured logging
 
 The library writes every entry as a constant message plus key-value fields.
@@ -103,7 +113,8 @@ identifiers. `NewSlogLogger` implements it through
 | Info | `redundancy group switched over` (server) | `group`, `session`, `previous` |
 | Debug | `ignoring unsolicited confirmation`, `ignoring U frame from controlled station` | `function` |
 | Error | `handler panic` (server; the session is closed) | `asdu`, `panic`, `stack` |
-| Error | `callback did not return normally` (client: `Handler`, `state handler`, `start handler`, `switch handler`; the client is closed. Server: `state handler`, the `Metrics` hooks (`Metrics.OnConnect` and the other methods), `HandlerMetrics.OnHandled`, `security endpoint factory`, which close the session, and `accept filter`, which rejects the connection) | `callback`, `value`, `stack` |
+| Error | `logger did not return normally` (written through `Errorf`; the entry is lost) | `method`, `value`, `stack` |
+| Error | `callback did not return normally` (client: `Handler`, `state handler`, `start handler`, `switch handler`, `Dialer`, the `Metrics` hooks (`Metrics.OnConnect` and the other methods) and `RequestMetrics.OnRequest`, `OnRequestDone`, `OnRetry`; the client is closed. Server: `state handler`, the `Metrics` hooks (`Metrics.OnConnect` and the other methods), `HandlerMetrics.OnHandled`, `security endpoint factory`, which close the session, and `accept filter`, which rejects the connection) | `callback`, `value`, `stack` |
 
 Every entry carries `component` (`iec104.client` or `iec104.server`). Client
 entries carry `remote`; entries of a server session carry `session`,
@@ -197,7 +208,10 @@ func (m *metrics) OnRequestDone(_ net.Addr, t asdu.TypeID, _ asdu.CommonAddr, d 
 ```
 
 The callbacks run synchronously on the protocol path, from several goroutines
-on a server. They must be safe for concurrent use and must not block.
+on a server. They must be safe for concurrent use and must not block. One
+that does not return normally is logged as `callback did not return
+normally` with its stack, and closes the client, or the server's session it
+was called for.
 
 `f.ASDU` in the frame callbacks is memory the library still uses: do not
 modify it.
@@ -238,6 +252,7 @@ through `Config.Logger`; nil is silent. They have no metrics interface.
 | Debug | `unexpected ASDU in disturbance data transfer`, `end of transmission of another fault in disturbance data transfer` (IEC 103 client) | `asdu` |
 | Warn | `time synchronization after initialization failed`, `general interrogation after initialization failed` (IEC 103 client) | `error` |
 | Error | `callback did not return normally` (every client and server, and the `link` stations with `link.Config.Logger`; the station stops and `Err` reports it) | `callback`, `value`, `stack` |
+| Error | `logger did not return normally` (written through `Errorf`, as for IEC 104; the entry is lost and the station goes on) | `method`, `value`, `stack` |
 
 Every entry carries `component` and `link` (the link address). The
 component is `<standard>.<role>`: `iec101.client`, `iec101.server`,

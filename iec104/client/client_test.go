@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/otfabric/go-iec60870-5/iec104/client"
 	"github.com/otfabric/go-iec60870-5/iec104/internal/testutil"
 	"github.com/otfabric/go-iec60870-5/iec104/server"
+	"github.com/otfabric/go-iec60870-5/internal/testutil/leakcheck"
 )
 
 const (
@@ -537,12 +539,14 @@ func TestConnectErrors(t *testing.T) {
 	// A peer that accepts but never confirms STARTDT: bounded by the context.
 	ln, _ = net.Listen("tcp", "127.0.0.1:0")
 	defer func() { _ = ln.Close() }()
+	var accepted atomic.Int32
 	go func() {
 		for {
 			conn, err := ln.Accept()
 			if err != nil {
 				return
 			}
+			accepted.Add(1)
 			defer func() { _ = conn.Close() }()
 		}
 	}()
@@ -567,7 +571,9 @@ func TestConnectErrors(t *testing.T) {
 	c3, _ := client.New(ln.Addr().String(), client.WithParams(testutil.Params()))
 	errc := make(chan error, 1)
 	go func() { errc <- c3.Connect(ctx) }()
-	time.Sleep(100 * time.Millisecond)
+	// The mute peer has accepted the second connection: the attempt is
+	// past the dial and waits for the STARTDT confirmation.
+	testutil.Eventually(t, "the attempt at the mute peer", func() bool { return accepted.Load() == 2 })
 	_ = c3.Close()
 	select {
 	case err := <-errc:
@@ -707,6 +713,7 @@ func (d *countingDialer) count() int {
 }
 
 func TestReconnect(t *testing.T) {
+	leaks := leakcheck.Check(t)
 	st := newStation(t)
 	d := &countingDialer{}
 	var (
@@ -774,7 +781,9 @@ func TestReconnect(t *testing.T) {
 		t.Errorf("state after Close: %s", c.State())
 	}
 	n := d.count()
-	time.Sleep(250 * time.Millisecond)
+	// Both stations are closed as well: once every goroutine the test
+	// started has ended, nothing is left that could dial.
+	leaks()
 	if d.count() != n {
 		t.Error("client kept dialing after Close")
 	}

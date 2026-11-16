@@ -509,6 +509,19 @@ func waitUp(t *testing.T, s *server.Server) {
 	}
 }
 
+// leaves polls state until it reports something other than s, at most for
+// bound, and reports whether it did.
+func leaves(state func() iec101.State, s iec101.State, bound time.Duration) bool {
+	deadline := time.Now().Add(bound)
+	for state() == s {
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return true
+}
+
 // hostileClient starts an IEC 101 client against a raw secondary that
 // serves the e2e station's answers through OnUserData.
 func hostileClient(t *testing.T, timeout time.Duration, hook func(rs *serialline.RawSecondary)) (*client.Client, *serialline.RawSecondary, chan *asdu.ASDU, func()) {
@@ -733,8 +746,7 @@ func TestHostileClient(t *testing.T) {
 				}
 			}
 			if tc.down {
-				time.Sleep(300 * time.Millisecond)
-				if c.State() == iec101.StateUp {
+				if !leaves(c.State, iec101.StateUp, 300*time.Millisecond) {
 					t.Fatal("link still up")
 				}
 				if _, err := c.Interrogate(ctx, ca, asdu.QOIStation); !errors.Is(err, iec101.ErrLinkDown) {

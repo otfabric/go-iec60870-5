@@ -4,6 +4,7 @@ package client_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"sync"
@@ -35,15 +36,18 @@ func TestOrderingHandlerCalledAfterCloseFromHandler(t *testing.T) {
 		}
 	}))
 	var (
-		c      *client.Client
-		ready  = make(chan struct{})
-		closed atomic.Bool
-		after  atomic.Int32
-		first  sync.Once
-		mu     sync.Mutex
-		states []iec104.State
+		c         *client.Client
+		ready     = make(chan struct{})
+		connected = make(chan struct{})
+		inHandler = make(chan struct{})
+		received  = &iFrames{n: 5, all: make(chan struct{})}
+		closed    atomic.Bool
+		after     atomic.Int32
+		first     sync.Once
+		mu        sync.Mutex
+		states    []iec104.State
 	)
-	c, err := client.New(st.addr, client.WithParams(testutil.Params()),
+	c, err := client.New(st.addr, client.WithParams(testutil.Params()), client.WithMetrics(received),
 		client.WithStateHandler(func(s iec104.State, err error) {
 			mu.Lock()
 			states = append(states, s)
@@ -56,7 +60,19 @@ func TestOrderingHandlerCalledAfterCloseFromHandler(t *testing.T) {
 				return
 			}
 			first.Do(func() {
-				time.Sleep(300 * time.Millisecond) // let the other ASDUs arrive
+				defer close(inHandler)
+				// Connect has returned, and the other ASDUs have arrived:
+				// they wait for the Handler.
+				for _, w := range []struct {
+					what string
+					ch   chan struct{}
+				}{{"Connect to return", connected}, {"the other ASDUs", received.all}} {
+					select {
+					case <-w.ch:
+					case <-time.After(5 * time.Second):
+						t.Errorf("the Handler waited in vain for %s", w.what)
+					}
+				}
 				_ = c.Close()
 				closed.Store(true)
 			})
@@ -68,7 +84,15 @@ func TestOrderingHandlerCalledAfterCloseFromHandler(t *testing.T) {
 	if err := c.Connect(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(time.Second)
+	close(connected)
+	select {
+	case <-inHandler:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the Handler did not close the client")
+	}
+	// A Close from outside returns when the Handler has been called for
+	// the last time.
+	within(t, "Close", func() { _ = c.Close() })
 	mu.Lock()
 	t.Logf("states: %v", states)
 	mu.Unlock()
@@ -142,6 +166,14 @@ func TestOrderingStateAfterCloseRacingConnect(t *testing.T) {
 
 func orderingServe(t *testing.T, h server.Handler) string {
 	t.Helper()
+	_, addr := orderingServer(t, h)
+	return addr
+}
+
+// orderingServer is orderingServe for a test that closes the station
+// itself.
+func orderingServer(t *testing.T, h server.Handler) (*server.Server, string) {
+	t.Helper()
 	srv, err := server.New(h, server.WithParams(testutil.Params()))
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +184,22 @@ func orderingServe(t *testing.T, h server.Handler) string {
 	}
 	go func() { _ = srv.Serve(ln) }()
 	t.Cleanup(func() { _ = srv.Close() })
-	return ln.Addr().String()
+	return srv, ln.Addr().String()
+}
+
+// iFrames is a client's metrics: it counts the I frames the link receives
+// and closes all at the n-th.
+type iFrames struct {
+	iec104.NopMetrics
+	n   int32
+	got atomic.Int32
+	all chan struct{}
+}
+
+func (m *iFrames) OnFrameReceived(_ net.Addr, f apci.Frame, _ int) {
+	if f.Format == apci.FormatI && m.got.Add(1) == m.n {
+		close(m.all)
+	}
 }
 
 // Finding 9 of the state machine review: the deactivation confirmation of an earlier Deactivate (one the caller
@@ -192,7 +239,11 @@ func TestOrderingConcurrentClientClose(t *testing.T) {
 	go func() { _ = c.Command(context.Background(), 1, asdu.SingleCommand{IOA: 1, Value: true}) }()
 	<-entered
 	go func() { _ = c.Close() }()
-	time.Sleep(100 * time.Millisecond) // the first Close is waiting for the Handler
+	// The first Close is under way: the client refuses Connect as closed
+	// (it refused it as busy before). It waits for the Handler.
+	testutil.Eventually(t, "the first Close under way", func() bool {
+		return errors.Is(c.Connect(context.Background()), iec104.ErrClosed)
+	})
 	second := make(chan struct{})
 	go func() { _ = c.Close(); close(second) }()
 	select {

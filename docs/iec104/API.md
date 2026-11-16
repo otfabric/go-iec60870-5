@@ -960,11 +960,16 @@ Errors: `ErrInvalidStart`, `ErrInvalidLength`, `ErrInvalidControl`,
 - A start handler (`WithStartHandler`) runs on its own goroutine and may call
   any method. A switch handler (`WithSwitchHandler`) is called one call at a
   time, in order, and may call the group, `Switchover` and `Close` included.
-- A client `Handler`, state handler, start handler or switch handler that
-  does not return normally is logged with its stack and closes its client
-  (the switch handler: its group): the state handler is told
-  "disconnected" with an error that wraps `iec104.ErrClosed` and names the
-  callback, and the process goes on.
+- A client `Handler`, state handler, start handler, switch handler,
+  `Dialer` or `Metrics` hook (`RequestMetrics` included) that does not
+  return normally is logged with its stack and closes its client (the
+  switch handler: its group): the state handler is told "disconnected"
+  with an error that wraps `iec104.ErrClosed` and names the callback, and
+  the process goes on. `Connect`, the reconnect loop or the request that
+  called it fails with `iec104.ErrClosed`.
+- A logger call that does not return normally, of a client or a server,
+  loses its entry and is written once more through `Errorf` as `logger
+  did not return normally`; the client, the server and the session go on.
 - A server `Handler`, state handler, `Metrics` hook, `WithAccept` filter or
   `WithSecurity` endpoint factory that does not return normally is logged
   with its stack and closes its session (the filter: rejects the

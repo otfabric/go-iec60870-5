@@ -171,7 +171,14 @@ callback that does not return normally is logged with its stack and stops
 the station that called it, whose `Err` then wraps `ErrClosed` and names
 the callback. Each station records the goroutines it calls callbacks on,
 so that Close called from one of them stops the station and returns at
-once instead of waiting for its own goroutine.
+once instead of waiting for its own goroutine. OnState is called one
+change at a time and in order, StateClosed last: the iec101, iec102 and
+iec103 servers take a token for the change and its call, which Close
+waits for; the clients report StateClosed after their goroutines have
+ended; the iec102 client tells OnState on a goroutine of its own,
+outside the request slot. Every call of the application's logger goes
+through `internal/logx`, which turns one that does not return normally
+into a lost entry and a report through `Errorf`.
 
 `iec101/server` holds class 1 and class 2 queues (unbalanced) or a send
 queue (balanced). Control-direction ASDUs are queued to a handler goroutine;

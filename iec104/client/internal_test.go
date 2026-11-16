@@ -7,12 +7,15 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/otfabric/go-iec60870-5/asdu"
 	iec104 "github.com/otfabric/go-iec60870-5/iec104"
+	"github.com/otfabric/go-iec60870-5/iec104/internal/testutil"
 	"github.com/otfabric/go-iec60870-5/iec104/server"
+	"github.com/otfabric/go-iec60870-5/internal/testutil/leakcheck"
 )
 
 // These tests hold the client at a named point inside one of its
@@ -92,6 +95,7 @@ func TestStartDTAsTheLinkBecomesCurrent(t *testing.T) {
 // application closes the client. Close must wait for the report: the
 // application is told once that it is disconnected, and not after Close.
 func TestCloseWhileLossIsBeingReported(t *testing.T) {
+	leaks := leakcheck.Check(t)
 	srv, addr := station(t)
 	reached, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
@@ -107,10 +111,7 @@ func TestCloseWhileLossIsBeingReported(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The station drops the connection; the client stops in the window.
-	deadline := time.Now().Add(5 * time.Second)
-	for len(srv.Sessions()) == 0 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
+	testutil.Eventually(t, "the session at the station", func() bool { return len(srv.Sessions()) > 0 })
 	for _, s := range srv.Sessions() {
 		_ = s.Close()
 	}
@@ -135,7 +136,10 @@ func TestCloseWhileLossIsBeingReported(t *testing.T) {
 		t.Fatal("Close never returned")
 	}
 	told := log.String()
-	time.Sleep(20 * time.Millisecond)
+	// With the station closed too, once every goroutine the test started
+	// has ended nothing is left that could tell the application more.
+	_ = srv.Close()
+	leaks()
 	if after := log.String(); after != told {
 		t.Fatalf("told %q when Close returned and %q afterwards", told, after)
 	}
@@ -151,12 +155,18 @@ func TestCloseWhileLossIsBeingReported(t *testing.T) {
 // The same window with a client that reconnects: Close in the window must
 // not leave a reconnect loop behind, nor a connection.
 func TestCloseWhileLossIsBeingReportedWithReconnect(t *testing.T) {
+	leaks := leakcheck.Check(t)
 	srv, addr := station(t)
 	reached, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
 	var log stateLog
+	var dials atomic.Int32
 	c, err := Dial(context.Background(), addr, WithStateHandler(log.add),
 		WithReconnect(Reconnect{MinDelay: time.Millisecond, MaxDelay: 5 * time.Millisecond}),
+		WithDialer(dialerFunc(func(ctx context.Context, network, address string) (net.Conn, error) {
+			dials.Add(1)
+			return (&net.Dialer{}).DialContext(ctx, network, address)
+		})),
 		withFailpoint(func(name string) {
 			if name == "link-detached" {
 				once.Do(func() { close(reached) })
@@ -166,17 +176,16 @@ func TestCloseWhileLossIsBeingReportedWithReconnect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
-	for len(srv.Sessions()) == 0 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
+	testutil.Eventually(t, "the session at the station", func() bool { return len(srv.Sessions()) > 0 })
 	for _, s := range srv.Sessions() {
 		_ = s.Close()
 	}
 	<-reached
 	closed := make(chan struct{})
 	go func() { _ = c.Close(); close(closed) }()
-	time.Sleep(50 * time.Millisecond)
+	// Close has begun: the client is closed while the loss, and the
+	// reconnect decided before it, are still to be reported.
+	testutil.Eventually(t, "Close under way", c.isClosed)
 	close(release)
 	select {
 	case <-closed:
@@ -184,12 +193,20 @@ func TestCloseWhileLossIsBeingReportedWithReconnect(t *testing.T) {
 		t.Fatal("Close never returned")
 	}
 	told := log.String()
-	time.Sleep(50 * time.Millisecond)
-	if after := log.String(); after != told || !strings.HasSuffix(told, "d") || strings.Count(told, "d") != 1 {
-		t.Fatalf("told %q when Close returned and %q afterwards; want one disconnected, last", told, after)
+	// Close waits for the reconnect loop: a connection attempt after the
+	// first one would have been counted by now.
+	if n := dials.Load(); n != 1 {
+		t.Fatalf("%d connection attempts, want 1: the client reconnected", n)
 	}
 	if n := len(srv.Sessions()); n != 0 {
 		t.Fatalf("%d sessions at the station after the client was closed: it reconnected", n)
+	}
+	// With the station closed too, once every goroutine the test started
+	// has ended nothing is left that could tell the application more.
+	_ = srv.Close()
+	leaks()
+	if after := log.String(); after != told || !strings.HasSuffix(told, "d") || strings.Count(told, "d") != 1 {
+		t.Fatalf("told %q when Close returned and %q afterwards; want one disconnected, last", told, after)
 	}
 	if c.State() != iec104.StateDisconnected {
 		t.Fatalf("state %s after Close", c.State())

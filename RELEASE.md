@@ -1,5 +1,114 @@
 # Release notes
 
+## v0.8.0
+
+**Date:** 2026-11-16
+**Previous release:** v0.7.0
+
+State notifications of the serial stations that come one at a time and
+in order, an iec102 client whose OnState may make requests, IEC 104
+client callbacks and loggers that no longer end the process when they do
+not return normally, a takeover in a redundancy group that ends the
+previous session's started state at once, and the remaining tests that
+waited a fixed time rewritten to wait for what they check. Four changes
+of behaviour are breaking; each says who notices and how to get the
+previous behaviour back where there is a way. No identifier is added,
+removed or changed.
+
+### Breaking
+
+- `iec102/client`: `Config.OnState` runs on a goroutine of the client's
+  own, outside the request slot, one call at a time and in the order of
+  the changes, `StateClosed` last. A request made from OnState is
+  answered after the request in progress, instead of waiting for the
+  slot until its deadline. The request that changed the state goes on
+  while OnState runs and returns once OnState has returned for that
+  change, as before. Close called from OnState returns at once; the
+  close completes, `StateClosed` reported included, when OnState has
+  returned, so `Done` may close before OnState is told `StateClosed`.
+  Who notices: an OnState that relies on running on the goroutine of the
+  request that changed the state. Previous behaviour: none; the request
+  still returns only after OnState for its change.
+- `iec101/server`, `iec102/server`, `iec103/server`: OnState is called
+  one change at a time and in order, `StateClosed` last: Close waits for
+  an OnState call in progress before it reports `StateClosed`. Before,
+  on a transport that is not an `io.Closer`, `StateClosed` could be
+  reported while OnState for the link coming up still ran on the link's
+  reader. Who notices: an OnState that waits for something the closing
+  goroutine does after Close returns. Previous behaviour: none; such an
+  OnState returns and waits on another goroutine.
+- `iec104/client`: a `Dialer` (`WithDialer`) or a metrics callback
+  (`WithMetrics`, `iec104.RequestMetrics` included) that does not return
+  normally is logged at Error as `callback did not return normally` with
+  its stack and closes the client, from whichever goroutine called it:
+  the state handler is told "disconnected" with an error that wraps
+  `iec104.ErrClosed` and names the callback, and `Connect`, the
+  reconnect loop or the request that called it fails with
+  `iec104.ErrClosed`. Previous behaviour: the process ended. An
+  application that wants that ends it itself in the callback.
+- Every package: a call of the application's logger (`Logger`,
+  `FieldLogger`, `ContextLogger`, `DebugEnabled`) that does not return
+  normally loses its entry; the failure is written once more through
+  `Errorf` as `logger did not return normally` with the method, the
+  value and the stack, and dropped when `Errorf` does not return
+  normally either. The client, server or session that logged goes on. A
+  `FieldLogger` whose `With` does not return normally is used through
+  its formatted methods; a `DebugEnabled` that does not return normally
+  counts as false. Previous behaviour: the process ended. An application
+  that wants that ends it itself in its logger.
+
+### Fixed
+
+- `iec104/server`: `Session.Started` reports false for a session that a
+  takeover in a declared redundancy group ends, from before the STARTDT
+  con of the new connection; it reported true until the session's
+  protocol goroutine had seen its connection closed, so `Sessions` could
+  show two started sessions of one group.
+- `iec104/client`: the "disconnected" notice names a callback that
+  closed the client during a reconnect attempt, or while the loss of the
+  connection was being reported (the metrics' `OnDisconnect`), as it
+  does after a local close.
+
+### Documentation
+
+- The OnState docs of the iec101, iec102 and iec103 clients and servers
+  say that the calls come one at a time and in order; the iec102 client
+  no longer says that OnState must not make a request. `WithDialer`,
+  `WithMetrics` and `WithLogger` of `iec104/client` and `iec104/server`,
+  and `iec60870.Logger`, say what happens to a callback or a logger call
+  that does not return normally. ARCHITECTURE.md, ERRORS.md,
+  OBSERVABILITY.md, TESTING.md, docs/iec102/README.md and
+  docs/iec104/API.md follow the changes above; docs/api is regenerated.
+
+### Tests
+
+- State order: `TestStateNotificationsInOrder` in `iec102/client`,
+  `iec102/server`, `iec103/client` and `iec103/server`;
+  `iec101/e2e.TestServerStateNotificationsInOrder` and
+  `TestClientStateNotificationsInOrder` (both modes), on the fake clock
+  of `testing/synctest`; `iec102/client.TestRequestFromOnState`.
+- Callbacks and loggers: `iec104/client`
+  `TestHookThatDoesNotReturnNormally`, `TestMetricsThatDoNotReturnNormally`,
+  `TestLoggerThatDoesNotReturnNormally`;
+  `internal/logx.TestLoggerThatDoesNotReturnNormally`;
+  `iec101/e2e.TestLoggerThatDoesNotReturnNormally`.
+- `iec104/server.TestTakeoverStopsThePreviousSessionAtOnce`.
+- `iec104/server.TestTakeoverEndsThePreviousConnection`,
+  `iec104/e2e.TestStopDuringEventStream` and
+  `iec104/e2e.TestSecurityStations` wait for the events they check:
+  the event stream test counts the events on the wire before each STOPDT
+  con and waits until the Handler has been given exactly those, and the
+  station test waits for the standby connection before the switchover
+  and checks the associations of the started sessions only.
+  `iec104/client.TestGroupFailsOverBehindABusyHandler` waits for both
+  connections to be established, not connecting, before it switches
+  over. Fixed waits
+  in the iec101, iec102, iec103 and iec104 tests that synchronised on
+  time now wait for what they check; the waits left are pacing, a
+  duration under test, or need a hook the library does not have.
+
+---
+
 ## v0.7.0
 
 **Date:** 2026-11-14

@@ -642,31 +642,9 @@ func chaos(t *testing.T, seed int64, duration time.Duration) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
-	time.Sleep(50 * time.Millisecond)
-	seen := make([]bool, want)
 	retiredMu.Lock()
 	everyone := append(append([]*chaosClient(nil), retired...), clients...)
 	retiredMu.Unlock()
-	for _, cc := range everyone {
-		cc.mu.Lock()
-		for v := range cc.events {
-			if v >= want {
-				t.Errorf("seed %d: client %d received event %d that was never queued", seed, cc.idx, v)
-				continue
-			}
-			seen[v] = true
-		}
-		cc.mu.Unlock()
-	}
-	lost := 0
-	for _, ok := range seen {
-		if !ok {
-			lost++
-		}
-	}
-	if lost != 0 || srv.Dropped("default") != 0 {
-		t.Errorf("seed %d: %d of %d queued events never arrived (dropped: %d)", seed, lost, want, srv.Dropped("default"))
-	}
 
 	// What each side was told.
 	for _, cc := range everyone {
@@ -702,6 +680,29 @@ func chaos(t *testing.T, seed int64, duration time.Duration) {
 			t.Errorf("seed %d: client %d is %s after Close", seed, cc.idx, s)
 		}
 	}
+	// Every event was acknowledged, and Close returns when the Handler has
+	// been given everything the connection acknowledged.
+	seen := make([]bool, want)
+	for _, cc := range everyone {
+		cc.mu.Lock()
+		for v := range cc.events {
+			if v >= want {
+				t.Errorf("seed %d: client %d received event %d that was never queued", seed, cc.idx, v)
+				continue
+			}
+			seen[v] = true
+		}
+		cc.mu.Unlock()
+	}
+	lost := 0
+	for _, ok := range seen {
+		if !ok {
+			lost++
+		}
+	}
+	if lost != 0 || srv.Dropped("default") != 0 {
+		t.Errorf("seed %d: %d of %d queued events never arrived (dropped: %d)", seed, lost, want, srv.Dropped("default"))
+	}
 	if err := bounded("Server.Close", func(context.Context) error { return srv.Close() }); err != nil {
 		t.Errorf("seed %d: Server.Close: %v", seed, err)
 	}
@@ -709,7 +710,9 @@ func chaos(t *testing.T, seed int64, duration time.Duration) {
 	if n := len(srv.Sessions()); n != 0 {
 		t.Errorf("seed %d: %d sessions after Server.Close", seed, n)
 	}
-	time.Sleep(20 * time.Millisecond)
+	// Goroutines: everything the run started is gone, so nothing is left
+	// that could tell either side more.
+	leaks()
 	for _, cc := range everyone {
 		if err := reconnectingGrammar(cc.tr.String()); err != nil {
 			t.Errorf("seed %d: client %d: %v", seed, cc.idx, err)
@@ -740,9 +743,6 @@ func chaos(t *testing.T, seed int64, duration time.Duration) {
 	if n := st.late.Load(); n != 0 {
 		t.Errorf("seed %d: %d requests handled for a session that had ended", seed, n)
 	}
-
-	// Goroutines: everything the run started is gone.
-	leaks()
 
 	if okOps.Load() < 50 || network.cuts.Load() == 0 || nSessions < 3 || want == 0 {
 		t.Errorf("seed %d: the run exercised too little: %d of %d calls succeeded, %d cuts, %d sessions, %d events",

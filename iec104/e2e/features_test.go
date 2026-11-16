@@ -53,18 +53,50 @@ func (b *errBox) has(target error) bool {
 
 // states records the state changes of one side of a connection.
 type states struct {
-	mu   sync.Mutex
-	seen []string
+	mu      sync.Mutex
+	seen    []string
+	changed chan struct{} // signalled after every entry, made on first use
 }
 
 func (s *states) add(state iec104.State, err error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	entry := state.String()
 	if err != nil {
 		entry += "!"
 	}
 	s.seen = append(s.seen, entry)
+	ch := s.signal()
+	s.mu.Unlock()
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
+}
+
+// signal returns the channel add signals; the caller holds mu.
+func (s *states) signal() chan struct{} {
+	if s.changed == nil {
+		s.changed = make(chan struct{}, 1)
+	}
+	return s.changed
+}
+
+// waitFor waits until cond holds for the states so far, as String gives
+// them.
+func (s *states) waitFor(t *testing.T, what string, cond func(states string) bool) {
+	t.Helper()
+	deadline := time.NewTimer(30 * time.Second)
+	defer deadline.Stop()
+	for !cond(s.String()) {
+		s.mu.Lock()
+		ch := s.signal()
+		s.mu.Unlock()
+		select {
+		case <-ch:
+		case <-deadline.C:
+			t.Fatalf("timed out waiting for %s: %s", what, s.String())
+		}
+	}
 }
 
 func (s *states) String() string {
@@ -146,10 +178,7 @@ func TestStatesLogsAndMetrics(t *testing.T) {
 	if err := c.Close(); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(3 * time.Second)
-	for !strings.Contains(srvStates.String(), "disconnected") && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
+	srvStates.waitFor(t, "the end of the session at the station", func(s string) bool { return strings.Contains(s, "disconnected") })
 
 	// The controlling station hung up: for the station that is a lost
 	// connection; for the client, which closed it, there is no error.
@@ -578,9 +607,19 @@ func TestRequestFailures(t *testing.T) {
 	var once sync.Once
 	t.Cleanup(func() { once.Do(func() { close(release) }) })
 	var readsSeen atomic.Int64
+	// heard tells that the station has a command to an object it never
+	// answers for, which is then pending.
+	heard := map[asdu.IOA]chan struct{}{4: make(chan struct{}, 1), 5: make(chan struct{}, 1)}
 	srv, addr := serve(t, server.HandlerFunc(func(s *server.Session, req *asdu.ASDU) {
 		switch o := req.First().(type) {
 		case asdu.SingleCommand:
+			if ch, ok := heard[o.IOA]; ok {
+				select {
+				case ch <- struct{}{}:
+				default:
+				}
+				return // never answered
+			}
 			if o.IOA == 1 {
 				return // never answered
 			}
@@ -608,8 +647,16 @@ func TestRequestFailures(t *testing.T) {
 		t.Errorf("command with a deadline: %v", err)
 	}
 	cctx, cancel := context.WithCancel(ctx)
-	go func() { time.Sleep(20 * time.Millisecond); cancel() }()
-	if err := c.Command(cctx, 1, asdu.SingleCommand{IOA: 1}); !errors.Is(err, context.Canceled) {
+	go func() {
+		select {
+		case <-heard[4]: // the command is pending at the station
+		case <-cctx.Done():
+		}
+		cancel()
+	}()
+	err = c.Command(cctx, 1, asdu.SingleCommand{IOA: 4})
+	cancel()
+	if !errors.Is(err, context.Canceled) {
 		t.Errorf("cancelled command: %v", err)
 	}
 	// Two requests whose answers could not be told apart.
@@ -649,9 +696,13 @@ func TestRequestFailures(t *testing.T) {
 	// The station shuts down under a pending request.
 	pending := make(chan error, 1)
 	go func() {
-		pending <- c.Command(long, 1, asdu.SingleCommand{IOA: 1})
+		pending <- c.Command(long, 1, asdu.SingleCommand{IOA: 5})
 	}()
-	time.Sleep(50 * time.Millisecond)
+	select {
+	case <-heard[5]:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the command did not reach the station")
+	}
 	_ = srv.Close()
 	select {
 	case err := <-pending:
@@ -807,99 +858,153 @@ func TestStopDuringEventStream(t *testing.T) {
 	}
 }
 
+// streamWire records, on the client's link goroutine and so in the order
+// of the wire, the events (I frames of M_BO_NA_1) the client receives, how
+// many had arrived when each STOPDT con did, and how many arrived while
+// data transfer was stopped: after a STOPDT con, before the next STARTDT
+// con.
+type streamWire struct {
+	iec104.NopMetrics
+	mu      sync.Mutex
+	events  int
+	stopped bool
+	atStop  []int
+	late    []int // per round
+}
+
+func (w *streamWire) OnFrameReceived(_ net.Addr, f apci.Frame, _ int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	switch {
+	case f.Format == apci.FormatI && len(f.ASDU) > 0 && asdu.TypeID(f.ASDU[0]) == asdu.M_BO_NA_1:
+		w.events++
+		if w.stopped {
+			w.late[len(w.late)-1]++
+		}
+	case f.Format == apci.FormatU && f.Function == apci.StopDTCon:
+		w.stopped = true
+		w.atStop = append(w.atStop, w.events)
+		w.late = append(w.late, 0)
+	case f.Format == apci.FormatU && f.Function == apci.StartDTCon:
+		w.stopped = false
+	}
+}
+
+// round returns how many events had arrived at the STOPDT con of round r,
+// and how many arrived after it while data transfer was stopped.
+func (w *streamWire) round(r int) (atStop, late int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.atStop[r], w.late[r]
+}
+
 func stopDuringEventStream(t *testing.T, p apci.Params) {
-	{
-		const events = 3000
-		// The queue holds the whole stream: nothing may be dropped.
-		l := start(t, []server.Option{server.WithEventQueue(events), server.WithParams(p)}, client.WithParams(p))
-		srv := l.st.Server
-		var mu sync.Mutex
-		var got []int
-		c := l.dial(t, client.WithHandler(client.HandlerFunc(func(a *asdu.ASDU) {
-			if v, ok := a.First().(asdu.Bitstring32); ok {
-				mu.Lock()
-				got = append(got, int(v.Value))
-				mu.Unlock()
-			}
-		})))
-		ctx := context.Background()
-		feeding := make(chan struct{})
-		go func() {
-			defer close(feeding)
-			for i := range events {
-				if err := srv.Enqueue(asdu.New(asdu.CauseSpontaneous, l.ca, asdu.Bitstring32{IOA: 103, Value: uint32(i)})); err != nil {
-					t.Errorf("Enqueue %d: %v", i, err)
-					return
-				}
-				if i%100 == 0 {
-					time.Sleep(time.Millisecond)
-				}
-			}
-		}()
-		for round := range 8 {
-			time.Sleep(3 * time.Millisecond)
-			if err := c.StopDT(ctx); err != nil {
-				t.Fatalf("StopDT %d: %v", round, err)
-			}
-			// The handler runs on the dispatcher, which may still deliver
-			// what arrived before the confirmation: let it settle, then
-			// nothing more may come.
-			count := func() int {
-				mu.Lock()
-				defer mu.Unlock()
-				return len(got)
-			}
-			stopped := count()
-			for settle := time.Now().Add(time.Second); time.Now().Before(settle); {
-				time.Sleep(5 * time.Millisecond)
-				n := count()
-				if n == stopped {
-					break
-				}
-				stopped = n
-			}
-			time.Sleep(10 * time.Millisecond)
+	const events = 3000
+	// The queue holds the whole stream: nothing may be dropped.
+	l := start(t, []server.Option{server.WithEventQueue(events), server.WithParams(p)}, client.WithParams(p))
+	srv := l.st.Server
+	var mu sync.Mutex
+	var got []int
+	changed := make(chan struct{}, 1)
+	wire := &streamWire{}
+	c := l.dial(t, client.WithMetrics(wire), client.WithHandler(client.HandlerFunc(func(a *asdu.ASDU) {
+		if v, ok := a.First().(asdu.Bitstring32); ok {
 			mu.Lock()
-			if len(got) != stopped {
-				t.Errorf("round %d: %d events arrived while data transfer was stopped", round, len(got)-stopped)
-			}
+			got = append(got, int(v.Value))
 			mu.Unlock()
-			if err := c.StartDT(ctx); err != nil {
-				t.Fatalf("StartDT %d: %v", round, err)
+			select {
+			case changed <- struct{}{}:
+			default:
 			}
 		}
-		<-feeding
-		testutil.Eventually(t, "every event", func() bool {
+	})))
+	// waitFor waits until cond holds for what the Handler was given.
+	waitFor := func(what string, cond func(got []int) bool) {
+		t.Helper()
+		deadline := time.NewTimer(30 * time.Second)
+		defer deadline.Stop()
+		for {
 			mu.Lock()
-			defer mu.Unlock()
-			return len(got) > 0 && got[len(got)-1] == events-1
-		})
+			ok := cond(got)
+			mu.Unlock()
+			if ok {
+				return
+			}
+			select {
+			case <-changed:
+			case <-deadline.C:
+				t.Fatalf("timed out waiting for %s", what)
+			}
+		}
+	}
+	all := func(got []int) bool { return len(got) > 0 && got[len(got)-1] == events-1 }
+	ctx := context.Background()
+	feeding := make(chan struct{})
+	go func() {
+		defer close(feeding)
+		for i := range events {
+			if err := srv.Enqueue(asdu.New(asdu.CauseSpontaneous, l.ca, asdu.Bitstring32{IOA: 103, Value: uint32(i)})); err != nil {
+				t.Errorf("Enqueue %d: %v", i, err)
+				return
+			}
+			if i%100 == 0 {
+				time.Sleep(time.Millisecond) // pacing: the rounds fall inside the stream
+			}
+		}
+	}()
+	handled := 0
+	for round := range 8 {
+		// An event of this started period first, unless the stream is over.
+		waitFor("an event after STARTDT", func(got []int) bool { return len(got) > handled || all(got) })
+		if err := c.StopDT(ctx); err != nil {
+			t.Fatalf("StopDT %d: %v", round, err)
+		}
+		// The Handler runs on the dispatcher, which may still deliver what
+		// arrived before the confirmation: it is given exactly that, and
+		// nothing arrives on the wire until STARTDT is confirmed.
+		atStop, _ := wire.round(round)
+		waitFor(fmt.Sprintf("the %d events received before STOPDT con %d", atStop, round),
+			func(got []int) bool { return len(got) >= atStop })
 		mu.Lock()
-		defer mu.Unlock()
-		seen := make([]int, events)
-		last := -1
-		for _, v := range got {
-			seen[v]++
-			if v < last {
-				t.Fatalf("event %d after event %d", v, last)
-			}
-			last = v
+		handled = len(got)
+		mu.Unlock()
+		if handled != atStop {
+			t.Errorf("round %d: the Handler was given %d events, %d arrived before STOPDT con", round, handled, atStop)
 		}
-		missing, repeated := 0, 0
-		for _, n := range seen {
-			switch {
-			case n == 0:
-				missing++
-			case n > 1:
-				repeated++
-			}
+		if err := c.StartDT(ctx); err != nil {
+			t.Fatalf("StartDT %d: %v", round, err)
 		}
-		if missing != 0 || repeated != 0 {
-			t.Errorf("%d events missing, %d delivered more than once", missing, repeated)
+		if _, late := wire.round(round); late != 0 {
+			t.Errorf("round %d: %d events arrived while data transfer was stopped", round, late)
 		}
-		if d := srv.Dropped("default"); d != 0 {
-			t.Errorf("%d events dropped", d)
+	}
+	<-feeding
+	waitFor("every event", all)
+	mu.Lock()
+	defer mu.Unlock()
+	seen := make([]int, events)
+	last := -1
+	for _, v := range got {
+		seen[v]++
+		if v < last {
+			t.Fatalf("event %d after event %d", v, last)
 		}
+		last = v
+	}
+	missing, repeated := 0, 0
+	for _, n := range seen {
+		switch {
+		case n == 0:
+			missing++
+		case n > 1:
+			repeated++
+		}
+	}
+	if missing != 0 || repeated != 0 {
+		t.Errorf("%d events missing, %d delivered more than once", missing, repeated)
+	}
+	if d := srv.Dropped("default"); d != 0 {
+		t.Errorf("%d events dropped", d)
 	}
 }
 
@@ -1095,8 +1200,12 @@ func TestSilentLink(t *testing.T) {
 	testutil.Eventually(t, "the client reported the timeout", func() bool { return cliErr.has(iec104.ErrTimeout) })
 	testutil.Eventually(t, "the station reported the timeout", func() bool { return srvEnd.has(iec104.ErrTimeout) })
 
-	// While the link is down every new connection dies the same way.
-	time.Sleep(300 * time.Millisecond)
+	// While the link is down every new connection dies the same way: the
+	// first "connecting!" is the loss of the connection, the next one a
+	// connection made in the silence that died.
+	cliStates.waitFor(t, "a connection made in the silence to die", func(s string) bool {
+		return strings.Count(s, "connecting!") >= 2
+	})
 	hole.silent.Store(false)
 	testutil.Eventually(t, "the client is back", func() bool {
 		if c.State() != iec104.StateStarted {

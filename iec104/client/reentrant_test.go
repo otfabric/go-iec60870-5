@@ -17,6 +17,7 @@ import (
 	"github.com/otfabric/go-iec60870-5/iec104/client"
 	"github.com/otfabric/go-iec60870-5/iec104/internal/testutil"
 	"github.com/otfabric/go-iec60870-5/iec104/server"
+	"github.com/otfabric/go-iec60870-5/internal/testutil/leakcheck"
 )
 
 // The tests in this file call back into the client from its own callbacks,
@@ -111,6 +112,7 @@ func TestReentrantStateHandlerDrivesTheClient(t *testing.T) {
 // Close from the Handler of a reconnecting client: no further connection
 // attempt, no further callback, and a later Close from outside returns.
 func TestReentrantCloseFromHandlerStopsReconnecting(t *testing.T) {
+	leaks := leakcheck.Check(t)
 	var sessions atomic.Int32
 	st := newStation(t, server.WithStateHandler(func(s *server.Session, state iec104.State, _ error) {
 		if state == iec104.StateStarted {
@@ -152,7 +154,10 @@ func TestReentrantCloseFromHandlerStopsReconnecting(t *testing.T) {
 		return strings.HasSuffix(log.String(), "disconnected")
 	})
 	within(t, "Close", func() { _ = c.Close() })
-	time.Sleep(300 * time.Millisecond)
+	// With the station closed too, once every goroutine the test started
+	// has ended nothing is left that could call back or connect again.
+	_ = st.Close()
+	leaks()
 	if n := after.Load(); n != 0 {
 		t.Errorf("%d callbacks after Close from the Handler; states: %s", n, &log)
 	}
@@ -330,8 +335,9 @@ func TestReentrantSwitchHandler(t *testing.T) {
 // flight: every Close returns only when the group is closed.
 func TestReentrantConcurrentGroupClose(t *testing.T) {
 	for round := range 15 {
-		a := orderingServe(t, server.HandlerFunc(confirming))
-		b := orderingServe(t, server.HandlerFunc(confirming))
+		leaks := leakcheck.Check(t)
+		sa, a := orderingServer(t, server.HandlerFunc(confirming))
+		sb, b := orderingServer(t, server.HandlerFunc(confirming))
 		var closed atomic.Bool
 		var late atomic.Int32
 		g := newGroup(t, []string{a, b}, client.WithStateHandler(func(st iec104.State, _ error) {
@@ -364,7 +370,10 @@ func TestReentrantConcurrentGroupClose(t *testing.T) {
 		within(t, "concurrent Group.Close", closers.Wait)
 		closed.Store(true)
 		within(t, "requests after Group.Close", wg.Wait)
-		time.Sleep(20 * time.Millisecond)
+		// With both stations closed too, once every goroutine of the round
+		// has ended nothing is left that could call back.
+		_, _ = sa.Close(), sb.Close()
+		leaks()
 		if n := late.Load(); n != 0 {
 			t.Errorf("round %d: %d state notifications after Group.Close returned", round, n)
 		}
@@ -647,8 +656,13 @@ func TestGroupFailsOverBehindABusyHandler(t *testing.T) {
 	})))
 	defer close(gate)
 	cs := g.Clients()
-	testutil.Eventually(t, "both connections", func() bool {
-		return cs[0].State() != iec104.StateDisconnected && cs[1].State() != iec104.StateDisconnected
+	// Switchover needs the other connection established, not connecting.
+	established := func(c *client.Client) bool {
+		s := c.State()
+		return s == iec104.StateStopped || s == iec104.StateStarted
+	}
+	testutil.Eventually(t, "both connections, one of them active", func() bool {
+		return g.Active() != nil && established(cs[0]) && established(cs[1])
 	})
 	if g.Active() != cs[0] {
 		// The second path was established first.

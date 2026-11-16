@@ -34,7 +34,7 @@ func (c *Client) reconnectLoop() {
 			c.mu.Lock()
 			c.dialing = false
 			c.mu.Unlock()
-			c.setState(iec104.StateDisconnected, nil)
+			c.setState(iec104.StateDisconnected, c.failure())
 			return
 		}
 		// Still connecting: report the failed attempt.

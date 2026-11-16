@@ -16,6 +16,7 @@ import (
 	"github.com/otfabric/go-iec60870-5/iec104/client"
 	"github.com/otfabric/go-iec60870-5/iec104/internal/testutil"
 	"github.com/otfabric/go-iec60870-5/iec104/server"
+	"github.com/otfabric/go-iec60870-5/internal/testutil/leakcheck"
 )
 
 // R2-1: Group.Close called from the state handler of one of the group's
@@ -88,8 +89,9 @@ func TestReview2GroupSwitchoverFromStateHandler(t *testing.T) {
 // was being called on the goroutine of a Switchover), and the handler is
 // called again after Close has returned.
 func TestReview2GroupCloseDoesNotWaitForSwitchHandler(t *testing.T) {
-	a := orderingServe(t, server.HandlerFunc(confirming))
-	b := orderingServe(t, server.HandlerFunc(confirming))
+	leaks := leakcheck.Check(t)
+	sa, a := orderingServer(t, server.HandlerFunc(confirming))
+	sb, b := orderingServer(t, server.HandlerFunc(confirming))
 	var (
 		armed   atomic.Bool
 		inside  = make(chan struct{})
@@ -134,7 +136,10 @@ func TestReview2GroupCloseDoesNotWaitForSwitchHandler(t *testing.T) {
 	if n := running.Load(); n != 0 {
 		t.Errorf("Group.Close returned while the switch handler was still running")
 	}
-	time.Sleep(200 * time.Millisecond)
+	// With both stations closed too, once every goroutine the test started
+	// has ended nothing is left that could call the switch handler.
+	_, _ = sa.Close(), sb.Close()
+	leaks()
 	if n := late.Load(); n != 0 {
 		t.Errorf("the switch handler was called %d times after Group.Close returned", n)
 	}

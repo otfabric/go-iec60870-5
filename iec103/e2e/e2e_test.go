@@ -14,6 +14,7 @@ import (
 
 	iec60870 "github.com/otfabric/go-iec60870-5"
 	"github.com/otfabric/go-iec60870-5/cp"
+	"github.com/otfabric/go-iec60870-5/ft12"
 	"github.com/otfabric/go-iec60870-5/iec103"
 	"github.com/otfabric/go-iec60870-5/iec103/client"
 	"github.com/otfabric/go-iec60870-5/iec103/server"
@@ -246,6 +247,8 @@ type options struct {
 	server func(*server.Config)
 	wrap   func(io.ReadWriteCloser) io.ReadWriteCloser
 	link   time.Duration // link time-out, default 50 ms
+	// onFrame is the client's link.Config.OnFrame.
+	onFrame func(tx bool, f ft12.Frame)
 }
 
 func start(t *testing.T, o options) *rig {
@@ -285,8 +288,10 @@ func start(t *testing.T, o options) *rig {
 	if o.wrap != nil {
 		cl = o.wrap(a)
 	}
+	clc := lc
+	clc.OnFrame = o.onFrame
 	r.c, err = client.New(cl, client.Config{
-		Link: lc, LinkAddr: 3, ResetFCB: o.resetFCB, NoInitGI: o.noInit, NoInitTimeSync: o.noInit,
+		Link: clc, LinkAddr: 3, ResetFCB: o.resetFCB, NoInitGI: o.noInit, NoInitTimeSync: o.noInit,
 		PollInterval: 5 * time.Millisecond, RetryInterval: 50 * time.Millisecond, RequestTimeout: o.timeout,
 		Handler: func(a *iec103.ASDU) { r.got <- a }, OnState: o.onState, Logger: o.logger,
 	})
@@ -656,10 +661,35 @@ func TestLinkLoss(t *testing.T) {
 // TestRequestFailsOnLinkLoss checks that a pending request ends with
 // ErrLinkDown when the link is lost while it waits.
 func TestRequestFailsOnLinkLoss(t *testing.T) {
-	r := start(t, options{noInit: true, handler: true})
+	// confirmed receives the positive confirmation the client receives
+	// after it sent the user data of the command.
+	confirmed := make(chan struct{}, 1)
+	var sent atomic.Bool
+	r := start(t, options{noInit: true, handler: true, onFrame: func(tx bool, f ft12.Frame) {
+		switch {
+		case tx && f.Kind == ft12.KindVariable && link.Control(f.Control).Func() == link.FuncUserDataConf:
+			sent.Store(true)
+		case !tx && sent.Load() && (f.Kind == ft12.KindSingle || f.Kind == ft12.KindFixed && link.Control(f.Control).Func() == link.FuncAck):
+			select {
+			case confirmed <- struct{}{}:
+			default:
+			}
+		}
+	}})
 	done := make(chan error, 1)
 	go func() { done <- r.c.Command(ctx(t), fun, 23, iec103.DPIOn) }()
-	time.Sleep(100 * time.Millisecond)
+	// The command waits for its acknowledgement: the equipment holds it
+	// and the link layer confirmed it.
+	select {
+	case <-r.dev.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the command did not reach the equipment")
+	}
+	select {
+	case <-confirmed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the command was not confirmed")
+	}
 	r.line.mute(true)
 	select {
 	case err := <-done:

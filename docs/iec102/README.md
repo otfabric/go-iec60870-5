@@ -110,7 +110,11 @@ collects at most `Config.MaxResult` ASDUs (131072 by default), then ends
 with `iec102.ErrResultLimit` and the ASDUs so far. `Done` and `Err` tell
 when and why the client stopped; a `Handler` or `OnState` that does not
 return normally is logged with its stack and closes the client, and both
-may call `Close`, which then returns at once. The typed
+may call `Close`, which then returns at once. `OnState` is called on a
+goroutine of the client's own, one change at a time and in order,
+`StateClosed` last, outside the request slot: a request made from it is
+answered, after the request in progress; the request that changed the
+state returns once `OnState` has returned for that change. The typed
 helpers are `ReadProductSpec`, `ReadTime`, `ReadTotals` (any of the 20 read
 commands C_CI_NA_2 .. C_CI_NU_2) and `ReadSinglePoints`; both keep only
 the data of the requested record address.
@@ -126,6 +130,8 @@ Other requests go to the `Handler`, which answers with `Send` and `Mirror`.
 All answers are class 2 data. The `Handler`, `Clock` and `OnState` may call
 `Close`, which then returns at once; one that does not return normally is
 logged with its stack and stops the server, and `Err` reports it.
+`OnState` is called one change at a time and in order, `StateClosed`
+last: Close waits for a call in progress before it reports `StateClosed`.
 
 ## Not implemented
 

@@ -8,6 +8,7 @@ import (
 	"crypto/x509/pkix"
 	"errors"
 	"fmt"
+	"net"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -555,6 +556,27 @@ func TestDataTransfer(t *testing.T) {
 	})
 }
 
+// testFrames counts the TESTFR frames a client sends and receives, and
+// signals each.
+type testFrames struct {
+	iec104.NopMetrics
+	n  atomic.Int64
+	ch chan struct{}
+}
+
+func (m *testFrames) count(f apci.Frame) {
+	if f.Format == apci.FormatU && (f.Function == apci.TestFRAct || f.Function == apci.TestFRCon) {
+		m.n.Add(1)
+		select {
+		case m.ch <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (m *testFrames) OnFrameSent(_ net.Addr, f apci.Frame, _ int)     { m.count(f) }
+func (m *testFrames) OnFrameReceived(_ net.Addr, f apci.Frame, _ int) { m.count(f) }
+
 // An idle connection is kept alive by test frames, whichever side's t3 is
 // shorter, and stays usable.
 func TestIdleConnection(t *testing.T) {
@@ -565,15 +587,22 @@ func TestIdleConnection(t *testing.T) {
 		srv, cli apci.Params
 	}{{"station tests", short, long}, {"client tests", long, short}, {"both test", short, short}} {
 		t.Run(tc.name, func(t *testing.T) {
-			tm := &testutil.Metrics{}
-			l := start(t, []server.Option{server.WithParams(tc.srv)}, client.WithParams(tc.cli), client.WithMetrics(tm))
+			tf := &testFrames{ch: make(chan struct{}, 1)}
+			l := start(t, []server.Option{server.WithParams(tc.srv)}, client.WithParams(tc.cli), client.WithMetrics(tf))
 			c := l.dial(t)
-			time.Sleep(1500 * time.Millisecond)
+			// Three link tests with nothing else on the connection: about a
+			// second of idling with t3 = 300ms.
+			deadline := time.NewTimer(30 * time.Second)
+			defer deadline.Stop()
+			for tf.n.Load() < 6 {
+				select {
+				case <-tf.ch:
+				case <-deadline.C:
+					t.Fatalf("%d TESTFR frames: the idle test did not run", tf.n.Load())
+				}
+			}
 			if c.State() != iec104.StateStarted {
 				t.Fatalf("state %s after idling", c.State())
-			}
-			if _, _, sent, received, _ := tm.Snapshot(); sent+received < 8 {
-				t.Errorf("only %d frames in 1.5s with t3 = 300ms: the idle test did not run", sent+received)
 			}
 			if _, err := c.Interrogate(context.Background(), l.ca, asdu.QOIStation); err != nil {
 				t.Errorf("Interrogate after idling: %v", err)
@@ -1032,8 +1061,16 @@ func TestSecurityStations(t *testing.T) {
 	l := &link{st: station.Start(t, fx, srv...), fx: fx, ca: fx.Station.CommonAddr, opts: cli, secure: controlling}
 	ctx := context.Background()
 
+	// changed is signalled after every state change of a connection of the
+	// group, which State reports before.
+	changed := make(chan struct{}, 1)
 	g, err := client.NewGroup([]string{l.st.Loopback(), l.st.Loopback()}, append(cli, controlling(t),
-		client.WithRequestTimeout(5*time.Second))...)
+		client.WithRequestTimeout(5*time.Second), client.WithStateHandler(func(iec104.State, error) {
+			select {
+			case changed <- struct{}{}:
+			default:
+			}
+		}))...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1054,29 +1091,50 @@ func TestSecurityStations(t *testing.T) {
 			}
 		}
 	}
-	// associations returns the distinct associations of the started sessions.
-	associations := func() map[*sec.Endpoint]int {
+	// carried checks that each of the two associations is up and carried
+	// by one started session. A session in STOPDT keeps its association,
+	// the group's standby that of the group, and carries nothing.
+	carried := func(what string) {
+		t.Helper()
 		m := map[*sec.Endpoint]int{}
 		for _, s := range l.st.Server.Sessions() {
-			if ep := s.Security(); ep != nil && ep.Status().Up {
+			if ep := s.Security(); s.Started() && ep != nil && ep.Status().Up {
 				m[ep]++
 			}
 		}
-		return m
+		if len(m) != 2 {
+			t.Errorf("%s: %d associations carried, want 2", what, len(m))
+		}
+		for ep, n := range m {
+			if n != 1 {
+				t.Errorf("%s: the association of AIM %d carried by %d started sessions, want 1", what, ep.Status().AIM, n)
+			}
+		}
 	}
 
 	interrogate("first path")
-	if n := len(associations()); n != 2 {
-		t.Errorf("first path: %d associations carried, want 2", n)
+	carried("first path")
+	// Switchover needs the standby: the other connection of the group,
+	// established and stopped, which Connect does not wait for.
+	deadline := time.NewTimer(30 * time.Second)
+	defer deadline.Stop()
+	for standby := false; !standby; {
+		for _, c := range g.Clients() {
+			standby = standby || (c != g.Active() && c.State() == iec104.StateStopped)
+		}
+		if !standby {
+			select {
+			case <-changed:
+			case <-deadline.C:
+				t.Fatal("no standby connection")
+			}
+		}
 	}
 	if err := g.Switchover(ctx); err != nil {
 		t.Fatalf("Switchover: %v", err)
 	}
 	interrogate("after the switchover")
-	testutil.Eventually(t, "both stations carried by one session each", func() bool {
-		m := associations()
-		return len(m) == 2 && m[l.st.Server.Sessions()[0].Security()] == 1
-	})
+	carried("after the switchover")
 	for _, s := range l.st.Server.Sessions() {
 		if st := s.Security().Status(); st.AIM != 7 && st.AIM != 8 {
 			t.Errorf("session %d bound to the association of AIM %d", s.ID(), st.AIM)

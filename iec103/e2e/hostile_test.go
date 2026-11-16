@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/otfabric/go-iec60870-5/asdu"
@@ -62,13 +63,17 @@ func (h *commands) count(rii uint8) int {
 	return h.runs[rii]
 }
 
+// waitRuns waits until the command with rii was executed want times and
+// checks that it was not executed more often. It runs in a
+// testing/synctest bubble: once every goroutine of the bubble is blocked,
+// the station has handled every command it accepted.
 func waitRuns(t *testing.T, h *commands, rii uint8, want int) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for h.count(rii) < want && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
-	time.Sleep(30 * time.Millisecond)
+	synctest.Wait()
 	if n := h.count(rii); n != want {
 		t.Fatalf("command RII %d executed %d times, want %d", rii, n, want)
 	}
@@ -117,6 +122,9 @@ func hostileServer(t *testing.T, h *commands, mod func(*server.Config)) (*server
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A case that fails before done still stops the station (Close is
+	// idempotent), so that its bubble ends.
+	t.Cleanup(func() { _ = s.Close(); _ = b.Close() })
 	rp := serialline.NewRawPrimary(serialline.NewPeer(t, b, p1), 3)
 	rp.Timeout = 200 * time.Millisecond
 	return s, rp, func() {
@@ -130,10 +138,13 @@ func hostileServer(t *testing.T, h *commands, mod func(*server.Config)) (*server
 }
 
 // legitimate checks that the server serves a controlling system that
-// behaves: link initialization and a general interrogation to its end.
+// behaves: link initialization and a general interrogation to its end. It
+// runs in a testing/synctest bubble: once every goroutine of the bubble is
+// blocked, the station has answered what came before, and those answers
+// are drained.
 func legitimate(t *testing.T, rp *serialline.RawPrimary) {
 	t.Helper()
-	time.Sleep(50 * time.Millisecond)
+	synctest.Wait()
 	rp.Drain()
 	rp.Init()
 	rp.PollAll(4096)
@@ -291,6 +302,16 @@ func TestHostileServer(t *testing.T) {
 			if nacks == 0 {
 				t.Error("a flood of commands to a slow handler was never refused with DFC")
 			}
+			// The handler works off the commands it accepted; a controlling
+			// system that behaves sends user data again once DFC is clear
+			// (clause 6.3).
+			deadline := time.Now().Add(5 * time.Second)
+			for link.Control(rp.Expect(link.FuncRequestStatus, nil, int(link.FuncStatus)).Control).DFC() {
+				if time.Now().After(deadline) {
+					t.Fatal("DFC still set after the flood")
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
 			legitimate(t, rp)
 		}},
 		{"half-open line with the longest length", 0, nil, func(t *testing.T, _ *server.Server, rp *serialline.RawPrimary, _ *commands) {
@@ -312,7 +333,7 @@ func TestHostileServer(t *testing.T) {
 			rp.Init()
 			rp.PollAll(64)
 			rp.Expect(link.FuncUserDataConf, gi(t, 5), 0, -1)
-			time.Sleep(50 * time.Millisecond)
+			synctest.Wait() // the answers of the general interrogation are queued
 			rp.Poll(1)
 			// Reset CU clears the queues; the identification comes first.
 			rp.Init()
@@ -329,17 +350,38 @@ func TestHostileServer(t *testing.T) {
 			rp.Init()
 			rp.MustRaw(frame(t, link.FuncUserDataConf, true, true, 3, gi(t, 1))[:6])
 			_ = rp.End.Close()
-			time.Sleep(50 * time.Millisecond)
+			select {
+			case <-s.Done():
+			case <-time.After(closeBound):
+				t.Fatal("server did not stop when the line closed")
+			}
 		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			h := &commands{runs: map[uint8]int{}, slow: tc.slow}
-			s, rp, done := hostileServer(t, h, tc.mod)
-			tc.run(t, s, rp, h)
-			done()
+			// The station's timers, the slow handler and the pauses of the
+			// cases run on the fake clock of the bubble.
+			synctest.Test(t, func(t *testing.T) {
+				h := &commands{runs: map[uint8]int{}, slow: tc.slow}
+				s, rp, done := hostileServer(t, h, tc.mod)
+				tc.run(t, s, rp, h)
+				done()
+			})
 		})
 	}
+}
+
+// leaves polls state until it reports something other than s, at most for
+// bound, and reports whether it did.
+func leaves(state func() iec103.State, s iec103.State, bound time.Duration) bool {
+	deadline := time.Now().Add(bound)
+	for state() == s {
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return true
 }
 
 // misbehave returns a hook that applies bad while *on is set.
@@ -540,11 +582,20 @@ func TestHostileClient(t *testing.T) {
 				_ = serialline.Within(t, reqTimeout+closeBound, "broadcast", func() error { return c.BroadcastClockSync(time.Now()) })
 			}
 			if tc.down {
-				time.Sleep(200 * time.Millisecond)
-				if c.State() == iec103.StateUp {
+				if !leaves(c.State, iec103.StateUp, 200*time.Millisecond) {
 					t.Error("link still up")
 				}
-				if _, err := c.Interrogate(context.Background()); !errors.Is(err, iec103.ErrLinkDown) {
+				// The general interrogation the client makes after
+				// initialization (clause 7.4.1) can still hold the
+				// interrogation, ErrBusy, when the link has just gone down;
+				// on a link that is down it ends at once.
+				deadline := time.Now().Add(200 * time.Millisecond)
+				_, err := c.Interrogate(context.Background())
+				for errors.Is(err, iec103.ErrBusy) && time.Now().Before(deadline) {
+					time.Sleep(time.Millisecond)
+					_, err = c.Interrogate(context.Background())
+				}
+				if !errors.Is(err, iec103.ErrLinkDown) {
 					t.Errorf("request on a link that is down: %v", err)
 				}
 			}

@@ -45,7 +45,14 @@ type Client struct {
 	// dirty is set when a request to common address dirtyCA ended before
 	// its answer was complete: the next request drains the station first.
 
+	// notes are the state changes OnState has not been told yet, in the
+	// order of the changes (under mu); slotTold is closed when the last
+	// change made by the request holding the slot has been told (under
+	// mu). The notifier goroutine tells them; notified is closed when it
+	// has told StateClosed and ended.
+
 	// the goroutine of deliver
+	// the goroutine of notify
 
 	// why a callback stopped the client
 
@@ -68,9 +75,9 @@ New starts a controlling station on rw. Close stops it and closes rw when it is 
 func (c *Client) Close() error
 ```
 
-Close stops the station. Outstanding requests, and requests made afterwards, fail with [iec102.ErrClosed](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec102#ErrClosed). Close is safe to call more than once and from several goroutines: the first call closes the transport and returns its error; later calls return nil.
+Close stops the station. Outstanding requests, and requests made afterwards, fail with [iec102.ErrClosed](https://pkg.go.dev/github.com/otfabric/go-iec60870-5/iec102#ErrClosed). The first call returns when OnState has been told StateClosed. Close is safe to call more than once and from several goroutines: the first call closes the transport and returns its error; later calls return nil.
 
-Called from the Handler, Close cannot wait for the Handler's goroutine: it stops the client and returns nil at once, and the close completes, StateClosed reported included, when the Handler has returned.
+Called from the Handler or OnState, Close cannot wait for the goroutine it runs on: it stops the client and returns nil at once, and the close completes, StateClosed reported included, when that callback has returned.
 
 #### func (Client) CommonAddr
 
@@ -198,14 +205,19 @@ type Config struct {
 	// logged with its stack and closes the client; Err reports it. The
 	// ASDU is the Handler's own: the client keeps no reference to it.
 	Handler func(a *iec102.ASDU)
-	// OnState is called with each change of the link state, from the
-	// goroutine of the request that changed it (while that request holds
-	// the request slot), or from Close for StateClosed. It must return
-	// quickly. It must not issue a request, which waits for the request
-	// slot the calling request holds; start one in a new goroutine. It may
-	// call Close; the request then fails with [iec102.ErrClosed]. An
-	// OnState that does not return normally is logged and closes the
-	// client, as for the Handler; the request fails with ErrClosed.
+	// OnState is called with each change of the link state, one call at a
+	// time and in the order of the changes, StateClosed last. It runs on a
+	// goroutine of the client's own, outside the request slot: the request
+	// that changed the state goes on meanwhile, and returns once OnState
+	// has returned for that change (a request made from OnState itself
+	// does not wait). State reports a change before OnState for it is
+	// called. OnState should return soon: the next notification waits for
+	// it, and so does Close. It may call the client's methods: a request
+	// from it waits for the request in progress like any other. It may
+	// call Close, which then does not wait for OnState's goroutine: it
+	// returns at once, and the close completes, StateClosed reported
+	// included, when OnState has returned. An OnState that does not return
+	// normally is logged and closes the client, as for the Handler.
 	OnState func(s iec102.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger

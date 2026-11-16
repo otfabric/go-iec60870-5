@@ -33,6 +33,9 @@ type Session struct {
 	// transfer by the link's protocol goroutine, possibly before newSession
 	// has returned and set link.
 	lk atomic.Pointer[link.Link]
+	// takenOver is set when a takeover in a declared redundancy group ends
+	// the session, before its connection is closed.
+	takenOver atomic.Bool
 	// sec is the security of the session, nil without security.
 	sec *route
 	// metrics are the metrics of the server as the session calls them,
@@ -265,8 +268,10 @@ func (s *Session) Conn() net.Conn { return s.conn }
 func (s *Session) Context() context.Context { return s.ctx }
 
 // Started reports whether the controlling station has started data
-// transfer on this session.
-func (s *Session) Started() bool { return s.link.Started() }
+// transfer on this session. It is false from the moment another connection
+// of a declared redundancy group takes over ([WithRedundancyGroups]), which
+// ends this one: before the STARTDT con of the other is sent.
+func (s *Session) Started() bool { return !s.takenOver.Load() && s.link.Started() }
 
 // Err returns why the session ended: nil while it is running or when it
 // was closed by the server.

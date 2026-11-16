@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/otfabric/go-iec60870-5/asdu"
@@ -60,13 +61,17 @@ func (e *executions) count(k byte) int {
 	return e.runs[k]
 }
 
+// waitRuns waits until request k was executed want times and checks that
+// it was not executed more often. It runs in a testing/synctest bubble:
+// once every goroutine of the bubble is blocked, the station has handled
+// every request it accepted.
 func waitRuns(t *testing.T, e *executions, k byte, want int) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for e.count(k) < want && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
-	time.Sleep(30 * time.Millisecond)
+	synctest.Wait()
 	if n := e.count(k); n != want {
 		t.Fatalf("request %d executed %d times, want %d", k, n, want)
 	}
@@ -101,6 +106,9 @@ func hostileServer(t *testing.T, queue int) (*server.Server, *serialline.RawPrim
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A case that fails before done still stops the station (Close is
+	// idempotent), so that its bubble ends.
+	t.Cleanup(func() { _ = s.Close(); _ = b.Close() })
 	rp := serialline.NewRawPrimary(serialline.NewPeer(t, b, p2), linkAddr)
 	rp.Timeout = 200 * time.Millisecond
 	return s, rp, e, func() {
@@ -127,10 +135,13 @@ func frame(t testing.TB, fn byte, fcb, fcv bool, addr uint16, data []byte) []byt
 }
 
 // legitimate checks that the server serves a primary that behaves: it
-// initializes the link and reads the system time.
+// initializes the link and reads the system time. It runs in a
+// testing/synctest bubble: once every goroutine of the bubble is blocked,
+// the station has answered what came before, and those answers are
+// drained.
 func legitimate(t *testing.T, rp *serialline.RawPrimary) {
 	t.Helper()
-	time.Sleep(50 * time.Millisecond)
+	synctest.Wait()
 	rp.Drain()
 	rp.Init()
 	rp.PollAll(1 << 14)
@@ -267,7 +278,7 @@ func TestHostileServer(t *testing.T) {
 			for range 300 {
 				rp.Expect(link.FuncUserDataConf, all, 0, 1, -1)
 			}
-			time.Sleep(200 * time.Millisecond) // the requests still waiting are served
+			synctest.Wait() // the requests still waiting are served
 			if got := rp.PollAll(1 << 14); len(got) > 64 {
 				t.Fatalf("%d ASDUs queued, the bound is 64", len(got))
 			}
@@ -292,7 +303,7 @@ func TestHostileServer(t *testing.T) {
 			rp.Init()
 			all, _ := iec102.New(iec102.CauseActivation, commonAddr, 11, iec102.Read{T: iec102.C_CI_NU_2, First: 1, Last: 6, From: hour(1, 0), To: hour(3, 0)}).Encode(iec102.Params{})
 			rp.Expect(link.FuncUserDataConf, all, 0, -1)
-			time.Sleep(50 * time.Millisecond)
+			synctest.Wait() // the answers of the read are queued
 			rp.Poll(2)
 			rp.Init() // reset of remote link discards the answers left
 			if got := rp.PollAll(16); len(got) != 0 {
@@ -313,9 +324,13 @@ func TestHostileServer(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			s, rp, e, done := hostileServer(t, tc.queue)
-			tc.run(t, s, rp, e)
-			done()
+			// The station's timers and the pauses of the cases run on
+			// the fake clock of the bubble.
+			synctest.Test(t, func(t *testing.T) {
+				s, rp, e, done := hostileServer(t, tc.queue)
+				tc.run(t, s, rp, e)
+				done()
+			})
 		})
 	}
 }

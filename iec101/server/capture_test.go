@@ -82,7 +82,16 @@ func replayServer(t *testing.T, p capture.Params, addr uint16, steps []capture.S
 		answers[len(reqs)-1] = append(answers[len(reqs)-1], s.ASDU)
 	}
 	seen := 0
+	// handled receives one value per request, after the handler queued
+	// its answers: the handler runs on the server's goroutine.
+	handled := make(chan struct{}, len(reqs))
 	h := server.HandlerFunc(func(s *server.Server, a *asdu.ASDU) {
+		defer func() {
+			select {
+			case handled <- struct{}{}:
+			default: // more calls than requests: the comparison reports it
+			}
+		}()
 		i := seen
 		seen++
 		for _, x := range answers[i] {
@@ -153,7 +162,11 @@ func replayServer(t *testing.T, p capture.Params, addr uint16, steps []capture.S
 		if err != nil {
 			t.Fatalf("request %d: %v", i, err)
 		}
-		time.Sleep(10 * time.Millisecond) // the handler runs on its own goroutine
+		select {
+		case <-handled:
+		case <-ctx.Done():
+			t.Fatalf("request %d: the handler did not run", i)
+		}
 		poll(st)
 	}
 	want = slices.DeleteFunc(want, func(s string) bool { return slices.Contains(before, s) })

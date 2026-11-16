@@ -6,6 +6,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/otfabric/go-iec60870-5/cp"
@@ -61,55 +62,59 @@ func FuzzReceive(f *testing.F) {
 		iec103.New(iec103.CauseCommandNack, 3, fun, 16, iec103.TimeTagged{SIN: 2})))
 	f.Add([]byte{6, 5, 0x81, 4, 3, 0xFF, 3})
 	f.Fuzz(func(t *testing.T, data []byte) {
-		a, b := serialline.Pair()
-		defer func() { _ = b.Close() }()
-		rs := serialline.NewRawSecondary(serialline.NewPeer(t, b, ft12.Params{AddrSize: 1}), 3)
-		rs.Start()
-		c, err := New(a, Config{Link: link.Config{Timeout: 50 * time.Millisecond}, LinkAddr: 3, NoInitGI: true, NoInitTimeSync: true,
-			PollInterval: time.Millisecond, Handler: func(*iec103.ASDU) {}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func() { _ = c.Close() }()
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		if err := c.WaitUp(ctx); err != nil {
-			t.Fatal(err)
-		}
-		waiters := func() int { c.mu.Lock(); defer c.mu.Unlock(); return len(c.waiters) }
-		var wg sync.WaitGroup
-		start := func(req func() error) {
-			n := waiters()
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				t0 := time.Now()
-				_ = req()
-				if d := time.Since(t0); d > 3*time.Second {
-					t.Errorf("request returned after %v", d)
-				}
-			}()
-			for deadline := time.Now().Add(time.Second); waiters() == n && time.Now().Before(deadline); {
-				time.Sleep(100 * time.Microsecond)
+		// The client, the equipment and the line run in a testing/synctest
+		// bubble: synctest.Wait returns once every goroutine is blocked.
+		synctest.Test(t, func(t *testing.T) {
+			a, b := serialline.Pair()
+			defer func() { _ = b.Close() }()
+			rs := serialline.NewRawSecondary(serialline.NewPeer(t, b, ft12.Params{AddrSize: 1}), 3)
+			rs.Start()
+			c, err := New(a, Config{Link: link.Config{Timeout: 50 * time.Millisecond}, LinkAddr: 3, NoInitGI: true, NoInitTimeSync: true,
+				PollInterval: time.Millisecond, Handler: func(*iec103.ASDU) {}})
+			if err != nil {
+				t.Fatal(err)
 			}
-		}
-		start(func() error { _, err := c.Interrogate(ctx); return err })
-		start(func() error { return c.Command(ctx, fun, 16, iec103.DPIOn) })
-		start(func() error { _, err := c.ReadGroup(ctx, 1, iec103.KODActualValue); return err })
-		start(func() error { _, err := c.GenericInterrogation(ctx); return err })
-		start(func() error { _, err := c.ClockSync(ctx, time.Now()); return err })
-		start(func() error { _, err := c.DisturbanceList(ctx, fun); return err })
-		start(func() error { _, err := c.Disturbance(ctx, fun, 7); return err })
-		for len(data) > 0 {
-			n := min(int(data[0]), len(data)-1)
-			c.receive(data[1 : 1+n])
-			data = data[1+n:]
-		}
-		time.Sleep(time.Millisecond) // orders of the disturbance transfer
-		cancel()
-		wg.Wait()
-		if n := waiters(); n != 0 {
-			t.Fatalf("%d waiters left", n)
-		}
+			defer func() { _ = c.Close() }()
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if err := c.WaitUp(ctx); err != nil {
+				t.Fatal(err)
+			}
+			waiters := func() int { c.mu.Lock(); defer c.mu.Unlock(); return len(c.waiters) }
+			var wg sync.WaitGroup
+			start := func(req func() error) {
+				n := waiters()
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					t0 := time.Now()
+					_ = req()
+					if d := time.Since(t0); d > 3*time.Second {
+						t.Errorf("request returned after %v", d)
+					}
+				}()
+				for deadline := time.Now().Add(time.Second); waiters() == n && time.Now().Before(deadline); {
+					time.Sleep(100 * time.Microsecond)
+				}
+			}
+			start(func() error { _, err := c.Interrogate(ctx); return err })
+			start(func() error { return c.Command(ctx, fun, 16, iec103.DPIOn) })
+			start(func() error { _, err := c.ReadGroup(ctx, 1, iec103.KODActualValue); return err })
+			start(func() error { _, err := c.GenericInterrogation(ctx); return err })
+			start(func() error { _, err := c.ClockSync(ctx, time.Now()); return err })
+			start(func() error { _, err := c.DisturbanceList(ctx, fun); return err })
+			start(func() error { _, err := c.Disturbance(ctx, fun, 7); return err })
+			for len(data) > 0 {
+				n := min(int(data[0]), len(data)-1)
+				c.receive(data[1 : 1+n])
+				data = data[1+n:]
+			}
+			synctest.Wait() // the disturbance transfer sent the orders the data called for
+			cancel()
+			wg.Wait()
+			if n := waiters(); n != 0 {
+				t.Fatalf("%d waiters left", n)
+			}
+		})
 	})
 }

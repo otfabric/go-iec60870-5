@@ -29,6 +29,9 @@ type Client struct {
 	addr string
 	opts options
 	log  *logx.Logger
+	// metrics are the metrics of the client as it calls them, through
+	// call; nil without metrics.
+	metrics iec104.Metrics
 
 	mu        sync.Mutex
 	link      *link.Link
@@ -111,6 +114,9 @@ func New(addr string, opts ...Option) (*Client, error) {
 		log:       logx.New(o.logger, "iec104.client", "remote", addr),
 		closeCh:   make(chan struct{}),
 		closeDone: make(chan struct{}),
+	}
+	if o.metrics != nil {
+		c.metrics = clientMetrics{c: c, m: o.metrics}
 	}
 	c.idle = sync.NewCond(&c.notifyMu)
 	c.startIdle = sync.NewCond(&c.startMu)
@@ -203,7 +209,7 @@ func (c *Client) connect(ctx context.Context) error {
 		return c.connectFailed(c.addr, err)
 	}
 	remote := conn.RemoteAddr()
-	if m := c.opts.metrics; m != nil {
+	if m := c.metrics; m != nil {
 		m.OnConnect(remote)
 	}
 
@@ -213,7 +219,7 @@ func (c *Client) connect(ctx context.Context) error {
 		Role:    link.Controlling,
 		Params:  c.opts.params,
 		Log:     c.log,
-		Metrics: c.opts.metrics,
+		Metrics: c.metrics,
 		Drain:   true,
 		// A group follows the link itself: the dispatcher may be busy in
 		// the Handler long after the connection has changed or is lost.
@@ -465,7 +471,11 @@ func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 	if d == nil {
 		d = &net.Dialer{}
 	}
-	conn, err := d.DialContext(ctx, "tcp", c.addr)
+	var conn net.Conn
+	var err error
+	if !c.call("Dialer", func() { conn, err = d.DialContext(ctx, "tcp", c.addr) }) {
+		return nil, c.failure()
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -578,6 +588,72 @@ func (c *Client) stop(err error) {
 	}
 	c.failMu.Unlock()
 	_ = c.Close()
+}
+
+// call runs the application callback name. One that does not return
+// normally is logged with its stack and closes the client (see abort). It
+// reports whether f returned normally.
+func (c *Client) call(name string, f func()) bool {
+	if err := callback.Call(c.log, name, f); err != nil {
+		c.abort(err)
+		return false
+	}
+	return true
+}
+
+// abort closes the client after one of its callbacks did not return
+// normally, from any goroutine and without waiting: it may run on one that
+// Close waits for (Connect, the reconnect loop, the link's). Nothing more
+// that was received is given to the Handler; the state handler is told
+// "disconnected" with err, wrapped in [iec104.ErrClosed].
+func (c *Client) abort(err error) {
+	c.mu.Lock()
+	first := !c.closed
+	if first {
+		c.closed = true
+		close(c.closeCh)
+	}
+	l := c.last
+	c.mu.Unlock()
+	if !first {
+		return
+	}
+	c.failMu.Lock()
+	if c.failed == nil {
+		c.failed = fmt.Errorf("%w: %w", iec104.ErrClosed, err)
+	}
+	c.failMu.Unlock()
+	c.quiet.Store(true)
+	if l != nil {
+		l.Shutdown()
+	}
+	go c.finishClose(l)
+}
+
+// clientMetrics calls the metrics of the client through Client.call.
+type clientMetrics struct {
+	c *Client
+	m iec104.Metrics
+}
+
+func (cm clientMetrics) OnConnect(remote net.Addr) {
+	cm.c.call("Metrics.OnConnect", func() { cm.m.OnConnect(remote) })
+}
+
+func (cm clientMetrics) OnDisconnect(remote net.Addr, err error) {
+	cm.c.call("Metrics.OnDisconnect", func() { cm.m.OnDisconnect(remote, err) })
+}
+
+func (cm clientMetrics) OnFrameSent(remote net.Addr, f apci.Frame, size int) {
+	cm.c.call("Metrics.OnFrameSent", func() { cm.m.OnFrameSent(remote, f, size) })
+}
+
+func (cm clientMetrics) OnFrameReceived(remote net.Addr, f apci.Frame, size int) {
+	cm.c.call("Metrics.OnFrameReceived", func() { cm.m.OnFrameReceived(remote, f, size) })
+}
+
+func (cm clientMetrics) OnDecodeError(remote net.Addr, err error) {
+	cm.c.call("Metrics.OnDecodeError", func() { cm.m.OnDecodeError(remote, err) })
 }
 
 // failure returns why a callback closed the client, nil if none did.
@@ -903,7 +979,7 @@ func goroutineID() uint64 {
 
 func (c *Client) onLinkClose(l *link.Link, remote net.Addr, err error) {
 	local := errors.Is(err, iec104.ErrClosed)
-	if m := c.opts.metrics; m != nil {
+	if m := c.metrics; m != nil {
 		if local {
 			m.OnDisconnect(remote, nil)
 		} else {
@@ -943,6 +1019,11 @@ func (c *Client) onLinkClose(l *link.Link, remote net.Addr, err error) {
 	case local:
 		c.setState(iec104.StateDisconnected, c.failure())
 	default:
+		// A callback that closed the client meanwhile (the metrics'
+		// OnDisconnect above) names itself, as after a local close.
+		if f := c.failure(); f != nil {
+			err = f
+		}
 		c.setState(iec104.StateDisconnected, err)
 	}
 }
@@ -950,7 +1031,7 @@ func (c *Client) onLinkClose(l *link.Link, remote net.Addr, err error) {
 func (c *Client) onASDU(remote net.Addr, raw []byte) {
 	a, err := asdu.Decode(raw, c.opts.asduParams)
 	if err != nil {
-		if m := c.opts.metrics; m != nil {
+		if m := c.metrics; m != nil {
 			m.OnDecodeError(remote, err)
 		}
 		c.log.Warn("dropping undecodable ASDU", "error", err)

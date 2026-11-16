@@ -50,7 +50,10 @@ func TestReview2EventStuckAfterStartDuringStopping(t *testing.T) {
 		t.Fatalf("event 1: %v %v", f, err)
 	}
 	write(apci.NewU(apci.StopDTAct)) // event 1 is not acknowledged: the station is "stopping"
-	time.Sleep(100 * time.Millisecond)
+	testutil.Eventually(t, "the station stopping", func() bool {
+		ss := srv.Sessions()
+		return len(ss) == 1 && !ss[0].Started()
+	})
 	enqueue(t, srv, 2, 2) // refused by the link, waits for the next start
 	time.Sleep(100 * time.Millisecond)
 	write(apci.NewU(apci.StartDTAct))

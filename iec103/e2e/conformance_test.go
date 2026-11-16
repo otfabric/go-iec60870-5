@@ -211,14 +211,29 @@ func TestDFCHeldBack(t *testing.T) {
 		<-release
 		handled.Add(1)
 	})
-	r := start(t, options{custom: h, noInit: true, noDist: true})
+	// held is closed at the second answer with DFC set the client
+	// receives: the equipment reported that it takes no more user data,
+	// and the client made one more exchange after that, while the blocked
+	// handler keeps the equipment busy. User data in that exchange would
+	// be answered NACK and fail its Send.
+	held := make(chan struct{})
+	var dfc atomic.Int32
+	r := start(t, options{custom: h, noInit: true, noDist: true, onFrame: func(tx bool, f ft12.Frame) {
+		if !tx && f.Kind != ft12.KindSingle && link.Control(f.Control).DFC() && dfc.Add(1) == 2 {
+			close(held)
+		}
+	}})
 	priv := &iec103.ASDU{Type: 200, VSQ: 0x81, Cause: 1, CommonAddr: 3, Fun: fun, Inf: 1, Body: iec103.Raw{Data: []byte{1}}}
 	const n = 60
 	errs := make(chan error, n)
 	for range n {
 		go func() { errs <- r.c.Send(ctx(t), priv) }()
 	}
-	time.Sleep(300 * time.Millisecond)
+	select {
+	case <-held:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the equipment never set DFC")
+	}
 	close(release)
 	for range n {
 		if err := <-errs; err != nil {

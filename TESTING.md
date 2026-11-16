@@ -89,11 +89,11 @@ Every package whose tests start goroutines checks for leaks with
 | L6 Cancel a pending request | `TestCancellation` (client), `TestCancelledContexts` (link) | `iec101/e2e.TestRequestDeadlineWhileTheLinkRepeats`, `TestBalancedRequestDeadlineWhileTheLinkRepeats`, `TestBalancedSendAfterItsDeadline`; `iec103/e2e.TestRequestDeadlineWhileTheLinkRepeats`; `telecontrol` `FuzzDispatch` | - |
 | L7 Response after the request ended | `TestRequestTakesOnlyItsOwnAnswers`, `TestRequestsAllAtOnce` (client) | `iec102/e2e.TestUnfinishedAnswerNotTaken`, `iec103/e2e.TestStaleGIAnswers` | a late confirmation completes the next identical request (no transaction identifier: LIMITATIONS.md, docs/iec104/LIMITATIONS.md); no counter of late answers |
 | L8 Response after reconnect | `TestRetryAcrossReconnect` (client), `TestPendingRequestsWhenTransferStops` (e2e) | `iec101/e2e.TestLinkRecovery` | n/a for the serial servers and `link` (no reconnect) |
-| L9 Callback calls a public method | `TestRequestFromHandlerFailsAtOnce` (`ErrInHandler`), `TestReentrantStateHandlerDrivesTheClient` (client); server handlers call Session methods throughout | the serial server handlers answer through their station in every e2e suite; `TestRequestFromHandlerFailsAtOnce` in `iec101/e2e` (both modes) and `iec103/client`: a request from the Handler or OnState returns `ErrInHandler` at once | - |
+| L9 Callback calls a public method | `TestRequestFromHandlerFailsAtOnce` (`ErrInHandler`), `TestReentrantStateHandlerDrivesTheClient` (client); server handlers call Session methods throughout | the serial server handlers answer through their station in every e2e suite; `TestRequestFromHandlerFailsAtOnce` in `iec101/e2e` (both modes) and `iec103/client`: a request from the Handler or OnState returns `ErrInHandler` at once; `iec102/client.TestRequestFromOnState`: OnState runs outside the request slot, and a request it makes is answered | - |
 | L10 Callback calls Close | `TestOrderingHandlerCalledAfterCloseFromHandler` (client and server), `TestOrderingCloseFromServerCallbacks`, `TestReentrantCloseFromHandlerStopsReconnecting`, `TestReview2GroupCloseFromStateHandler`, `TestCloseFromTheStartHandler`, `TestCloseWaitsForTheStartHandler` (client), `TestCloseWaitsForCallbacks` (link) | Close from the callback itself: `link.TestL10CallbackClosesSynchronously` (the handlers, OnFrame), `iec101/e2e.TestL10CallbackClosesSynchronously` (Handler and OnState of client and server, both modes), `TestCloseFromCallbacksSynchronously` in `iec102/server` (Handler, Clock, OnState), `iec103/client` and `iec103/server` (Handler, OnTimeSync, DisturbanceSource, OnState), `iec102/client.TestCloseFromHandlerSynchronously`, `iec102/client.TestCloseFromOnState`; Close in a new goroutine: `link.TestL10CallbackClosesAsynchronously`, `iec101/e2e.TestL10CallbackClosesAsynchronously`, `TestCloseFromHandler` in the iec102 and iec103 clients and servers | - |
 | L11 Slow callback | `TestBurstWithSlowHandler` (server), `TestGroupFailsOverBehindABusyHandler` (client) | `iec101/e2e.TestServerBusySetsDFC` | no slow-handler test for the serial clients |
 | L12 Queue at capacity | `TestEventQueueOverflow` (with its dropped counter), `TestCloseWaitsForEventQueues`, `TestFileServerMaxTransfers` (server), `TestReceiveBackpressure`, `TestThrottledLinkStillProcessesAcks`, `TestSecurityOutputSlowAcknowledgementStaysBounded`, `TestSecurityOutputPeerPastWindowIsClosed` (link); the result bounds of the client: `TestInterrogateResultLimit`, `TestListFilesResultLimit`, `TestGetFileSectionLimit`, `TestExchangeQueueBound` | `iec101/e2e.TestServerUnbalancedEdges` (`ErrQueueFull`), `iec102/client.TestHandlerQueueFull`, `iec102/server.TestJunkAndBusy`, `iec103/server.TestClass1QueueFull`, `link` `FuzzSecondary` (response queue bound); the result bounds of the clients, with an allocation budget on the fake clock: `telecontrol.TestCollectResultLimit`, `iec101/e2e.TestInterrogationResultLimit`, `iec102/client.TestRequestResultLimit`, `iec103/client.TestInterrogationResultLimit`, `telecontrol.TestCollectQueueBound`; `iec103/client.TestWaitOverflow` (`ErrOverflow`); `link.TestExchangeEndsWithContextOnFullQueue` (a peer that stops reading), `iec103/server.TestDisturbanceChannelQueuedWhole` (a channel queued all or none) | no drop counters in the serial stations; server answers cut at the queue bound |
-| L13 Concurrent sessions | `TestOrderingSessionCallbacksOnOneGoroutine`, `TestDefaultGroupKeepsIndependentSessions`, `TestFileTransfersPerSession`, `TestUnauthenticatedMessageLeavesTheAssociation`, `TestAuthenticatedSessionTakesTheAssociationOver`, `TestPendingAssociationIsShared` (server) | n/a: one line and one peer per station | - |
+| L13 Concurrent sessions | `TestOrderingSessionCallbacksOnOneGoroutine`, `TestDefaultGroupKeepsIndependentSessions`, `TestTakeoverStopsThePreviousSessionAtOnce` (a takeover ends the previous session before the STARTDT con of the new one), `TestFileTransfersPerSession`, `TestUnauthenticatedMessageLeavesTheAssociation`, `TestAuthenticatedSessionTakesTheAssociationOver`, `TestPendingAssociationIsShared` (server) | n/a: one line and one peer per station | - |
 | L14 Failure during construction | the connect-failure tests of the client, `TestDialerWithoutConnection`; `TestServeRetriesAcceptErrors` (server); validation in `New` before any goroutine | `link.TestConfigErrors`, `iec101/e2e.TestConfigErrors`, the config tests of iec102 and iec103 | - |
 | L15 `Shutdown(ctx)` | n/a: no type has a graceful shutdown; `TestCloseDeliversWhatWasAcknowledged` (client) | n/a | - |
 | L16 Close racing reconnect | `TestCloseWhileLossIsBeingReportedWithReconnect`, `TestReentrantCloseFromHandlerStopsReconnecting`, `TestReview2GroupCloseRacingSwitchover`, `TestReview2GroupStress` (client) | `iec101/e2e.TestHostileBalancedServer` (Close while re-initializing), `TestWaitUpCloseWhileWaiting` | n/a for types without reconnect |
@@ -115,6 +115,27 @@ only its session: `TestStateHandlerPanicClosesOnlyItsSession`,
 panic). `Done` and `Err` of the iec102 client and
 the iec103 server: `TestDoneAndErr`; `Err` of the iec102 server:
 `TestErr`.
+
+The `Dialer` and the metrics of `iec104/client` close the
+client: `TestHookThatDoesNotReturnNormally` (the Dialer at Connect and
+at a reconnect, OnConnect, OnFrameSent, OnFrameReceived, OnDisconnect,
+OnRequest, each on the goroutine that calls it) and
+`TestMetricsThatDoNotReturnNormally` (every metrics callback, of
+`RequestMetrics` included). A logger call that does not return normally
+loses its entry and nothing else: `internal/logx.TestLoggerThatDoesNotReturnNormally`
+(every method, With and DebugEnabled included),
+`iec104/client.TestLoggerThatDoesNotReturnNormally` (client and
+station) and `iec101/e2e.TestLoggerThatDoesNotReturnNormally` (both
+modes, link layers included).
+
+OnState of the serial stations is called one change at a time and in the
+order of the changes, StateClosed last, also when Close runs while a call
+is in progress: `TestStateNotificationsInOrder` in `iec102/client`,
+`iec102/server`, `iec103/client` and `iec103/server`, and
+`iec101/e2e.TestServerStateNotificationsInOrder` and
+`TestClientStateNotificationsInOrder` (both modes), on the fake clock of
+`testing/synctest`. The servers' tests run on a transport that is not an
+`io.Closer`, whose pending Read Close does not wait for.
 
 ## Options
 

@@ -109,14 +109,19 @@ type Config struct {
 	// logged with its stack and closes the client; Err reports it. The
 	// ASDU is the Handler's own: the client keeps no reference to it.
 	Handler func(a *iec102.ASDU)
-	// OnState is called with each change of the link state, from the
-	// goroutine of the request that changed it (while that request holds
-	// the request slot), or from Close for StateClosed. It must return
-	// quickly. It must not issue a request, which waits for the request
-	// slot the calling request holds; start one in a new goroutine. It may
-	// call Close; the request then fails with [iec102.ErrClosed]. An
-	// OnState that does not return normally is logged and closes the
-	// client, as for the Handler; the request fails with ErrClosed.
+	// OnState is called with each change of the link state, one call at a
+	// time and in the order of the changes, StateClosed last. It runs on a
+	// goroutine of the client's own, outside the request slot: the request
+	// that changed the state goes on meanwhile, and returns once OnState
+	// has returned for that change (a request made from OnState itself
+	// does not wait). State reports a change before OnState for it is
+	// called. OnState should return soon: the next notification waits for
+	// it, and so does Close. It may call the client's methods: a request
+	// from it waits for the request in progress like any other. It may
+	// call Close, which then does not wait for OnState's goroutine: it
+	// returns at once, and the close completes, StateClosed reported
+	// included, when OnState has returned. An OnState that does not return
+	// normally is logged and closes the client, as for the Handler.
 	OnState func(s iec102.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger
@@ -156,9 +161,28 @@ type Client struct {
 	closeOnce sync.Once
 	closeErr  error
 
-	handlerID atomic.Uint64 // the goroutine of deliver
-	failMu    sync.Mutex
-	failed    error // why a callback stopped the client
+	// notes are the state changes OnState has not been told yet, in the
+	// order of the changes (under mu); slotTold is closed when the last
+	// change made by the request holding the slot has been told (under
+	// mu). The notifier goroutine tells them; notified is closed when it
+	// has told StateClosed and ended.
+	notes    []note
+	slotTold chan struct{}
+	wake     chan struct{}
+	notified chan struct{}
+
+	handlerID  atomic.Uint64 // the goroutine of deliver
+	notifierID atomic.Uint64 // the goroutine of notify
+	failMu     sync.Mutex
+	failed     error // why a callback stopped the client
+}
+
+// note is a change of the link state for OnState; told is closed once
+// OnState has returned for it.
+type note struct {
+	s    iec102.State
+	err  error
+	told chan struct{}
 }
 
 // New starts a controlling station on rw. Close stops it and closes rw
@@ -196,15 +220,18 @@ func New(rw io.ReadWriter, cfg Config) (*Client, error) {
 		return nil, fmt.Errorf("%w: %w", iec102.ErrInvalidConfig, err)
 	}
 	c := &Client{
-		cfg:     cfg,
-		log:     logx.New(cfg.Logger, "iec102.client", "link", cfg.LinkAddr),
-		pri:     pri,
-		sem:     make(chan struct{}, 1),
-		handled: make(chan *iec102.ASDU, 64),
+		cfg:      cfg,
+		log:      logx.New(cfg.Logger, "iec102.client", "link", cfg.LinkAddr),
+		pri:      pri,
+		sem:      make(chan struct{}, 1),
+		handled:  make(chan *iec102.ASDU, 64),
+		wake:     make(chan struct{}, 1),
+		notified: make(chan struct{}),
 	}
 	c.ctx, c.cancel = context.WithCancel(context.Background())
 	c.wg.Add(1)
 	go c.deliver()
+	go c.notify()
 	return c, nil
 }
 
@@ -236,15 +263,17 @@ func (c *Client) Err() error {
 }
 
 // Close stops the station. Outstanding requests, and requests made
-// afterwards, fail with [iec102.ErrClosed]. Close is safe to call more
-// than once and from several goroutines: the first call closes the
-// transport and returns its error; later calls return nil.
+// afterwards, fail with [iec102.ErrClosed]. The first call returns when
+// OnState has been told StateClosed. Close is safe to call more than once
+// and from several goroutines: the first call closes the transport and
+// returns its error; later calls return nil.
 //
-// Called from the Handler, Close cannot wait for the Handler's goroutine:
-// it stops the client and returns nil at once, and the close completes,
-// StateClosed reported included, when the Handler has returned.
+// Called from the Handler or OnState, Close cannot wait for the goroutine
+// it runs on: it stops the client and returns nil at once, and the close
+// completes, StateClosed reported included, when that callback has
+// returned.
 func (c *Client) Close() error {
-	if c.handlerID.Load() == callback.Goroutine() {
+	if id := callback.Goroutine(); id == c.handlerID.Load() || id == c.notifierID.Load() {
 		c.closeAsync()
 		return nil
 	}
@@ -278,23 +307,62 @@ func (c *Client) close() error {
 	if !first {
 		return nil
 	}
-	// Outside the Once: OnState(StateClosed) may call Close.
+	// StateClosed is the last change: the notifier tells it after every
+	// earlier one and ends. close never runs on the notifier (Close from
+	// OnState completes the close on a new goroutine).
 	c.setState(iec102.StateClosed, nil)
+	<-c.notified
 	return c.closeErr
 }
 
+// setState records a change of the link state and queues it for OnState.
+// The request holding the slot is the only one that changes the state
+// before StateClosed, so slotTold is the notice of its last change.
 func (c *Client) setState(s iec102.State, err error) {
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.state == s || c.state == iec102.StateClosed {
-		c.mu.Unlock()
 		return
 	}
 	c.state = s
-	c.mu.Unlock()
-	c.log.Info("link state", "state", s.String(), "error", err)
-	if f := c.cfg.OnState; f != nil {
-		if cerr := callback.Call(c.log, "OnState", func() { f(s, err) }); cerr != nil {
-			c.stop(cerr)
+	n := note{s: s, err: err, told: make(chan struct{})}
+	c.notes = append(c.notes, n)
+	if s != iec102.StateClosed {
+		c.slotTold = n.told
+	}
+	select {
+	case c.wake <- struct{}{}:
+	default:
+	}
+}
+
+// notify tells OnState the changes of the link state, one at a time and in
+// order, outside the request slot, and ends after StateClosed.
+func (c *Client) notify() {
+	defer close(c.notified)
+	c.notifierID.Store(callback.Goroutine())
+	for {
+		<-c.wake
+		for {
+			c.mu.Lock()
+			if len(c.notes) == 0 {
+				c.mu.Unlock()
+				break
+			}
+			n := c.notes[0]
+			c.notes[0] = note{}
+			c.notes = c.notes[1:]
+			c.mu.Unlock()
+			c.log.Info("link state", "state", n.s.String(), "error", n.err)
+			if f := c.cfg.OnState; f != nil {
+				if cerr := callback.Call(c.log, "OnState", func() { f(n.s, n.err) }); cerr != nil {
+					c.stop(cerr)
+				}
+			}
+			close(n.told)
+			if n.s == iec102.StateClosed {
+				return
+			}
 		}
 	}
 }
@@ -318,7 +386,10 @@ func (c *Client) deliver() {
 	}
 }
 
-// acquire takes the request slot and bounds ctx by RequestTimeout.
+// acquire takes the request slot and bounds ctx by RequestTimeout. The
+// function it returns gives the slot up and then waits until OnState has
+// been told the changes the request made, unless the request runs on the
+// notifier itself (it was made from OnState).
 func (c *Client) acquire(ctx context.Context) (context.Context, func(), error) {
 	if c.State() == iec102.StateClosed {
 		return nil, nil, iec102.ErrClosed
@@ -336,7 +407,22 @@ func (c *Client) acquire(ctx context.Context) (context.Context, func(), error) {
 	}
 	ctx, stop := context.WithCancel(ctx)
 	unhook := context.AfterFunc(c.ctx, stop)
-	return ctx, func() { unhook(); stop(); cancel(); <-c.sem }, nil
+	return ctx, func() {
+		unhook()
+		stop()
+		cancel()
+		c.mu.Lock()
+		told := c.slotTold
+		c.slotTold = nil
+		c.mu.Unlock()
+		<-c.sem
+		if told != nil && c.notifierID.Load() != callback.Goroutine() {
+			select {
+			case <-told:
+			case <-c.notified:
+			}
+		}
+	}, nil
 }
 
 // linkErr marks the link down after a transport failure or a station that

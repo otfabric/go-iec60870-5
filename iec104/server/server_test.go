@@ -600,7 +600,9 @@ func TestTLSHandshakeIsBounded(t *testing.T) {
 	serverTLS, _ := testutil.TLSConfigs(t)
 	p := testutil.Params()
 	p.T0 = 300 * time.Millisecond
-	srv, err := server.New(nil, server.WithParams(p), server.WithTLS(serverTLS), server.WithLogger(iec60870.NopLogger()))
+	var accepted atomic.Int32
+	srv, err := server.New(nil, server.WithParams(p), server.WithTLS(serverTLS), server.WithLogger(iec60870.NopLogger()),
+		server.WithAccept(func(net.Addr) bool { accepted.Add(1); return true }))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -630,7 +632,9 @@ func TestTLSHandshakeIsBounded(t *testing.T) {
 	// Close does not wait for a handshake in progress.
 	conn2 := silent()
 	defer func() { _ = conn2.Close() }()
-	time.Sleep(50 * time.Millisecond)
+	// The server has accepted the second connection: its handshake begins
+	// and waits for the peer.
+	testutil.Eventually(t, "the second connection accepted", func() bool { return accepted.Load() == 2 })
 	done := make(chan struct{})
 	go func() {
 		_ = srv.Close()

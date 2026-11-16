@@ -4,6 +4,7 @@ package server_test
 
 import (
 	"context"
+	"net"
 	"runtime"
 	"strings"
 	"sync"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/otfabric/go-iec60870-5/asdu"
 	iec104 "github.com/otfabric/go-iec60870-5/iec104"
+	"github.com/otfabric/go-iec60870-5/iec104/apci"
 	"github.com/otfabric/go-iec60870-5/iec104/client"
 	"github.com/otfabric/go-iec60870-5/iec104/internal/testutil"
 	"github.com/otfabric/go-iec60870-5/iec104/server"
@@ -67,22 +69,42 @@ func TestOrderingHandlerCalledAfterCloseFromHandler(t *testing.T) {
 	var closed atomic.Bool
 	var after atomic.Int32
 	var first sync.Once
+	received := &iFrames{n: 5, all: make(chan struct{})}
+	ended := make(chan struct{}, 1)
 	_, addr := serve(t, server.HandlerFunc(func(s *server.Session, req *asdu.ASDU) {
 		if closed.Load() {
 			after.Add(1)
 			return
 		}
 		first.Do(func() {
-			time.Sleep(300 * time.Millisecond) // let the other commands arrive
+			// The other commands have arrived: they wait for the Handler.
+			select {
+			case <-received.all:
+			case <-time.After(5 * time.Second):
+				t.Errorf("the other commands did not arrive")
+			}
 			_ = s.Close()
 			closed.Store(true)
 		})
+	}), server.WithMetrics(received), server.WithStateHandler(func(_ *server.Session, st iec104.State, _ error) {
+		if st == iec104.StateDisconnected {
+			select {
+			case ended <- struct{}{}:
+			default:
+			}
+		}
 	}))
 	c := connect(t, addr)
 	for i := range 5 {
 		_ = c.Send(context.Background(), asdu.New(asdu.CauseActivation, 1, asdu.SingleCommand{IOA: asdu.IOA(100 + i), Value: true}))
 	}
-	time.Sleep(time.Second)
+	// "disconnected" is the session's last callback, on the goroutine of
+	// the Handler: a Handler call for a queued command would come first.
+	select {
+	case <-ended:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the session did not end")
+	}
 	if n := after.Load(); n != 0 {
 		t.Errorf("Handler was called %d more times after Session.Close returned in the Handler", n)
 	}
@@ -97,12 +119,14 @@ func TestOrderingHandlerCalledAfterCloseFromHandler(t *testing.T) {
 func TestOrderingLateStoppedDuplicatesEvents(t *testing.T) {
 	gate := make(chan struct{})
 	entered := make(chan struct{}, 1)
+	var handled atomic.Int32
 	srv, addr := serve(t, server.HandlerFunc(func(s *server.Session, req *asdu.ASDU) {
 		select {
 		case entered <- struct{}{}:
 		default:
 		}
 		<-gate
+		handled.Add(1)
 	}))
 	rx := &events{}
 	c := connect(t, addr, client.WithHandler(rx))
@@ -120,9 +144,17 @@ func TestOrderingLateStoppedDuplicatesEvents(t *testing.T) {
 	enqueue(t, srv, 1, 3)
 	testutil.Eventually(t, "delivery", func() bool { return len(rx.values()) >= 3 })
 	close(gate) // before t2: the three events are sent and not yet acknowledged
-	time.Sleep(500 * time.Millisecond)
-	if got := rx.values(); !isRange(got, 1, 3) {
-		t.Errorf("events received: %v, want [1 2 3]", got)
+	// A second command reaches the Handler after the late "stopped" and
+	// "started" have been delivered; an event enqueued then follows
+	// whatever they made the station send again.
+	if err := c.Send(ctx, asdu.New(asdu.CauseActivation, 1, asdu.SingleCommand{IOA: 2, Value: true})); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Eventually(t, "the second command handled", func() bool { return handled.Load() == 2 })
+	enqueue(t, srv, 4, 4)
+	testutil.Eventually(t, "the event after", func() bool { return len(rx.values()) >= 4 })
+	if got := rx.values(); !isRange(got, 1, 4) {
+		t.Errorf("events received: %v, want [1 2 3 4]", got)
 	}
 }
 
@@ -172,6 +204,21 @@ func TestOrderingConcurrentServerClose(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("the second Server.Close never returned")
+	}
+}
+
+// iFrames is a station's metrics: it counts the I frames its sessions
+// receive and closes all at the n-th.
+type iFrames struct {
+	iec104.NopMetrics
+	n   int32
+	got atomic.Int32
+	all chan struct{}
+}
+
+func (m *iFrames) OnFrameReceived(_ net.Addr, f apci.Frame, _ int) {
+	if f.Format == apci.FormatI && m.got.Add(1) == m.n {
+		close(m.all)
 	}
 }
 
@@ -328,12 +375,14 @@ func TestOrderingEventsFollowTheLinkNotTheHandler(t *testing.T) {
 	}
 	enqueue(t, srv, 4, 6)
 	testutil.Eventually(t, "events on the second connection", func() bool { return len(rxB.values()) == 3 })
-	time.Sleep(200 * time.Millisecond)
+	// An event enqueued now follows whatever the station would send twice.
+	enqueue(t, srv, 7, 7)
+	testutil.Eventually(t, "the event after", func() bool { return len(rxB.values()) >= 4 })
 	if got := rxA.values(); !isRange(got, 1, 3) {
 		t.Errorf("first connection received %v, want [1 2 3]", got)
 	}
-	if got := rxB.values(); !isRange(got, 4, 6) {
-		t.Errorf("second connection received %v, want [4 5 6]", got)
+	if got := rxB.values(); !isRange(got, 4, 7) {
+		t.Errorf("second connection received %v, want [4 5 6 7]", got)
 	}
 }
 

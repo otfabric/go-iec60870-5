@@ -41,6 +41,7 @@ companion standards add their own layers, described in
 | Client has no connection | `iec104.ErrNotConnected` | - |
 | Data transfer stopped (before STARTDT, after STOPDT) | `iec104.ErrNotStarted` | stays up |
 | Operation after `Close` | `iec104.ErrClosed` | - |
+| `Connect`, the reconnect loop or a request whose client callback (`Dialer`, a `Metrics` hook, the Handler, the state or start handler) did not return normally | `iec104.ErrClosed`; the "disconnected" notice wraps it and names the callback | closed |
 | Peer closed, write or read failed | `iec104.ErrConnectionLost` | closed |
 | I frame not acknowledged or U frame not confirmed within `t1` | `iec104.ErrTimeout` | closed |
 | Malformed APDU, sequence error, I frame in STOPDT | `iec104.ErrProtocol` | closed |

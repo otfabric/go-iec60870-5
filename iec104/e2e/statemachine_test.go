@@ -18,6 +18,7 @@ import (
 	"github.com/otfabric/go-iec60870-5/iec104/client"
 	"github.com/otfabric/go-iec60870-5/iec104/internal/testutil"
 	"github.com/otfabric/go-iec60870-5/iec104/server"
+	"github.com/otfabric/go-iec60870-5/internal/testutil/leakcheck"
 )
 
 // These tests are about the two state machines staying in step: what each
@@ -379,12 +380,14 @@ func TestConcurrentControl(t *testing.T) {
 		c := l.dial(t, client.WithRequestTimeout(2*time.Second))
 		session := onlySession(t, l.st.Server)
 
+		var calls atomic.Int64
 		storm := func(n int) {
 			var wg sync.WaitGroup
 			for g := range 8 {
 				wg.Go(func() {
 					rng := rand.New(rand.NewSource(int64(g)))
 					for i := range n {
+						calls.Add(1)
 						var err error
 						switch rng.Intn(6) {
 						case 0:
@@ -435,8 +438,9 @@ func TestConcurrentControl(t *testing.T) {
 
 		// Close under load: every call returns.
 		done := make(chan struct{})
+		before := calls.Load()
 		go func() { storm(200); close(done) }()
-		time.Sleep(5 * time.Millisecond)
+		testutil.Eventually(t, "the storm under way", func() bool { return calls.Load() >= before+8 })
 		if err := c.Close(); err != nil {
 			t.Errorf("Close: %v", err)
 		}
@@ -458,6 +462,7 @@ func TestNothingAfterClose(t *testing.T) {
 		event := asdu.New(asdu.CauseSpontaneous, l.ca, asdu.MeasuredScaled{IOA: 201, Value: 1})
 
 		for round := range 20 {
+			leaks := leakcheck.Check(t)
 			var closed atomic.Bool
 			var after atomic.Int64
 			c := l.dial(t,
@@ -489,7 +494,9 @@ func TestNothingAfterClose(t *testing.T) {
 			}
 			<-streaming
 			testutil.Eventually(t, "the session gone", func() bool { return len(srv.Sessions()) == 0 })
-			time.Sleep(5 * time.Millisecond)
+			// Once every goroutine of the round has ended, the client's and
+			// the session's, nothing is left that could call back.
+			leaks()
 			if n := after.Load(); n != 0 {
 				t.Fatalf("round %d: %d callbacks after Close returned", round, n)
 			}
@@ -498,6 +505,7 @@ func TestNothingAfterClose(t *testing.T) {
 
 	// The same for a station: after Server.Close no handler runs and no
 	// session is left, while clients were in the middle of requests.
+	leaks := leakcheck.Check(t)
 	var closed atomic.Bool
 	var after atomic.Int64
 	srv, addr := serve(t, server.HandlerFunc(func(s *server.Session, req *asdu.ASDU) {
@@ -508,10 +516,11 @@ func TestNothingAfterClose(t *testing.T) {
 	}))
 	ctx := context.Background()
 	var wg sync.WaitGroup
+	var serving atomic.Int32
 	for i := range 8 {
 		c := connect(t, addr, client.WithRequestTimeout(time.Second))
 		wg.Go(func() {
-			for {
+			for n := 0; ; n++ {
 				err := c.Command(ctx, 1, asdu.SingleCommand{IOA: asdu.IOA(i + 1)})
 				if err != nil {
 					if !errors.Is(err, iec104.ErrConnectionLost) && !errors.Is(err, iec104.ErrNotConnected) {
@@ -519,10 +528,14 @@ func TestNothingAfterClose(t *testing.T) {
 					}
 					return
 				}
+				if n == 0 {
+					serving.Add(1)
+				}
 			}
 		})
 	}
-	time.Sleep(20 * time.Millisecond)
+	// Every client has had a command confirmed and is sending the next.
+	testutil.Eventually(t, "every client in its requests", func() bool { return serving.Load() == 8 })
 	if err := srv.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -531,7 +544,9 @@ func TestNothingAfterClose(t *testing.T) {
 		t.Errorf("%d sessions after Server.Close returned", n)
 	}
 	wg.Wait()
-	time.Sleep(10 * time.Millisecond)
+	// The clients do not reconnect: once every goroutine of this part has
+	// ended nothing is left that could call the Handler.
+	leaks()
 	if n := after.Load(); n != 0 {
 		t.Errorf("%d requests handled after Server.Close returned", n)
 	}
@@ -700,6 +715,7 @@ func TestPendingRequestsWhenTransferStops(t *testing.T) {
 func TestCloseRacingConnectionLoss(t *testing.T) {
 	station, saddr := serve(t, &echo{})
 	for i := range 400 {
+		leaks := leakcheck.Check(t)
 		var tr trace
 		var closed atomic.Bool
 		var after atomic.Int64
@@ -721,7 +737,9 @@ func TestCloseRacingConnectionLoss(t *testing.T) {
 		got := tr.String()
 		wg.Wait()
 		testutil.Eventually(t, "the session gone", func() bool { return len(station.Sessions()) == 0 })
-		time.Sleep(time.Millisecond)
+		// Once every goroutine of the iteration has ended, the client's and
+		// the session's, nothing is left that could report a state.
+		leaks()
 		if n := after.Load(); n != 0 {
 			t.Fatalf("iteration %d: %d state reports after Close returned (before: %q, after: %q)", i, n, got, tr.String())
 		}

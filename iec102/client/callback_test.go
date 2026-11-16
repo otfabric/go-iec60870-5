@@ -67,8 +67,8 @@ func TestCloseFromHandlerSynchronously(t *testing.T) {
 }
 
 // L10: OnState calls Close at every change, StateClosed included, which
-// Close itself reports. Every call returns and the request fails with
-// ErrClosed.
+// the close reports once OnState has returned. Every call returns and the
+// request fails with ErrClosed.
 func TestCloseFromOnState(t *testing.T) {
 	t.Cleanup(leakcheck.Check(t))
 	st := &station{}
@@ -76,6 +76,7 @@ func TestCloseFromOnState(t *testing.T) {
 	var states []iec102.State
 	var c *Client
 	ready := make(chan struct{})
+	closed := make(chan struct{})
 	c, _ = counted(t, st, func(cfg *Config) {
 		cfg.OnState = func(s iec102.State, _ error) {
 			<-ready
@@ -83,6 +84,9 @@ func TestCloseFromOnState(t *testing.T) {
 			states = append(states, s)
 			mu.Unlock()
 			_ = c.Close()
+			if s == iec102.StateClosed {
+				close(closed)
+			}
 		}
 	})
 	close(ready)
@@ -92,6 +96,7 @@ func TestCloseFromOnState(t *testing.T) {
 		t.Fatalf("ReadTime: %v, want ErrClosed", err)
 	}
 	within(t, c.Done(), "the client to stop")
+	within(t, closed, "StateClosed")
 	mu.Lock()
 	defer mu.Unlock()
 	if n := len(states); n < 2 || states[0] != iec102.StateUp || states[n-1] != iec102.StateClosed {

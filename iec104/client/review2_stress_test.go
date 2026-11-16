@@ -16,6 +16,7 @@ import (
 	"github.com/otfabric/go-iec60870-5/iec104/client"
 	"github.com/otfabric/go-iec60870-5/iec104/internal/testutil"
 	"github.com/otfabric/go-iec60870-5/iec104/server"
+	"github.com/otfabric/go-iec60870-5/internal/testutil/leakcheck"
 )
 
 func stressServe(t *testing.T) (*server.Server, string) {
@@ -38,6 +39,7 @@ func stressServe(t *testing.T) (*server.Server, string) {
 // exactly one started connection, which is the active one.
 func TestReview2GroupStress(t *testing.T) {
 	for round := range 12 {
+		leaks := leakcheck.Check(t)
 		sa, a := stressServe(t)
 		sb, b := stressServe(t)
 		var closed atomic.Bool
@@ -134,13 +136,15 @@ func TestReview2GroupStress(t *testing.T) {
 		case <-time.After(10 * time.Second):
 			t.Fatalf("round %d: Group.Close did not return", round)
 		}
-		time.Sleep(100 * time.Millisecond)
+		// With both stations closed too, once every goroutine of the round
+		// has ended nothing is left that could call back.
+		_ = sa.Close()
+		_ = sb.Close()
+		leaks()
 		if lateSwitch.Load()+lateState.Load()+lateASDU.Load() != 0 {
 			t.Errorf("round %d: after Group.Close: %d switch, %d state, %d ASDU callbacks", round,
 				lateSwitch.Load(), lateState.Load(), lateASDU.Load())
 		}
-		_ = sa.Close()
-		_ = sb.Close()
 	}
 }
 
@@ -148,8 +152,9 @@ func TestReview2GroupStress(t *testing.T) {
 func TestReview2GroupCloseRacingSwitchover(t *testing.T) {
 	late := 0
 	for round := 0; round < 150 && late == 0; round++ {
-		_, a := stressServe(t)
-		_, b := stressServe(t)
+		leaks := leakcheck.Check(t)
+		sa, a := stressServe(t)
+		sb, b := stressServe(t)
 		var closed atomic.Bool
 		var lateSwitch atomic.Int32
 		g, err := client.NewGroup([]string{a, b}, client.WithParams(testutil.Params()),
@@ -181,7 +186,10 @@ func TestReview2GroupCloseRacingSwitchover(t *testing.T) {
 		_ = g.Close()
 		closed.Store(true)
 		wg.Wait()
-		time.Sleep(5 * time.Millisecond)
+		// With both stations closed too, once every goroutine of the round
+		// has ended nothing is left that could call the switch handler.
+		_, _ = sa.Close(), sb.Close()
+		leaks()
 		late += int(lateSwitch.Load())
 	}
 	if late != 0 {

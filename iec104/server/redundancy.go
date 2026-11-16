@@ -268,6 +268,7 @@ func (g *group) started(s *Session) {
 	}
 	g.mu.Unlock()
 	if g.declared && prev != nil && prev != s && prev.transferring() {
+		prev.takenOver.Store(true)
 		prev.lk.Load().Drop()
 	}
 	g.signal()

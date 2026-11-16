@@ -215,11 +215,14 @@ func TestRetryStopsWhereItShould(t *testing.T) {
 	}
 
 	// Closing the client ends a retry that is waiting.
-	c4 := dial(t, silent.addr, client.WithRequestTimeout(40*time.Millisecond),
+	m4 := &requestLog{}
+	c4 := dial(t, silent.addr, client.WithMetrics(m4), client.WithRequestTimeout(40*time.Millisecond),
 		client.WithRetry(client.Retry{Attempts: 100, Backoff: time.Hour}))
 	errc := make(chan error, 1)
 	go func() { _, err := c4.Read(context.Background(), 1, 10); errc <- err }()
-	time.Sleep(150 * time.Millisecond)
+	// The retry is announced when the first attempt has failed, before
+	// the pause of at least half an hour begins.
+	testutil.Eventually(t, "the retry announced", func() bool { _, retries, _, _ := m4.snapshot(); return retries == 1 })
 	_ = c4.Close()
 	select {
 	case err := <-errc:
@@ -320,11 +323,23 @@ func TestStartHandler(t *testing.T) {
 
 	// Not called without data transfer.
 	var standby atomic.Int64
+	var told states
 	c2 := dial(t, st.addr, client.WithAutoStart(false),
+		client.WithStateHandler(func(s iec104.State, _ error) { told.add(s) }),
 		client.WithStartHandler(func(context.Context, *client.Client) { standby.Add(1) }))
-	time.Sleep(100 * time.Millisecond)
-	if standby.Load() != 0 || c2.State() != iec104.StateStopped {
-		t.Errorf("start handler ran %d times on a connection in STOPDT", standby.Load())
+	// The station confirms the test frame after anything the client sent
+	// before it: a STARTDT the client had sent would be confirmed first.
+	if err := c2.TestLink(context.Background()); err != nil {
+		t.Fatalf("TestLink in STOPDT: %v", err)
+	}
+	if c2.State() != iec104.StateStopped {
+		t.Errorf("state %s of a connection in STOPDT", c2.State())
+	}
+	// Close returns when every start handler has returned and the state
+	// handler has been told the last state.
+	_ = c2.Close()
+	if standby.Load() != 0 || strings.Contains(told.String(), iec104.StateStarted.String()) {
+		t.Errorf("start handler ran %d times on a connection in STOPDT (told %q)", standby.Load(), told.String())
 	}
 	_ = c
 }

@@ -141,9 +141,12 @@ type Config struct {
 
 	// OnState is called with each change of the link state: from the
 	// station's link goroutine on a reset, and from Close for
-	// StateClosed. It must return quickly. It may call Close, which then
-	// does not wait for the link goroutine. An OnState that does not
-	// return normally is logged and closes the server, as for the Handler.
+	// StateClosed. The calls come one at a time and in the order of the
+	// changes, StateClosed last: Close waits for a call in progress before
+	// it reports StateClosed. It must return quickly. It may call Close,
+	// which then does not wait for the link goroutine. An OnState that
+	// does not return normally is logged and closes the server, as for the
+	// Handler.
 	OnState func(s iec103.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger
@@ -190,6 +193,10 @@ type Server struct {
 	onReader atomic.Uint64 // the link goroutine, while it calls OnState
 	failMu   sync.Mutex
 	failed   error // why a callback stopped the server
+
+	// notifying is held while a change of the link state is made and told,
+	// so that OnState is called one change at a time and in their order.
+	notifying chan struct{}
 }
 
 // queued is a monitor-direction ASDU waiting to be polled; cycle marks the
@@ -249,10 +256,11 @@ func New(rw io.ReadWriter, cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("%w: start cause %s", iec103.ErrInvalidConfig, cfg.StartCause)
 	}
 	s := &Server{
-		cfg: cfg,
-		ca:  cfg.CommonAddr,
-		log: logx.New(cfg.Logger, "iec103.server", "link", cfg.LinkAddr),
-		in:  make(chan inbound, 64),
+		cfg:       cfg,
+		ca:        cfg.CommonAddr,
+		log:       logx.New(cfg.Logger, "iec103.server", "link", cfg.LinkAddr),
+		in:        make(chan inbound, 64),
+		notifying: make(chan struct{}, 1),
 	}
 	if s.ca == 0 {
 		s.ca = cfg.LinkAddr
@@ -348,7 +356,12 @@ func (s *Server) State() iec103.State {
 // CommonAddr returns the common address of ASDU of the station.
 func (s *Server) CommonAddr() uint8 { return s.ca }
 
+// setState records a change of the link state and tells OnState, one change
+// at a time: StateClosed waits for a call in progress on the link's reader,
+// which Close does not wait for on a transport that is not an io.Closer.
 func (s *Server) setState(st iec103.State, err error) {
+	s.notifying <- struct{}{}
+	defer func() { <-s.notifying }()
 	s.mu.Lock()
 	if s.state == st || s.state == iec103.StateClosed {
 		s.mu.Unlock()

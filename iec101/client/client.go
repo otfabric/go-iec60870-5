@@ -102,9 +102,12 @@ type Config struct {
 	Handler func(a *asdu.ASDU)
 	// OnState is called with each change of the link state, from the
 	// goroutine that changed it: one of the client's own goroutines, or
-	// Close. WaitUp returns only after OnState for the change to StateUp
-	// has returned, so what the callback sets up is in place when WaitUp
-	// returns. State reports a change before OnState for it is called.
+	// Close. The calls come one at a time and in the order of the changes,
+	// StateClosed last: Close waits for the client's goroutines, a call in
+	// progress included, before it reports StateClosed. WaitUp returns
+	// only after OnState for the change to StateUp has returned, so what
+	// the callback sets up is in place when WaitUp returns. State reports
+	// a change before OnState for it is called.
 	// Called on one of the client's goroutines, OnState cannot have a
 	// request answered: the request methods, Send and SetDelay return
 	// [iec101.ErrInHandler]; start them in a new goroutine. It may call

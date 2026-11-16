@@ -83,9 +83,11 @@ type Config struct {
 
 	// OnState is called with each change of the link state, from the
 	// goroutine that changed it: the link's reader (unbalanced), the
-	// server's supervisor (balanced), or Close. It may call Close, as the
-	// Handler may; one that does not return normally closes the server,
-	// as for the Handler.
+	// server's supervisor (balanced), or Close. The calls come one at a
+	// time and in the order of the changes, StateClosed last: Close waits
+	// for a call in progress before it reports StateClosed. It may call
+	// Close, as the Handler may; one that does not return normally closes
+	// the server, as for the Handler.
 	OnState func(s iec101.State, err error)
 	// Logger receives the log entries; nil is silent.
 	Logger iec60870.Logger
@@ -138,6 +140,9 @@ type Server struct {
 	// while it calls OnState.
 
 	// why a callback stopped the server
+
+	// notifying is held while a change of the link state is made and told,
+	// so that OnState is called one change at a time and in their order.
 
 }
 ```

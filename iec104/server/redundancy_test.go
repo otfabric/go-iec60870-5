@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,8 +23,9 @@ import (
 
 // events collects the scaled values a client receives, in order.
 type events struct {
-	mu   sync.Mutex
-	seen []int16
+	mu      sync.Mutex
+	seen    []int16
+	changed chan struct{} // signalled after every value, made on first use
 }
 
 func (e *events) HandleASDU(a *asdu.ASDU) {
@@ -31,6 +33,33 @@ func (e *events) HandleASDU(a *asdu.ASDU) {
 		e.mu.Lock()
 		e.seen = append(e.seen, v.Value)
 		e.mu.Unlock()
+		select {
+		case e.signal() <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (e *events) signal() chan struct{} {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.changed == nil {
+		e.changed = make(chan struct{}, 1)
+	}
+	return e.changed
+}
+
+// waitFor waits until cond holds for the values received so far.
+func (e *events) waitFor(t *testing.T, what string, cond func(got []int16) bool) {
+	t.Helper()
+	deadline := time.NewTimer(30 * time.Second)
+	defer deadline.Stop()
+	for !cond(e.values()) {
+		select {
+		case <-e.signal():
+		case <-deadline.C:
+			t.Fatalf("timed out waiting for %s, got %v", what, e.values())
+		}
 	}
 }
 
@@ -76,8 +105,9 @@ func TestEventQueueBuffersWithoutClient(t *testing.T) {
 
 	// A connection that is not started gets nothing.
 	standby := &events{}
+	// What it may receive later is checked once the started connection has
+	// been given everything.
 	connect(t, addr, client.WithHandler(standby), client.WithAutoStart(false))
-	time.Sleep(100 * time.Millisecond)
 	if len(standby.values()) != 0 || srv.Pending("default") != 50 {
 		t.Fatalf("a connection in STOPDT received %d events", len(standby.values()))
 	}
@@ -215,11 +245,17 @@ func TestTakeoverEndsThePreviousConnection(t *testing.T) {
 		server.WithRedundancyGroups(server.RedundancyGroup{Name: "scada"}))
 	ctx := context.Background()
 	rxOld, rxNew := &events{}, &events{}
-	old := connect(t, addr, client.WithHandler(rxOld))
+	oldGone := make(chan struct{})
+	var gone sync.Once
+	old := connect(t, addr, client.WithHandler(rxOld), client.WithStateHandler(func(s iec104.State, _ error) {
+		if s == iec104.StateDisconnected {
+			gone.Do(func() { close(oldGone) })
+		}
+	}))
 	standby := connect(t, addr, client.WithAutoStart(false))
 	next := connect(t, addr, client.WithHandler(rxNew), client.WithAutoStart(false))
 	enqueue(t, srv, 1, 1)
-	testutil.Eventually(t, "the event on the started connection", func() bool { return isRange(rxOld.values(), 1, 1) })
+	rxOld.waitFor(t, "the event on the started connection", func(got []int16) bool { return isRange(got, 1, 1) })
 
 	if err := next.StartDT(ctx); err != nil {
 		t.Fatal(err)
@@ -235,7 +271,11 @@ func TestTakeoverEndsThePreviousConnection(t *testing.T) {
 	if started != 1 {
 		t.Errorf("%d sessions started after the takeover, want 1", started)
 	}
-	testutil.Eventually(t, "the old connection closed", func() bool { return old.State() == iec104.StateDisconnected })
+	select {
+	case <-oldGone:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the old connection was not closed")
+	}
 	if err := old.TestCommand(ctx, 1); err == nil {
 		t.Error("a request on the connection taken over was answered")
 	}
@@ -246,20 +286,74 @@ func TestTakeoverEndsThePreviousConnection(t *testing.T) {
 	enqueue(t, srv, 2, 2)
 	// Event 1 comes again on the new connection when the old one had not
 	// acknowledged it yet.
-	testutil.Eventually(t, "the event on the new connection", func() bool {
-		got := rxNew.values()
+	rxNew.waitFor(t, "the event on the new connection", func(got []int16) bool {
 		return len(got) > 0 && got[len(got)-1] == 2
 	})
 	if err := next.StopDT(ctx); err != nil {
 		t.Fatal(err)
 	}
 	enqueue(t, srv, 3, 3)
-	time.Sleep(100 * time.Millisecond)
+	// The old connection is disconnected, and its Handler was called for
+	// the last time before it said so: what it received is final.
 	if got := rxOld.values(); !isRange(got, 1, 1) {
 		t.Errorf("the connection taken over received %v after the takeover", got)
 	}
 	if p := srv.Pending("scada"); p != 1 {
 		t.Errorf("Pending = %d with no connection started, want 1", p)
+	}
+}
+
+// holdFrame holds the protocol goroutine of the session that receives the
+// first I frame after arm, until release.
+type holdFrame struct {
+	iec104.NopMetrics
+	armed            atomic.Bool
+	once             sync.Once
+	entered, release chan struct{}
+}
+
+func (h *holdFrame) OnFrameReceived(_ net.Addr, f apci.Frame, _ int) {
+	if f.Format == apci.FormatI && h.armed.CompareAndSwap(true, false) {
+		close(h.entered)
+		<-h.release
+	}
+}
+
+func (h *holdFrame) free() { h.once.Do(func() { close(h.release) }) }
+
+// A takeover in a declared group ends the previous session at once: from
+// the STARTDT con of the new connection on, the previous session no longer
+// reports data transfer started, also while its protocol goroutine is busy
+// (here in a metrics callback) and has not yet seen its connection closed.
+func TestTakeoverStopsThePreviousSessionAtOnce(t *testing.T) {
+	hold := &holdFrame{entered: make(chan struct{}), release: make(chan struct{})}
+	srv, addr := serve(t, server.HandlerFunc(confirmAll), server.WithLogger(iec60870.NopLogger()), server.WithMetrics(hold),
+		server.WithRedundancyGroups(server.RedundancyGroup{Name: "scada"}))
+	t.Cleanup(hold.free) // before the server closes
+	ctx := context.Background()
+	old := connect(t, addr)
+	next := connect(t, addr, client.WithAutoStart(false))
+	// Only the old connection is started: the I frame of its request holds
+	// its session's protocol goroutine.
+	hold.armed.Store(true)
+	go func() { _ = old.TestCommand(ctx, 1) }()
+	select {
+	case <-hold.entered:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the request of the old connection did not arrive")
+	}
+	if err := next.StartDT(ctx); err != nil {
+		t.Fatal(err)
+	}
+	started := 0
+	for _, s := range srv.Sessions() {
+		if s.Started() {
+			started++
+		}
+	}
+	hold.free()
+	if started != 1 {
+		t.Errorf("%d sessions started after the takeover, want 1", started)
 	}
 }
 
