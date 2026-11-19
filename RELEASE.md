@@ -54,6 +54,10 @@ changes.
 - `TestSwitchHandlerToldWhenSwitchoverReturns` waits for an established
   standby before its first `Switchover`; it counted one still connecting,
   and failed now and then under load.
+- `link.TestCloseWaitsForTheWriter` and `TestCloseWithoutCloserIdleWriter`
+  check that the writer of their own station has returned; they searched
+  every goroutine's stack and failed when a writer of a station an earlier
+  test closed was still on its way out.
 
 ---
 

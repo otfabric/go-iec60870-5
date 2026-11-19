@@ -171,7 +171,7 @@ func TestCloseWithoutCloserIdleWriter(t *testing.T) {
 	if err := pr.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if writerRunning() {
+	if writerRunning(pr.p) {
 		t.Fatal("the writer goroutine is still running after Close")
 	}
 	l.free()

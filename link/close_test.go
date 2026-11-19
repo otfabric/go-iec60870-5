@@ -5,8 +5,6 @@ package link
 import (
 	"errors"
 	"io"
-	"runtime"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -38,10 +36,16 @@ func (l *slowLine) Write([]byte) (int, error) {
 
 func (l *slowLine) Close() error { l.once.Do(func() { close(l.closed) }); return nil }
 
-// writerRunning reports whether a writer goroutine of a port is alive.
-func writerRunning() bool {
-	buf := make([]byte, 1<<20)
-	return strings.Contains(string(buf[:runtime.Stack(buf, true)]), "link.(*port).writer")
+// writerRunning reports whether the writer goroutine of p is alive. It
+// looks at p alone: a writer of a station an earlier test closed may still
+// be on its way out, and is not this test's.
+func writerRunning(p *port) bool {
+	select {
+	case <-p.writeDone:
+		return false
+	default:
+		return true
+	}
 }
 
 // Close returns only after the writer goroutine has: no frame is written or passed to
@@ -66,7 +70,7 @@ func TestCloseWaitsForTheWriter(t *testing.T) {
 	if err := pr.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if writerRunning() {
+	if writerRunning(pr.p) {
 		t.Fatal("the writer goroutine is still running after Close")
 	}
 	// The writer, the only caller of OnFrame for sent frames, has returned:
