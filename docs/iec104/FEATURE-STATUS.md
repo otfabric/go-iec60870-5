@@ -76,6 +76,7 @@ The library is pure Go with no dependencies outside the standard library.
 | Client redundancy group, failover, switchover | ✅ | `TestRedundancyGroup`, `TestSwitchoverStaysInStep` | one group across two reference stacks |
 | Server redundancy groups | ✅ | `TestServerRedundancyGroups`, `TestReconnectingStandbyDoesNotEvictActive`, `TestFailoverThenRejoinDoesNotEvict` | none |
 | Event queue with acknowledged delivery, in memory | ✅ | `TestEventQueue`, `TestEventQueueOverflow` | reference clients (`TestServerEventQueue`) |
+| Clearing the event queue (`Server.ClearEvents`; reset of pending information with time tag, QRP 2) | ✅ | `TestClearEvents`, `TestClearEventsKeepsWhatIsInFlight` | none |
 | Combined station on one connection | — | | |
 
 ### Application-layer security (IEC 62351-5:2023 with IEC TS 60870-5-7:2025)

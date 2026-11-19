@@ -11,6 +11,14 @@ with cause activation and waits for the activation confirmation, as
 four types. Before, parameters could only be sent with `Send`, which does
 not wait for the station's answer. Nothing is removed or changed.
 
+`Server.ClearEvents` on the IEC 104 controlled station removes the events a
+redundancy group (or every group) holds that are not yet sent, all of them
+or only those with a time tag: what a reset process command with QRP 2
+("reset of pending information with time tag of the event buffer",
+IEC 60870-5-101 ed. 2, 7.2.6.27) asks of a station. Events sent and
+awaiting their acknowledgement stay. Before, a station had no way to empty
+its queue short of closing the server. Nothing is removed or changed.
+
 ---
 
 ## v0.9.0

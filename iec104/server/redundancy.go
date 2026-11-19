@@ -423,6 +423,46 @@ func (s *Server) Pending(group string) int {
 	return 0
 }
 
+// ClearEvents removes the events a redundancy group holds that are not on
+// their way to a controlling station, and returns how many. With
+// timeTagged only those whose type identification carries a time tag go:
+// the "reset of pending information with time tag of the event buffer"
+// a reset process command with QRP 2 asks of the station (IEC 60870-5-101
+// ed. 2, 7.2.6.27; IEC 60870-5-104 ed. 1, 7.1). An event already sent and
+// awaiting its acknowledgement stays: the controlling station holds it, and
+// it leaves the queue when acknowledged. An empty group name clears every
+// group; an unknown one clears nothing.
+func (s *Server) ClearEvents(group string, timeTagged bool) int {
+	n := 0
+	for _, g := range s.groups {
+		if group == "" || g.name == group {
+			n += g.clear(timeTagged)
+		}
+	}
+	return n
+}
+
+// clear is ClearEvents for one group.
+func (g *group) clear(timeTagged bool) int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	kept := g.queue[:0]
+	n := 0
+	for _, q := range g.queue {
+		if q.owner == nil && (!timeTagged || asdu.TypeID(q.raw[0]).HasTimeTag()) {
+			n++
+			continue
+		}
+		kept = append(kept, q)
+	}
+	clear(g.queue[len(kept):])
+	g.queue = kept
+	if g.overflow && len(g.queue) <= g.limit/2 {
+		g.overflow = false
+	}
+	return n
+}
+
 // Dropped returns how many events a redundancy group has dropped because
 // its queue was full.
 func (s *Server) Dropped(group string) uint64 {

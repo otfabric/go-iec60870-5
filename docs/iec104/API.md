@@ -316,6 +316,7 @@ func (s *Server) Broadcast(ctx context.Context, a *asdu.ASDU) (int, error)
 func (s *Server) Enqueue(a *asdu.ASDU) error
 func (s *Server) Pending(group string) int
 func (s *Server) Dropped(group string) uint64
+func (s *Server) ClearEvents(group string, timeTagged bool) int
 
 var ErrServerClosed error
 ```
@@ -484,6 +485,10 @@ a time: the one that started data transfer last.
 - a full queue drops its oldest event; `Dropped` counts them.
 
 `Pending(group)` is the number of events queued or awaiting acknowledgement.
+`ClearEvents(group, timeTagged)` removes the events not yet sent (with
+`timeTagged`, only those whose type carries a time tag: a reset process
+command with QRP 2) and returns how many; the events awaiting their
+acknowledgement stay. An empty name clears every group.
 `Broadcast` and `Session.Send` bypass the queue. `Close` stops the queues and
 waits for the goroutine of each to end.
 

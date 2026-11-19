@@ -5,7 +5,9 @@ package server_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -443,5 +445,105 @@ func TestRedundancyGroups(t *testing.T) {
 	_ = closed.Close()
 	if err := closed.Enqueue(event(1)); !errors.Is(err, server.ErrServerClosed) {
 		t.Errorf("Enqueue after Close: %v", err)
+	}
+}
+
+// ClearEvents empties a group's queue of what is not yet sent; with
+// timeTagged only the events with a time tag (QRP 2), the rest delivered
+// in order.
+func TestClearEvents(t *testing.T) {
+	srv, addr := serve(t, server.HandlerFunc(confirmAll),
+		server.WithRedundancyGroups(server.RedundancyGroup{Name: "local", Allow: []string{"127.0.0.0/8"}}, server.RedundancyGroup{Name: "rest"}))
+	tagged := func(i int) *asdu.ASDU {
+		return asdu.New(asdu.CauseSpontaneous, 1, asdu.MeasuredScaled{IOA: 2, Value: int16(i), Time: asdu.Now()})
+	}
+	for i := 1; i <= 6; i++ {
+		a := event(i)
+		if i%2 == 0 {
+			a = tagged(i)
+		}
+		if err := srv.Enqueue(a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := srv.ClearEvents("local", true); n != 3 {
+		t.Fatalf("ClearEvents(local, timeTagged) = %d, want 3", n)
+	}
+	if srv.Pending("local") != 3 || srv.Pending("rest") != 6 {
+		t.Fatalf("Pending local=%d rest=%d, want 3 and 6", srv.Pending("local"), srv.Pending("rest"))
+	}
+	if n := srv.ClearEvents("no-such-group", false); n != 0 {
+		t.Fatalf("an unknown group cleared %d", n)
+	}
+	rx := &events{}
+	connect(t, addr, client.WithHandler(rx))
+	testutil.Eventually(t, "delivery", func() bool { return len(rx.values()) == 3 })
+	if got := rx.values(); got[0] != 1 || got[1] != 3 || got[2] != 5 {
+		t.Errorf("received %v, want the events without time tag, 1 3 5", got)
+	}
+	testutil.Eventually(t, "acknowledgement", func() bool { return srv.Pending("local") == 0 })
+	if n := srv.ClearEvents("", false); n != 6 || srv.Pending("rest") != 0 {
+		t.Errorf("ClearEvents(every group) = %d, rest pending %d; want 6 and 0", n, srv.Pending("rest"))
+	}
+}
+
+// An event sent and awaiting its acknowledgement is not cleared: it leaves
+// the queue when the controlling station acknowledges it.
+func TestClearEventsKeepsWhatIsInFlight(t *testing.T) {
+	srv, addr := serve(t, server.HandlerFunc(confirmAll))
+	p := testutil.Params()
+	p.W = 100 // the controlling station acknowledges at t2 only, within the server's t1
+	p.T2 = time.Second
+	rx := &events{}
+	connect(t, addr, client.WithHandler(rx), client.WithParams(p))
+	enqueue(t, srv, 1, 3)
+	testutil.Eventually(t, "delivery", func() bool { return len(rx.values()) == 3 })
+	if n := srv.Pending("default"); n != 3 {
+		t.Fatalf("Pending = %d before the acknowledgement, want 3", n)
+	}
+	if n := srv.ClearEvents("default", false); n != 0 {
+		t.Errorf("ClearEvents removed %d events in flight", n)
+	}
+	testutil.Eventually(t, "acknowledgement", func() bool { return srv.Pending("default") == 0 })
+}
+
+// warnings counts the warnings a server logs.
+type warnings struct {
+	mu   sync.Mutex
+	full int
+}
+
+func (w *warnings) Debugf(string, ...any) {}
+func (w *warnings) Infof(string, ...any)  {}
+func (w *warnings) Errorf(string, ...any) {}
+func (w *warnings) Warnf(format string, args ...any) {
+	if strings.Contains(fmt.Sprintf(format, args...), "event queue full") {
+		w.mu.Lock()
+		w.full++
+		w.mu.Unlock()
+	}
+}
+
+func (w *warnings) count() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.full
+}
+
+// A queue that overflowed and is cleared below half its size warns again
+// when it next overflows, as one emptied by acknowledgements does.
+func TestClearEventsEndsOverflow(t *testing.T) {
+	w := &warnings{}
+	srv, _ := serve(t, server.HandlerFunc(confirmAll), server.WithEventQueue(4), server.WithLogger(w))
+	enqueue(t, srv, 1, 6)
+	if w.count() != 1 || srv.Dropped("default") != 2 {
+		t.Fatalf("after the overflow: %d warnings, %d dropped; want 1 and 2", w.count(), srv.Dropped("default"))
+	}
+	if n := srv.ClearEvents("default", false); n != 4 {
+		t.Fatalf("ClearEvents = %d, want 4", n)
+	}
+	enqueue(t, srv, 7, 11)
+	if w.count() != 2 {
+		t.Errorf("%d warnings after the second overflow, want 2", w.count())
 	}
 }

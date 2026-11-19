@@ -497,6 +497,14 @@ Broadcast sends a to every session whose data transfer is started and returns ho
 
 The sessions are served one after the other. A session whose send window is full blocks until its controlling station acknowledges, ctx ends or the session times out (t1). Errors of individual sessions are joined.
 
+#### func (Server) ClearEvents
+
+```go
+func (s *Server) ClearEvents(group string, timeTagged bool) int
+```
+
+ClearEvents removes the events a redundancy group holds that are not on their way to a controlling station, and returns how many. With timeTagged only those whose type identification carries a time tag go: the "reset of pending information with time tag of the event buffer" a reset process command with QRP 2 asks of the station (IEC 60870-5-101 ed. 2, 7.2.6.27; IEC 60870-5-104 ed. 1, 7.1). An event already sent and awaiting its acknowledgement stays: the controlling station holds it, and it leaves the queue when acknowledged. An empty group name clears every group; an unknown one clears nothing.
+
 #### func (Server) Close
 
 ```go
