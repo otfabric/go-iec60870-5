@@ -705,14 +705,21 @@ func TestSwitchHandlerToldWhenSwitchoverReturns(t *testing.T) {
 		calls.Add(1)
 	}))
 	ctx := context.Background()
+	// Switchover needs a standby that is established, not one still
+	// connecting: one connection started, the other stopped.
 	testutil.Eventually(t, "a standby", func() bool {
-		established := 0
+		started, stopped := 0, 0
 		for _, c := range g.Clients() {
-			if c.State() != iec104.StateDisconnected {
-				established++
+			switch c.State() {
+			case iec104.StateStarted:
+				started++
+			case iec104.StateStopped:
+				stopped++
+			case iec104.StateDisconnected, iec104.StateConnecting:
+				// not established: no standby yet
 			}
 		}
-		return established == 2 && calls.Load() == 1
+		return started == 1 && stopped == 1 && calls.Load() == 1
 	})
 	for i := range 300 {
 		before := calls.Load()

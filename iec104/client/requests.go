@@ -349,8 +349,8 @@ func (c *Client) Command(ctx context.Context, ca asdu.CommonAddr, obj asdu.Infor
 // [asdu.ParameterScaled] or [asdu.ParameterFloat]: a threshold, smoothing
 // factor or limit of a measured value) or sends a parameter activation
 // ([asdu.ParameterActivation]) with cause "activation", and waits for the
-// activation confirmation (IEC 60870-5-101:2003 7.4.9 and 7.4.10, which
-// IEC 60870-5-104 takes over).
+// activation confirmation (IEC 60870-5-104:2000 7.9; IEC 60870-5-101:2003
+// 7.4.9 and 7.4.10).
 //
 // A negative confirmation or an "unknown ..." answer is returned as
 // [*iec104.NegativeError].

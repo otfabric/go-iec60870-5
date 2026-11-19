@@ -81,7 +81,7 @@ the library carries it) · **n/a**.
 |---|---|---|---|
 | 7 | Controlling station = client, controlled station = server | conforms | packages `client`, `server` |
 | 7.1, fig. 17-19 | The controlling station establishes the connection, retries, either side closes | conforms | `client` with `WithReconnect` (t0 bounds each attempt); `server` listens |
-| 7.1, fig. 20 | Remote initialization: C_RP_NA_1 act/actcon, the controlled station closes, the controlling station reconnects | conforms / app | `client.ResetProcess` and reconnect; closing is the station application's (`Session.Close`) |
+| 7.1, fig. 20 | Remote initialization: C_RP_NA_1 act/actcon, the controlled station closes, the controlling station reconnects | conforms / app | `client.ResetProcess` and reconnect; closing is the station application's (`Session.Close`). For QRP 2 (reset of pending information with time tag, IEC 60870-5-101:2003 7.2.6.27) the handler calls `Server.ClearEvents(group, true)`; that events already sent and not yet acknowledged are not "pending" and stay is our interpretation. `TestClearEvents`, `TestClearEventsKeepsWhatIsInFlight`, chaos |
 | 7.2 | Read: C_RD, data answered with cause 5 | conforms | `client.Read`; interop `TestClientRead`, server scenarios |
 | 7.3, 7.4 | Cyclic and spontaneous transmission | app | `Server.Enqueue`, `Session.Send` |
 | 7.5 | Station interrogation: C_IC act, actcon, data, actterm | conforms | `client.Interrogate`; interop `TestClientInterrogation`, `TestClientGroups` |
@@ -89,7 +89,7 @@ the library carries it) · **n/a**.
 | 7.7 | Commands: select, break (deact), execute, actcon, deactcon, actterm, return information | conforms | `client.Command`, `Deactivate`; interop `TestClientSelectBeforeOperate`. The client's wait ends at actcon (Known deviations) |
 | 7.8 | Counter interrogation: C_CI act/actcon, deact/deactcon, M_IT, actterm | conforms | `client.CounterInterrogate`; `server.Mux` passes a C_CI deactivation |
 | 7.8 | A counter freeze or reset (A_MEMCNT, A_MEMINCR) is act/actcon only; the readings follow a separate counter request (IEC 60870-5-101:2003 7.4.8 mode C, figures 95, 96) | **fixed** (v0.4.0) | `client.CounterInterrogate` waited for a termination after a freeze or reset, so it timed out against a station that only confirms; it now returns at the confirmation. `TestCounterFreezeReturnsAtConfirmation`. The interop references refuse a freeze, so the confirmed path is unit-tested only |
-| 7.9 | Parameter loading: P_ME act/actcon (and spontaneous), P_AC act/actcon | **fixed** | `server.Mux` passed a deactivation of P_ME_NA/NB/NC_1 to the handler; now refused with cause 45. `TestMuxActivationOnlyTypes` |
+| 7.9 | Parameter loading: P_ME act/actcon (and spontaneous), P_AC act/actcon | **fixed** | `server.Mux` passed a deactivation of P_ME_NA/NB/NC_1 to the handler; now refused with cause 45. `TestMuxActivationOnlyTypes`. `client.Parameter` sends act and waits for actcon (`TestParameters`); no independent evidence |
 | 7.6, 7.10, 7.1 / 8.8 | Clock synchronization, test command and reset process are activated only; for C_TS_TA_1, 8.8 lists cause 6 alone in control direction | **fixed** | `server.Mux` passed a deactivation of C_CS_NA_1, C_TS_TA_1 and C_RP_NA_1 to the handler; now refused with cause 45. `TestMuxActivationOnlyTypes` |
 | 7.11 | File transfer in both directions, directory | conforms | `GetFile`, `PutFile`, `ListFiles`, `FileServer`; interop `TestClientFileTransfer`, `TestClientUpload`, `TestClientDirectory`, server tests |
 
@@ -348,7 +348,7 @@ The test bit and the P/N bit are exposed as `ASDU.Test` and `ASDU.Negative`.
 | Command deactivation | `Deactivate` | app, via `Mux` |
 | Commands with time tag | set `Time` on the command | app: the handler checks the age |
 | Test procedure (`C_TS_TA_1`) | `TestCommand` | app, via `Mux` |
-| Reset process | `ResetProcess` | app, via `Mux` |
+| Reset process | `ResetProcess` | app, via `Mux`; QRP 2 with `Server.ClearEvents` |
 | Parameter loading and activation | `Parameter` | app, via `Mux` |
 | File transfer, monitor direction (download) | `GetFile` | `FileServer`, via `Mux` |
 | File transfer, control direction (upload) | `PutFile` | `FileServer` with a `FileSink`, via `Mux` |

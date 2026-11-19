@@ -66,6 +66,9 @@ own list: [docs/iec104/LIMITATIONS.md](docs/iec104/LIMITATIONS.md).
 - **Class assignment** is the application's: `server.Send` queues class 1,
   `server.SendClass` chooses. The library does not move class 2 data to
   class 1 when class 2 is empty.
+- **No way to clear the class queues.** The IEC 104 server has
+  `Server.ClearEvents` for a reset process with QRP 2; the IEC 101 server
+  has no counterpart yet.
 - **Balanced test function** is sent every `TestInterval` regardless of
   other traffic.
 - **No transaction identifier.** IEC 60870-5-101 has none: the client

@@ -204,7 +204,7 @@ Off by default. `client.WithRetry` repeats a request when all of these hold:
 A `*NegativeError` is never retried: the station answered. `ErrBusy` is not
 retried either.
 
-`Command`, `Deactivate`, `ClockSync`, `ResetProcess`, a counter freeze or
+`Command`, `Deactivate`, `Parameter`, `ClockSync`, `ResetProcess`, a counter freeze or
 reset, `GetFile`, `PutFile` and `Send` are **never** repeated. If the confirmation of a command is
 lost, the command may have been executed; IEC 60870-5-104 offers no way to
 find out, and sending it again could operate the process twice. Decide in the
