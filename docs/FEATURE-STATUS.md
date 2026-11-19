@@ -22,6 +22,7 @@ library against itself), **independent** (pinned reference images),
 | Link: balanced | yes | - | - | n/a |
 | Standard ASDU types | all of `asdu` (configurable sizes); recorded: 2, 4, 11, 13, 30-32, 34, 46, 100, 103, 104 | 40 standard types classified (37 with a vendor layout), 38 REE; recorded: 11, 123, 183 | all compatible types 1-11, 20-31; private types raw; recorded: 1, 5-9, 20, 45, 46, 205 (ASDU 9 with up to 127 measurands carried) | the 67 type identifications of `asdu`, less the 101-only C_TS_NA_1 and C_CD_NA_1; the security types 81..89 and 91 in `sec` |
 | Interrogation, counters, read, clock, commands, SBO, test, reset | yes: e2e, independent (reset process e2e only), recorded (interrogation, SBO) | integrated totals reads, clock: e2e; independent for C_CI_NT_2, C_CI_NU_2, C_TI_NA_2, C_RD_NA_2 and the REE C_CS_TA_2 (server) | - | yes: independent |
+| Parameter loading and activation, confirmed (`Parameter`) | yes: e2e, chaos; no independent evidence | n/a | n/a | yes: client tests; no independent evidence |
 | File transfer | no | - | - | yes: independent |
 | TLS (IEC 62351-3) | n/a | n/a | n/a | yes: independent |
 | IEC 62351-5 / TS 60870-5-7 | no | n/a | n/a | yes: independent (cB-Sigma); statistics reports, FILEMNGT and MONITOR DATA: unit and e2e |

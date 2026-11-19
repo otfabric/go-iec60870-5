@@ -1,23 +1,63 @@
 # Release notes
 
-## Unreleased
+## v0.10.0
 
-Confirmed parameter loading and activation in the controlling station:
-`Parameter` on the IEC 104 `Client` and `Group`, the IEC 101 `Client`
-and `telecontrol.Requester` sends a parameter of measured value
-(P_ME_NA_1, P_ME_NB_1, P_ME_NC_1) or a parameter activation (P_AC_NA_1)
-with cause activation and waits for the activation confirmation, as
-`Command` does for process commands; `asdu.TypeID.IsParameter` names the
-four types. Before, parameters could only be sent with `Send`, which does
-not wait for the station's answer. Nothing is removed or changed.
+**Date:** 2026-11-19
+**Previous release:** v0.9.0
 
-`Server.ClearEvents` on the IEC 104 controlled station removes the events a
-redundancy group (or every group) holds that are not yet sent, all of them
-or only those with a time tag: what a reset process command with QRP 2
-("reset of pending information with time tag of the event buffer",
-IEC 60870-5-101 ed. 2, 7.2.6.27) asks of a station. Events sent and
-awaiting their acknowledgement stay. Before, a station had no way to empty
-its queue short of closing the server. Nothing is removed or changed.
+Confirmed parameter loading and activation in the controlling station of
+IEC 104 and IEC 101, and a way for the IEC 104 controlled station to clear
+its event queue for a reset process with QRP 2. Both were contributed by
+@MatthewReed303 (#20, #21). Nothing is removed or changed, and no default
+changes.
+
+### Added
+
+- `Parameter` on the IEC 104 `client.Client` and `client.Group`, on
+  `iec101/client.Client` and on `telecontrol.Requester`: sends a parameter
+  of measured value (P_ME_NA_1, P_ME_NB_1, P_ME_NC_1) or a parameter
+  activation (P_AC_NA_1) with cause activation and waits for the
+  activation confirmation (IEC 60870-5-104:2000 7.9; IEC 60870-5-101:2003
+  7.4.9, 7.4.10), as `Command` does for process commands. Another type is
+  `asdu.ErrTypeMismatch`, nil is `asdu.ErrInvalidValue`, a refusal is a
+  `NegativeError`. Like `Command`, it is never repeated by the request
+  retries. Before, parameters could only be sent with `Send`, which does not
+  wait for the station's answer. (#20)
+- `asdu.TypeID.IsParameter` names those four types. (#20)
+- `server.Server.ClearEvents(group, timeTagged)` on the IEC 104 controlled
+  station removes the events a redundancy group (or every group) holds that
+  are not yet sent, all of them or only those with a time tag, and returns
+  how many: what a reset process command with QRP 2 ("reset of pending
+  information with time tag of the event buffer", IEC 60870-5-101:2003
+  7.2.6.27) asks of a station. Events sent and awaiting their
+  acknowledgement stay; that they are not "pending" is our interpretation.
+  Before, a station had no way to empty its queue short of closing the
+  server. (#21)
+
+### Documentation
+
+- The clause table of docs/iec104/INTEROPERABILITY.md names the evidence
+  for 7.9 and QRP 2 under 7.1; ERRORS.md lists `Parameter` among the
+  requests that are never repeated; requirement 101-10 in
+  docs/REQUIREMENTS.md; LIMITATIONS.md notes that the IEC 101 server has no
+  counterpart of `ClearEvents`.
+
+### Tests
+
+- `TestParameters` (IEC 104 client), parameters in `iec101/e2e.TestServices`
+  and `telecontrol.TestRequests`, `TestClearEvents` and
+  `TestClearEventsKeepsWhatIsInFlight`.
+- The IEC 101 chaos suite loads parameters and checks none is applied twice;
+  the IEC 104 chaos suite queues time-tagged events and clears them with
+  `ClearEvents` while the queue is delivered and switched over, and still
+  requires every event without a time tag to arrive.
+- `TestSwitchHandlerToldWhenSwitchoverReturns` waits for an established
+  standby before its first `Switchover`; it counted one still connecting,
+  and failed now and then under load.
+- `link.TestCloseWaitsForTheWriter` and `TestCloseWithoutCloserIdleWriter`
+  check that the writer of their own station has returned; they searched
+  every goroutine's stack and failed when a writer of a station an earlier
+  test closed was still on its way out.
 
 ---
 

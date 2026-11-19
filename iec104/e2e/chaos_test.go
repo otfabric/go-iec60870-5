@@ -586,6 +586,15 @@ func chaos(t *testing.T, seed int64, duration time.Duration) {
 				ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 				_, _ = srv.Broadcast(ctx, asdu.New(asdu.CausePeriodic, 1, asdu.MeasuredScaled{IOA: 9, Value: 1}))
 				cancel()
+			case 2:
+				// An event with a time tag, which ClearEvents may remove.
+				if err := srv.Enqueue(asdu.New(asdu.CauseSpontaneous, 1, asdu.MeasuredScaled{IOA: 10, Time: asdu.Now()})); err != nil {
+					t.Errorf("Enqueue: %v", err)
+				}
+			case 3:
+				// A reset of pending information with time tag (QRP 2): the
+				// events without one, counted below, must all still arrive.
+				srv.ClearEvents("", true)
 			default:
 				n := enqueued.Add(1) - 1
 				if err := srv.Enqueue(asdu.New(asdu.CauseSpontaneous, 1, asdu.Bitstring32{IOA: 8, Value: n})); err != nil {

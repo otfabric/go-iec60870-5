@@ -94,18 +94,22 @@ func (st *chaosStation) HandleASDU(s *server.Server, a *asdu.ASDU) {
 		_ = s.Confirm(a)
 		_ = s.Send(asdu.New(o.Qualifier.Cause(), ca, asdu.SinglePoint{IOA: 100, Value: true}))
 		_ = s.Terminate(a)
-	case asdu.SingleCommand:
+	case asdu.SingleCommand, asdu.ParameterFloat:
+		// A command or a parameter is acted on once: neither is repeated.
+		ioa := o.Address()
 		st.mu.Lock()
-		st.runs[o.IOA]++
+		st.runs[ioa]++
 		if st.trace != nil {
-			st.trace.note(fmt.Sprintf("EXECUTE %d (%d)", o.IOA, st.runs[o.IOA]))
+			st.trace.note(fmt.Sprintf("EXECUTE %d (%d)", ioa, st.runs[ioa]))
 		}
-		if st.runs[o.IOA] > 1 {
-			st.dup = append(st.dup, o.IOA)
+		if st.runs[ioa] > 1 {
+			st.dup = append(st.dup, ioa)
 		}
 		st.mu.Unlock()
 		_ = s.Confirm(a)
-		_ = s.Terminate(a)
+		if a.Type.IsProcessCommand() {
+			_ = s.Terminate(a)
+		}
 	case asdu.Read:
 		_ = s.Send(asdu.New(asdu.CauseRequest, ca, asdu.MeasuredFloat{IOA: o.IOA, Value: 1}))
 	case asdu.ClockSync, asdu.TestCommand:
@@ -192,7 +196,7 @@ func chaos101(t *testing.T, seed int64, mode iec101.Mode, d time.Duration) {
 				}
 				ctx, cancel := context.WithTimeout(context.Background(), time.Duration(200+rng.Intn(800))*time.Millisecond)
 				err := serialline.Within(t, 5*time.Second, "request", func() error {
-					switch rng.Intn(6) {
+					switch rng.Intn(7) {
 					case 0:
 						_, err := c.Interrogate(ctx, ca, asdu.QOIStation)
 						return err
@@ -203,6 +207,8 @@ func chaos101(t *testing.T, seed int64, mode iec101.Mode, d time.Duration) {
 						return err
 					case 4:
 						return c.ClockSync(ctx, ca, time.Now())
+					case 5:
+						return c.Parameter(ctx, ca, asdu.ParameterFloat{IOA: asdu.IOA(nextIOA.Add(1)), Value: 0.5, Qualifier: asdu.ParameterThreshold})
 					default:
 						return c.TestCommand(ctx, ca)
 					}
@@ -245,14 +251,14 @@ func chaos101(t *testing.T, seed int64, mode iec101.Mode, d time.Duration) {
 	}
 	st.mu.Lock()
 	if len(st.dup) > 0 {
-		t.Errorf("commands executed more than once: %v", st.dup)
+		t.Errorf("commands or parameters executed more than once: %v", st.dup)
 	}
 	executed := len(st.runs)
 	st.mu.Unlock()
 	if ok.Load() == 0 {
 		t.Errorf("no request succeeded in %v", d)
 	}
-	t.Logf("requests %d ok %d failed, %d commands executed, %d spontaneous, line %+v",
+	t.Logf("requests %d ok %d failed, %d commands and parameters executed, %d spontaneous, line %+v",
 		ok.Load(), failed.Load(), executed, spont.Load(), line.Stats())
 
 	if err := serialline.Within(t, closeBound, "client Close", c.Close); err != nil {
